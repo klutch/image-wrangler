@@ -14,6 +14,27 @@ the bottom panel.
 The preview sits on a checkerboard and is drawn unfiltered, so you can see
 exactly what happened to the edge pixels.
 
+### Preview and zoom
+
+| Control | What it does |
+| --- | --- |
+| `-` / `+` | Steps the zoom: 25% at a time below 100%, 100% at a time above, so 1000% is ten clicks away rather than forty. |
+| Zoom field | Type any value from 1 to 1000. A trailing `%` is fine. Applied on Enter or when the field loses focus; anything unparseable snaps back. |
+| **Fit** | Zooms so the whole image is visible — but never past 100%, so a small sprite is shown at its true size rather than blown up. |
+| Mouse wheel | Zooms in 25% steps across the whole range, **towards the pixel under the cursor**, so you can drive into a corner of the silhouette without chasing it with the scrollbars. |
+
+The image is never stretched. Below the frame size it sits centred with
+transparent margins; above it, scrollbars appear and it is drawn at exactly the
+requested zoom with nearest sampling, so at 800% you are looking at real pixel
+boundaries rather than a smoothed guess.
+
+Opening an image fits it, so a large one doesn't appear as a corner crop. Zoom
+and scroll then survive everything else — re-running the tool, toggling **Show
+Original** — so you can sit at 400% on an edge and watch a setting change it.
+
+The three columns are split by draggable dividers, and the panel itself resizes
+from its top edge like any other bottom-panel dock.
+
 ## Remove Background
 
 Keys out a flat background colour while rebuilding the antialiased silhouette.

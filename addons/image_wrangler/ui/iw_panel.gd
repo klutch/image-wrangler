@@ -54,6 +54,7 @@ var _key_color_property := &""
 var _settings_box: VBoxContainer
 var _show_original: CheckButton
 var _auto_preview: CheckButton
+var _zoom_field: LineEdit
 var _refresh_button: Button
 var _remove_button: Button
 var _suffix_edit: LineEdit
@@ -69,7 +70,9 @@ var _overwrite_dialog: ConfirmationDialog
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(0, 360)
+	# Only a floor, so the bottom panel and the splitters between columns stay
+	# freely draggable.
+	custom_minimum_size = Vector2(0, 240)
 	_build_operations()
 	_build_ui()
 	_select_operation(0)
@@ -115,7 +118,7 @@ func _build_ui() -> void:
 
 func _build_source_column() -> Control:
 	var column := VBoxContainer.new()
-	column.custom_minimum_size = Vector2(220, 0)
+	column.custom_minimum_size = Vector2(140, 0)
 
 	var header := HBoxContainer.new()
 	column.add_child(header)
@@ -155,19 +158,22 @@ func _build_source_column() -> Control:
 func _build_preview_column() -> Control:
 	var column := VBoxContainer.new()
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.custom_minimum_size = Vector2(240, 0)
+	column.custom_minimum_size = Vector2(140, 0)
 
 	var toolbar := HBoxContainer.new()
 	column.add_child(toolbar)
 
+	# Labels are kept short on purpose: a container's minimum width comes from
+	# its children, so a chatty toolbar would pin this column open and stop the
+	# splitters from moving.
 	_show_original = CheckButton.new()
-	_show_original.text = "Show Original"
+	_show_original.text = "Original"
 	_show_original.tooltip_text = "Toggle between the source image and the processed result."
 	_show_original.toggled.connect(func(_pressed: bool) -> void: _update_preview_texture())
 	toolbar.add_child(_show_original)
 
 	_auto_preview = CheckButton.new()
-	_auto_preview.text = "Auto Preview"
+	_auto_preview.text = "Auto"
 	_auto_preview.button_pressed = true
 	_auto_preview.tooltip_text = "Re-run the tool whenever a setting changes."
 	_auto_preview.toggled.connect(_on_auto_preview_toggled)
@@ -187,14 +193,57 @@ func _build_preview_column() -> Control:
 	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_preview.pixel_picked.connect(_on_pixel_picked)
+	_preview.zoom_changed.connect(_on_zoom_changed)
 	column.add_child(_preview)
+
+	# Zoom sits under the image, Photoshop-style, which also splits the column's
+	# width demand across two rows instead of one long one.
+	column.add_child(_build_zoom_controls())
 
 	return column
 
 
+func _build_zoom_controls() -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 0)
+
+	var zoom_out_button := Button.new()
+	zoom_out_button.text = "-"
+	zoom_out_button.tooltip_text = "Zoom out. 25% steps below 100%, 100% steps above."
+	zoom_out_button.pressed.connect(func() -> void: _preview.zoom_out())
+	row.add_child(zoom_out_button)
+
+	_zoom_field = LineEdit.new()
+	_zoom_field.text = "100%"
+	_zoom_field.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_zoom_field.custom_minimum_size = Vector2(58, 0)
+	_zoom_field.tooltip_text = "Zoom level, 1% to 1000%. Type a value and press Enter.\nThe mouse wheel zooms in 25% steps, towards the pixel under the cursor."
+	_zoom_field.text_submitted.connect(_on_zoom_submitted)
+	_zoom_field.focus_exited.connect(func() -> void: _on_zoom_submitted(_zoom_field.text))
+	row.add_child(_zoom_field)
+
+	var zoom_in_button := Button.new()
+	zoom_in_button.text = "+"
+	zoom_in_button.tooltip_text = "Zoom in. 25% steps below 100%, 100% steps above."
+	zoom_in_button.pressed.connect(func() -> void: _preview.zoom_in())
+	row.add_child(zoom_in_button)
+
+	var fit_button := Button.new()
+	fit_button.text = "Fit"
+	fit_button.tooltip_text = "Zoom so the whole image is visible, never past 100%."
+	fit_button.pressed.connect(func() -> void: _preview.fit_to_view())
+	row.add_child(fit_button)
+
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
+
+	return row
+
+
 func _build_tool_column() -> Control:
 	var column := VBoxContainer.new()
-	column.custom_minimum_size = Vector2(280, 0)
+	column.custom_minimum_size = Vector2(220, 0)
 
 	var title := Label.new()
 	title.text = "Tool"
@@ -446,6 +495,9 @@ func _on_file_selected(index: int) -> void:
 	else:
 		_update_preview_texture()
 		_update_detail_label()
+	# A newly opened image starts fitted, so a large one is not shown as a
+	# corner crop. Fit never magnifies, so a small one still lands at 100%.
+	_preview.fit_to_view()
 
 
 static func _load_image(path: String) -> Image:
@@ -628,6 +680,27 @@ func _update_preview_texture() -> void:
 		_preview.set_image(_source_image)
 	else:
 		_preview.set_image(_result_image)
+
+
+## Accepts "150", "150%" or whitespace around either; anything unparseable snaps
+## the field back to the zoom actually in force.
+func _on_zoom_submitted(text: String) -> void:
+	var cleaned := text.strip_edges().trim_suffix("%").strip_edges()
+	if cleaned.is_valid_float():
+		_preview.set_zoom(cleaned.to_float())
+	_show_zoom(_preview.get_zoom())
+
+
+func _on_zoom_changed(percent: float) -> void:
+	_show_zoom(percent)
+
+
+func _show_zoom(percent: float) -> void:
+	# Rounded for display only; the view keeps the exact value, which matters
+	# after Fit lands on something like 14.65%.
+	var shown := "%d%%" % roundi(percent)
+	if _zoom_field.text != shown:
+		_zoom_field.text = shown
 
 
 func _update_detail_label() -> void:
