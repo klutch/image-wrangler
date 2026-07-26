@@ -30,17 +30,25 @@ const MAX_ZOOM := 1000.0
 ## around but never dragged out of sight.
 const MIN_VISIBLE := 32.0
 
-## Button steps are fine up to 100% and coarse beyond it, so the top of the
-## range is reachable without forty clicks.
-const FINE_STEP := 25.0
-const COARSE_STEP := 100.0
-const COARSE_ABOVE := 100.0
+## Every zoom the buttons, the wheel and the dropdown offer.
+##
+## Spelled out rather than computed. The spacing is deliberately uneven — 10%
+## apart at the bottom, 25% through the middle, 100% at the top — because what
+## counts as a useful step depends on how much of the image you are looking at,
+## and no single formula gives all three. Writing them down is also the only way
+## the three controls are guaranteed to agree: they all walk this one array.
+##
+## [constant MIN_ZOOM] sits below the first rung on purpose. Fit has to be able
+## to shrink a very large image past 10% to get it on screen, and the dropdown
+## shows such a value when it does — it is simply not something you can pick.
+const ZOOM_STOPS := [
+	10.0, 20.0, 30.0, 40.0, 50.0, 75.0,
+	100.0, 125.0, 150.0, 175.0,
+	200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0,
+]
 
-## The wheel steps 25% for most of the range, but drops to 10% at the bottom of
-## it, where a 25% jump is a large fraction of what you are looking at.
-const WHEEL_STEP := 25.0
-const WHEEL_FINE_STEP := 10.0
-const WHEEL_FINE_BELOW := 50.0
+## How close a zoom must be to a rung to count as standing on it.
+const _STOP_EPSILON := 0.01
 
 ## While set, clicks report the pixel under the cursor instead of doing nothing.
 var pick_mode := false:
@@ -209,27 +217,31 @@ func fit_to_view() -> void:
 	_relayout()
 
 
-## Next zoom on the button ladder: 25% steps below 100%, 100% steps above it.
+## The next rung of [constant ZOOM_STOPS] above or below [param percent].
+##
+## The buttons and the wheel both come through here, so they cannot disagree.
+##
+## The trailing [code]maxf[/code] and [code]minf[/code] stop a step travelling
+## the wrong way from somewhere off the list. Below the first rung — where only
+## Fit can put you — returning that rung on the way *down* would zoom in.
 static func step_zoom(percent: float, zooming_in: bool) -> float:
 	if zooming_in:
-		var up_step := FINE_STEP if percent < COARSE_ABOVE else COARSE_STEP
-		return clampf(floorf(percent / up_step) * up_step + up_step, MIN_ZOOM, MAX_ZOOM)
-	var down_step := FINE_STEP if percent <= COARSE_ABOVE else COARSE_STEP
-	return clampf(ceilf(percent / down_step) * down_step - down_step, MIN_ZOOM, MAX_ZOOM)
+		for stop: float in ZOOM_STOPS:
+			if stop > percent + _STOP_EPSILON:
+				return maxf(stop, percent)
+		return maxf(ZOOM_STOPS[ZOOM_STOPS.size() - 1], percent)
+
+	var previous: float = ZOOM_STOPS[0]
+	for stop: float in ZOOM_STOPS:
+		if stop >= percent - _STOP_EPSILON:
+			break
+		previous = stop
+	return minf(previous, percent)
 
 
-## Next zoom on the wheel ladder: 10% steps below 50%, 25% steps from there up.
-##
-## The comparisons differ by a hair on purpose. Stepping up *from* 50% takes the
-## coarse step and stepping down *from* it takes the fine one, so 40 and 50 are
-## neighbours in both directions and the boundary has no rung that can only be
-## reached from one side.
-static func wheel_zoom(percent: float, zooming_in: bool) -> float:
-	if zooming_in:
-		var up_step := WHEEL_FINE_STEP if percent < WHEEL_FINE_BELOW else WHEEL_STEP
-		return clampf(floorf(percent / up_step) * up_step + up_step, MIN_ZOOM, MAX_ZOOM)
-	var down_step := WHEEL_FINE_STEP if percent <= WHEEL_FINE_BELOW else WHEEL_STEP
-	return clampf(ceilf(percent / down_step) * down_step - down_step, MIN_ZOOM, MAX_ZOOM)
+## [constant ZOOM_STOPS] as a packed array, for the dropdown to build from.
+static func zoom_stops() -> PackedFloat32Array:
+	return PackedFloat32Array(ZOOM_STOPS)
 
 
 # --- Layout -------------------------------------------------------------
@@ -352,10 +364,10 @@ func _on_canvas_gui_input(event: InputEvent) -> void:
 		return
 
 	if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-		set_zoom(wheel_zoom(_zoom_percent, true), event.position)
+		set_zoom(step_zoom(_zoom_percent, true), event.position)
 		_canvas.accept_event()
 	elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-		set_zoom(wheel_zoom(_zoom_percent, false), event.position)
+		set_zoom(step_zoom(_zoom_percent, false), event.position)
 		_canvas.accept_event()
 	elif pick_mode and event.button_index == MOUSE_BUTTON_LEFT:
 		var pixel := _pixel_at(event.position)

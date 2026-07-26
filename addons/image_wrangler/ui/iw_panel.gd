@@ -23,6 +23,10 @@ const AUTO_PREVIEW_PIXEL_LIMIT := 4_194_304
 ## Settings edits arrive in bursts while a slider is dragged; collapse them.
 const PREVIEW_DEBOUNCE := 0.15
 
+## How close a zoom has to be to a ladder rung to count as that rung rather than
+## as a value of its own. Comfortably under the smallest gap in the ladder.
+const _ZOOM_MATCH := 0.01
+
 ## Longer than the preview debounce on purpose. The preview has to feel live; a
 ## disk write must not happen seven times a second while a slider is dragged.
 const AUTOSAVE_DEBOUNCE := 0.75
@@ -79,7 +83,7 @@ var _key_color_property := &""
 var _settings_box: VBoxContainer
 var _show_original: CheckButton
 var _auto_preview: CheckButton
-var _zoom_field: LineEdit
+var _zoom_select: OptionButton
 var _refresh_button: Button
 var _remove_button: Button
 var _suffix_edit: LineEdit
@@ -275,22 +279,20 @@ func _build_status_row() -> Control:
 
 	var zoom_out_button := Button.new()
 	zoom_out_button.text = "-"
-	zoom_out_button.tooltip_text = "Zoom out. 25% steps below 100%, 100% steps above."
+	zoom_out_button.tooltip_text = "Zoom out one step."
 	zoom_out_button.pressed.connect(func() -> void: _preview.zoom_out())
 	zoom.add_child(zoom_out_button)
 
-	_zoom_field = LineEdit.new()
-	_zoom_field.text = "100%"
-	_zoom_field.alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_zoom_field.custom_minimum_size = Vector2(58, 0)
-	_zoom_field.tooltip_text = "Zoom level, 1% to 1000%. Type a value and press Enter.\nThe mouse wheel zooms towards the pixel under the cursor, in 10% steps\nbelow 50% and 25% steps above.\nDrag to pan. While a tool is active, pan with the middle button or Ctrl+left."
-	_zoom_field.text_submitted.connect(_on_zoom_submitted)
-	_zoom_field.focus_exited.connect(func() -> void: _on_zoom_submitted(_zoom_field.text))
-	zoom.add_child(_zoom_field)
+	_zoom_select = OptionButton.new()
+	_zoom_select.custom_minimum_size = Vector2(76, 0)
+	_zoom_select.tooltip_text = "Zoom level. The buttons, the wheel and this list all step through the same\nstops. The wheel zooms towards the pixel under the cursor.\nFit can land between stops; such a value is shown here too, until you\nleave it. Drag to pan — while a tool is active, use middle or Ctrl+left."
+	_zoom_select.item_selected.connect(_on_zoom_selected)
+	zoom.add_child(_zoom_select)
+	_refresh_zoom_items(100.0)
 
 	var zoom_in_button := Button.new()
 	zoom_in_button.text = "+"
-	zoom_in_button.tooltip_text = "Zoom in. 25% steps below 100%, 100% steps above."
+	zoom_in_button.tooltip_text = "Zoom in one step."
 	zoom_in_button.pressed.connect(func() -> void: _preview.zoom_in())
 	zoom.add_child(zoom_in_button)
 
@@ -848,25 +850,46 @@ func _update_preview_texture() -> void:
 		_preview.set_image(_result_image)
 
 
-## Accepts "150", "150%" or whitespace around either; anything unparseable snaps
-## the field back to the zoom actually in force.
-func _on_zoom_submitted(text: String) -> void:
-	var cleaned := text.strip_edges().trim_suffix("%").strip_edges()
-	if cleaned.is_valid_float():
-		_preview.set_zoom(cleaned.to_float())
-	_show_zoom(_preview.get_zoom())
+func _on_zoom_selected(index: int) -> void:
+	# The exact value rides in the metadata: the label is rounded for display,
+	# and picking "15%" should restore the 14.65% Fit actually chose.
+	_preview.set_zoom(_zoom_select.get_item_metadata(index))
 
 
 func _on_zoom_changed(percent: float) -> void:
-	_show_zoom(percent)
+	_refresh_zoom_items(percent)
 
 
-func _show_zoom(percent: float) -> void:
-	# Rounded for display only; the view keeps the exact value, which matters
-	# after Fit lands on something like 14.65%.
-	var shown := "%d%%" % roundi(percent)
-	if _zoom_field.text != shown:
-		_zoom_field.text = shown
+## Rebuilds the dropdown around [param percent] and selects it.
+##
+## The list is [constant PreviewView.ZOOM_STOPS], the same stops the buttons and
+## the wheel step through. Fit can land between them, so a value that is not on
+## the list gets a row of its own, in sorted position, for as long as the view
+## sits there — the control has to be able to say what the zoom actually is, not
+## merely the nearest thing it can offer.
+func _refresh_zoom_items(percent: float) -> void:
+	var values := PackedFloat32Array()
+	var placed := false
+	for stop in PreviewView.zoom_stops():
+		if not placed and absf(stop - percent) < _ZOOM_MATCH:
+			placed = true
+		elif not placed and percent < stop:
+			values.append(percent)
+			placed = true
+		values.append(stop)
+	if not placed:
+		values.append(percent)
+
+	_zoom_select.clear()
+	for i in values.size():
+		# Rounded for display only; the view keeps the exact value, which matters
+		# after Fit lands on something like 14.65%.
+		_zoom_select.add_item("%d%%" % roundi(values[i]))
+		_zoom_select.set_item_metadata(i, values[i])
+		if absf(values[i] - percent) < _ZOOM_MATCH:
+			# select() does not re-emit item_selected, so this cannot loop back
+			# into _on_zoom_selected.
+			_zoom_select.select(i)
 
 
 ## The status label ellipsises, so the full message is kept as its tooltip.

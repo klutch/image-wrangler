@@ -18,10 +18,10 @@ exactly what happened to the edge pixels.
 
 | Control | What it does |
 | --- | --- |
-| `-` / `+` | Steps the zoom: 25% at a time below 100%, 100% at a time above, so 1000% is ten clicks away rather than forty. |
-| Zoom field | Type any value from 1 to 1000. A trailing `%` is fine. Applied on Enter or when the field loses focus; anything unparseable snaps back. |
+| `-` / `+` | Steps to the next zoom stop. |
+| Zoom dropdown | The stops: **10, 20, 30, 40, 50, 75, 100, 125, 150, 175, 200, 300 … 1000**. The buttons, the wheel and this list all walk the same array, so they cannot disagree. **Fit** can land between stops, and such a value gets a row of its own until you leave it, so the control always says what the zoom actually is. |
 | **Fit** | Zooms so the whole image is visible — but never past 100%, so a small sprite is shown at its true size rather than blown up. |
-| Mouse wheel | Zooms **towards the pixel under the cursor**, so you can drive into a corner of the silhouette without chasing it with the scrollbars. Steps 10% below 50%, where a 25% jump is a large fraction of what you are looking at, and 25% above. |
+| Mouse wheel | Steps the same stops, **towards the pixel under the cursor**, so you can drive into a corner of the silhouette without chasing it with the scrollbars. |
 | Drag to pan | Left-drag pans whenever no tool is active. With one active — **Pick**, say — the left button belongs to the tool, and middle-drag or Ctrl+left-drag pans instead. Both are claimed before the tool sees them, so panning never drops an island by accident. |
 | Pan range | The image follows the cursor, as if you had grabbed it, and can be dragged clear of the frame edges — zoomed in or out, fitting or not — stopping only once a sliver of it is left on screen, so an edge you are inspecting can be pulled into the middle. **Fit** re-centres. |
 
