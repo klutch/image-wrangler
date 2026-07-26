@@ -1,8 +1,8 @@
 # Image Wrangler
 
 An in-editor toolbox for manipulating images. Enable it under
-**Project → Project Settings → Plugins**, then open the **Image Wrangler** tab in
-the bottom panel.
+**Project → Project Settings → Plugins**, then pick **Image Wrangler** from the
+main screen tabs at the top, alongside **2D**, **3D** and **Script**.
 
 ## Using it
 
@@ -34,8 +34,7 @@ Opening an image fits it, so a large one doesn't appear as a corner crop. Zoom
 and scroll then survive everything else — re-running the operation, toggling **Show
 Original** — so you can sit at 400% on an edge and watch a setting change it.
 
-The three columns are split by draggable dividers, and the panel itself resizes
-from its top edge like any other bottom-panel dock.
+The three columns are split by draggable dividers.
 
 ## Remove Background
 
@@ -60,7 +59,7 @@ Finally it bleeds subject colour outwards into the fully transparent pixels,
 since bilinear filtering and mipmaps sample RGB even where alpha is zero.
 
 The full derivation is in the header comment of
-`core/iw_background_remover.gd`.
+`core/remove_background.gd`.
 
 ### Settings
 
@@ -184,11 +183,10 @@ the dock, so H stays free everywhere else in the editor and never steals a
 keystroke from a text field.
 
 **The list belongs to the image, not to the operation.** It names the image it is
-showing, and changing selection swaps the list to whatever that image has.
-Entries stay put until you remove them or remove the image from the queue, so you
+showing, and changing selection swaps the list to whatever that image has, so you
 can work through a batch picking each image's islands and then process the lot in
-one go; **Process All** gives every image its own. Islands live for the editor
-session and are not written to disk.
+one go. Islands are saved with the rest of that image's settings — see
+[Per-image settings](#per-image-settings) — so they survive an editor restart.
 
 A picked island is not a hole punch — it starts the same flood fill the image
 border does, so the region's rim gets the identical antialiasing treatment as
@@ -240,12 +238,69 @@ every case; the error above is entirely in the soft edge.
 - An edge softer than **Edge Width** keeps part of its halo. Raise the setting;
   overshooting it costs nothing, as the coverage estimate self-corrects.
 
+## Per-image settings
+
+Every setting belongs to the image on screen, not to the operation. Selecting an
+image loads its settings; changing one saves them again a moment later.
+
+They live in a **JSON file beside the image**, named by replacing the extension:
+`flower_0002.png` → `flower_0002.json`. It is plain text and safe to hand-edit or
+commit alongside the art.
+
+```json
+{
+	"format": "image_wrangler",
+	"version": 1,
+	"operations": {
+		"remove_background": {
+			"tolerance": 0.02,
+			"islands": { "points": [[128, 64]] }
+		}
+	}
+}
+```
+
+**An image with no file inherits whatever is currently dialled in** — so tuning
+one image and clicking through a sheet of similar ones carries your work forward,
+rather than resetting each time. Islands are the exception: a coordinate in one
+image means nothing in another, so they always start empty.
+
+Selecting an image never writes anything. Only editing does.
+
+Three things worth knowing:
+
+- **Files appear beside your art without being asked for.** Everything else this
+  addon writes is behind an explicit Process, with a confirmation before
+  overwriting. This is not.
+- **Settings are no longer shared across a batch.** Dialling in a tolerance and
+  hitting **Process All** applies it only to images that have none of their own.
+  Anything you previously selected and edited keeps its own values.
+- **A `.json` already there and written by something else is left alone.**
+  `sprite.json` beside `sprite.png` is exactly what Aseprite names its atlas
+  descriptor. The addon reads such a file, sees it is not one of its own, refuses
+  to touch it, and says so — so that image simply has no saved settings. Two
+  images differing only by extension (`sprite.png`, `sprite.jpg`) also share one
+  file name; only one of them can have settings.
+
+Values outside the range their slider allows — from a hand edit, or a file
+written by a later version — are pulled back inside it on load, so the form and
+the processing can never silently disagree.
+
 ## Adding an operation
 
-Subclass `IWOperation` in `core/`, override `get_operation_name()`,
-`get_settings_schema()` and `process_image()`, then add the script path to
-`OPERATION_SCRIPTS` in `ui/iw_panel.gd`. The dock builds the settings form from
-the schema, so there is no UI work.
+Write two classes in `core/`: a `Resource` holding the tunables as `@export`
+properties, and an `IWOperation` subclass pointing at one. Override
+`get_operation_name()`, `get_operation_id()`, `get_settings()`, `set_settings()`,
+`make_settings()`, `get_settings_schema()` and `process_image()`, then add the
+operation's script path to `OPERATION_SCRIPTS` in `ui/iw_panel.gd`.
+
+That is the whole job. The dock builds the settings form from the schema and the
+sidecar codec reflects over the settings Resource, so neither the UI nor the
+persistence needs touching — including for a setting deliberately left out of the
+schema, as `key_color` is.
+
+Ranges belong in the schema, not in `@export_range`, so there is one source of
+truth for them.
 
 Setting types are `BOOL`, `INT`, `FLOAT` and `ISLAND_PICKER`. The last one gives
 you the pick-off-the-preview list described above for any `Array[Vector2i]`

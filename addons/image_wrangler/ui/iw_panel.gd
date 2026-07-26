@@ -1,15 +1,16 @@
 @tool
 extends VBoxContainer
 
-## The Image Wrangler bottom panel: pick images, tweak an operation, write results.
+## The Image Wrangler main screen: pick images, tweak an operation, write results.
 
 const SettingsBuilder := preload("res://addons/image_wrangler/ui/iw_settings_builder.gd")
 const PreviewView := preload("res://addons/image_wrangler/ui/iw_preview_view.gd")
 const IslandPicker := preload("res://addons/image_wrangler/ui/iw_island_picker.gd")
+const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
 
 ## Every operation the dock offers. Add new [IWOperation] subclasses here.
 const OPERATION_SCRIPTS := [
-	"res://addons/image_wrangler/core/iw_background_remover.gd",
+	"res://addons/image_wrangler/core/remove_background.gd",
 ]
 
 ## Extensions [method Image.load_from_file] can read.
@@ -22,6 +23,10 @@ const AUTO_PREVIEW_PIXEL_LIMIT := 4_194_304
 ## Settings edits arrive in bursts while a slider is dragged; collapse them.
 const PREVIEW_DEBOUNCE := 0.15
 
+## Longer than the preview debounce on purpose. The preview has to feel live; a
+## disk write must not happen seven times a second while a slider is dragged.
+const AUTOSAVE_DEBOUNCE := 0.75
+
 var _operations: Array[IWOperation] = []
 var _operation: IWOperation
 var _sources: PackedStringArray = PackedStringArray()
@@ -30,11 +35,32 @@ var _result_image: Image
 var _suffix_is_default := true
 var _pending_outputs: Dictionary = {}
 
-## Picked islands keyed by source path. They describe a place in one particular
-## image, so they live with the image rather than with the operation: they follow
-## the selection, are swapped in per file during a batch run, and are dropped
-## when the image leaves the list.
-var _islands_by_path: Dictionary = {}
+## Settings keyed by source path, then by operation id. An entry appears the
+## first time an image is selected or processed: loaded from its JSON sidecar
+## when it has one, carried over from whatever is dialled in when it does not.
+##
+## While the dock is open this is the source of truth — the sidecar is read once
+## per path and never re-read, so a half-written file or an external edit landing
+## mid-drag cannot clobber live state.
+var _settings_by_path: Dictionary = {}
+
+## Set while the form is being repointed at another image's settings. Every
+## change handler early-returns on it.
+##
+## The no-signal setters in [SettingsBuilder] should make this unnecessary, but
+## the cost of one leaking through is no longer a stray preview — it is writing
+## one image's values into another image's sidecar at the moment of the swap. And
+## [ColorPickerButton] has no no-signal setter at all, so for the swatch this is
+## the only defence.
+var _refreshing := false
+
+## Path the pending autosave belongs to, captured when it was scheduled: the
+## selection can move before the timer fires.
+var _autosave_path := ""
+
+## Paths whose sidecar could not be written, so the failure is reported once
+## rather than on every tick of a slider drag.
+var _autosave_failures := {}
 
 var _file_list: ItemList
 var _preview: PreviewView
@@ -63,14 +89,14 @@ var _use_source_dir: CheckBox
 var _process_selected_button: Button
 var _process_all_button: Button
 var _debounce: Timer
+var _autosave: Timer
 var _open_dialog: FileDialog
 var _output_dialog: FileDialog
 var _overwrite_dialog: ConfirmationDialog
 
 
 func _ready() -> void:
-	# Only a floor, so the bottom panel and the splitters between columns stay
-	# freely draggable.
+	# Only a floor, so the splitters between the columns stay freely draggable.
 	custom_minimum_size = Vector2(0, 240)
 	_build_operations()
 	_build_ui()
@@ -99,6 +125,13 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var shown := _preview.toggle_markers()
 	_set_status("Island markers %s." % ("shown" if shown else "hidden"))
 	accept_event()
+
+
+## A pending write must not die with the dock: this runs on plugin disable and on
+## editor shutdown. It deliberately touches only the settings store and the
+## codec, nothing that needs the panel to still be in the tree.
+func _exit_tree() -> void:
+	_flush_autosave()
 
 
 func _build_operations() -> void:
@@ -134,6 +167,12 @@ func _build_ui() -> void:
 	_debounce.wait_time = PREVIEW_DEBOUNCE
 	_debounce.timeout.connect(_run_preview)
 	add_child(_debounce)
+
+	_autosave = Timer.new()
+	_autosave.one_shot = true
+	_autosave.wait_time = AUTOSAVE_DEBOUNCE
+	_autosave.timeout.connect(_flush_autosave)
+	add_child(_autosave)
 
 
 func _build_source_column() -> Control:
@@ -462,8 +501,11 @@ func _on_remove_pressed() -> void:
 	var index := _selected_index()
 	if index < 0:
 		return
-	# Islands are scoped to the image, so they go with it.
-	_islands_by_path.erase(_sources[index])
+	# Its settings go with it, but its sidecar does not: the button's tooltip
+	# promises the file is not touched, and a settings file beside the art is a
+	# file. Re-adding the image loads it back.
+	_flush_autosave()
+	_settings_by_path.erase(_sources[index])
 	_sources.remove_at(index)
 	_source_image = null
 	_result_image = null
@@ -474,7 +516,7 @@ func _on_remove_pressed() -> void:
 		_on_file_selected(next)
 	else:
 		_preview.set_image(null)
-		_apply_islands_for("")
+		_clear_settings_context()
 		_set_status("No image selected.")
 		_detail_label.text = ""
 	_update_controls()
@@ -483,6 +525,9 @@ func _on_remove_pressed() -> void:
 func _on_file_selected(index: int) -> void:
 	if index < 0 or index >= _sources.size():
 		return
+	# The outgoing image's pending write goes out before the settings swap, or it
+	# would be written against whatever came next.
+	_flush_autosave()
 	var path := _sources[index]
 	_source_image = _load_image(path)
 	_result_image = null
@@ -490,13 +535,13 @@ func _on_file_selected(index: int) -> void:
 		_set_status("Could not read %s" % path.get_file())
 		_detail_label.text = ""
 		_preview.set_image(null)
-		_apply_islands_for("")
+		_clear_settings_context()
 		_update_controls()
 		return
 
-	# Islands belong to this image, so they are swapped in before anything is
-	# processed with them.
-	_apply_islands_for(path)
+	# The settings belong to this image, and the form must agree with them before
+	# anything is processed, so both happen before the preview below.
+	_apply_settings_for(path)
 
 	var pixel_count := _source_image.get_width() * _source_image.get_height()
 	if pixel_count > AUTO_PREVIEW_PIXEL_LIMIT and _auto_preview.button_pressed:
@@ -532,6 +577,8 @@ func _select_operation(index: int) -> void:
 	_bind_key_color()
 	SettingsBuilder.build(_operation, _settings_box, _on_setting_changed)
 	_bind_island_picker()
+	# _bind_island_picker already applied this image's settings for the operation
+	# just selected, so the form and the operation agree before the first run.
 
 	# Only reset the suffix while the user has not claimed it as their own.
 	if _suffix_is_default or _suffix_edit.text == previous_suffix:
@@ -548,14 +595,16 @@ func _select_operation(index: int) -> void:
 func _bind_key_color() -> void:
 	_key_color_property = _operation.get_key_color_property()
 	_key_color_row.visible = _key_color_property != &""
-	if _key_color_row.visible:
-		_key_color_button.color = _operation.get(_key_color_property)
+	_refresh_key_color()
 
 
 func _on_key_color_changed(color: Color) -> void:
-	if _operation == null or _key_color_property == &"":
+	if _refreshing or _operation == null or _key_color_property == &"":
 		return
-	_operation.set(_key_color_property, color)
+	var settings := _operation.get_settings()
+	if settings == null:
+		return
+	settings.set(_key_color_property, color)
 	_on_setting_changed()
 
 
@@ -588,7 +637,7 @@ func _bind_island_picker() -> void:
 	_preview.pick_mode = false
 	if _island_picker != null:
 		_island_picker.set_pick_active(false)
-	_apply_islands_for(_current_path())
+	_apply_settings_for(_current_path())
 	_update_markers()
 
 
@@ -600,35 +649,123 @@ func _current_path() -> String:
 	return _sources[index]
 
 
-func _islands_for(path: String) -> Array[Vector2i]:
-	var islands: Array[Vector2i] = []
-	if not path.is_empty() and _islands_by_path.has(path):
-		islands.assign(_islands_by_path[path])
-	return islands
+## Settings for one source, created on demand.
+##
+## [param template] is what the values are carried over from when the image has
+## no sidecar. It is passed in rather than read from the operation because the
+## batch run swaps the operation's settings as it goes — reading them there would
+## make an untouched image inherit whichever image the loop happened to process
+## last, and the result would depend on job order.
+func _settings_for(path: String, template: Resource) -> Resource:
+	if path.is_empty() or _operation == null:
+		return null
 
+	var id := _operation.get_operation_id()
+	if not _settings_by_path.has(path):
+		_settings_by_path[path] = {}
+	var per_operation: Dictionary = _settings_by_path[path]
+	if per_operation.has(id):
+		return per_operation[id]
 
-## Loads one image's islands into the operation and the list.
-func _apply_islands_for(path: String) -> void:
-	if _island_picker == null:
-		return
-	_island_picker.set_islands(_islands_for(path))
-	_island_picker.set_context_label(path.get_file())
-	_update_markers()
-
-
-## Saves the list back against the image it was picked on. An emptied list drops
-## its entry rather than leaving a stale key behind.
-func _store_islands() -> void:
-	if _island_picker == null:
-		return
-	var path := _current_path()
-	if path.is_empty():
-		return
-	var islands := _island_picker.get_islands()
-	if islands.is_empty():
-		_islands_by_path.erase(path)
+	var settings := SettingsIO.load_settings(path, _operation)
+	if settings != null:
+		# Clamped here rather than after the swap, so the batch path — which
+		# never goes through _apply_settings_for — gets it too.
+		_operation.clamp_settings_to_schema(settings)
+	elif template != null and template.has_method("duplicate_for_new_image"):
+		# Carries everything but the islands: a coordinate in one image means
+		# nothing in another.
+		settings = template.duplicate_for_new_image()
 	else:
-		_islands_by_path[path] = islands.duplicate()
+		settings = _operation.make_settings()
+	per_operation[id] = settings
+	return settings
+
+
+## Points the operation and the form at [param path]'s settings.
+func _apply_settings_for(path: String) -> void:
+	if _operation == null:
+		return
+	var settings := _settings_for(path, _operation.get_settings())
+	if settings == null:
+		return
+
+	_refreshing = true
+	_operation.set_settings(settings)
+	SettingsBuilder.refresh_values(_operation, _settings_box)
+	_refresh_key_color()
+	if _island_picker != null:
+		_island_picker.refresh()
+		_island_picker.set_context_label(path.get_file())
+	_update_markers()
+	_refreshing = false
+
+
+## Writes the sidecar for whichever image the pending save belongs to.
+func _flush_autosave() -> void:
+	if _autosave != null:
+		_autosave.stop()
+	var path := _autosave_path
+	_autosave_path = ""
+	if path.is_empty() or _operation == null:
+		return
+
+	# Read rather than resolve: resolving would create and cache an entry, so a
+	# stale pending path could write a sidecar for an image never touched.
+	var per_operation: Dictionary = _settings_by_path.get(path, {})
+	var settings: Resource = per_operation.get(_operation.get_operation_id())
+	if settings == null:
+		return
+	var error := SettingsIO.save_settings(path, _operation, settings)
+	if error == OK:
+		_autosave_failures.erase(path)
+		return
+	if _autosave_failures.has(path):
+		return
+	_autosave_failures[path] = true
+	if error == ERR_FILE_CORRUPT:
+		_set_status("Cannot save settings: %s already exists and was written by something else."
+				% SettingsIO.sidecar_path(path).get_file())
+	else:
+		_set_status("Could not write settings for %s." % path.get_file())
+
+
+func _schedule_autosave() -> void:
+	var path := _current_path()
+	if path.is_empty() or _autosave == null:
+		return
+	# A pending save for a different image is written now rather than dropped.
+	if not _autosave_path.is_empty() and _autosave_path != path:
+		_flush_autosave()
+	_autosave_path = path
+	_autosave.start()
+
+
+## Drops the form back to a blank context when no image is selected. The
+## operation keeps whatever is dialled in, so it stays the carry-over template.
+func _clear_settings_context() -> void:
+	if _operation == null:
+		return
+	_refreshing = true
+	var current := _operation.get_settings()
+	if current != null and current.has_method("duplicate_for_new_image"):
+		# Keeps the dialled-in values as the carry-over template, but drops the
+		# departed image's islands rather than leaving them in the picker.
+		_operation.set_settings(current.duplicate_for_new_image())
+	if _island_picker != null:
+		_island_picker.refresh()
+		_island_picker.set_context_label("")
+	_update_markers()
+	_refreshing = false
+
+
+## Pushes the current settings' key colour into the swatch.
+func _refresh_key_color() -> void:
+	if _key_color_property == &"" or _operation == null:
+		return
+	var settings := _operation.get_settings()
+	if settings != null:
+		_key_color_button.color = settings.get(_key_color_property)
 
 
 ## Colour behind a pixel of the image on screen, for the island row swatches.
@@ -654,7 +791,8 @@ func _on_pixel_picked(pixel: Vector2i) -> void:
 
 
 func _on_islands_changed() -> void:
-	_store_islands()
+	# Nothing to store: the picker edited the IslandList inside this image's
+	# settings directly, so it is already where it belongs.
 	_update_markers()
 	_on_setting_changed()
 
@@ -668,6 +806,9 @@ func _update_markers() -> void:
 
 
 func _on_setting_changed() -> void:
+	if _refreshing:
+		return
+	_schedule_autosave()
 	if _auto_preview.button_pressed:
 		_schedule_preview()
 	else:
@@ -812,6 +953,15 @@ func _write_pending_outputs() -> void:
 	if jobs.is_empty() or _operation == null:
 		return
 
+	# Resolved up front: _settings_for carries over from the template, and the
+	# template has to stay the selected image's settings rather than becoming
+	# whichever image the loop swapped in last.
+	_flush_autosave()
+	var template := _operation.get_settings()
+	var settings_for_job := {}
+	for source_path: String in jobs:
+		settings_for_job[source_path] = _settings_for(source_path, template)
+
 	var written := 0
 	var failures := PackedStringArray()
 	for source_path: String in jobs:
@@ -826,18 +976,17 @@ func _write_pending_outputs() -> void:
 			if make_error != OK:
 				failures.append(source_path.get_file())
 				continue
-		# Each image is processed with its own islands, not the selected
-		# image's. The list UI is left alone and restored below.
-		if _island_picker != null:
-			_island_picker.write_islands(_islands_for(source_path))
+		# Each image is processed with its own settings, not the selected image's.
+		# The form is left alone and the selection's settings restored below.
+		if settings_for_job.has(source_path):
+			_operation.set_settings(settings_for_job[source_path])
 		var result := _operation.process_image(image)
 		if result.save_png(destination) != OK:
 			failures.append(source_path.get_file())
 			continue
 		written += 1
 
-	if _island_picker != null:
-		_island_picker.write_islands(_islands_for(_current_path()))
+	_operation.set_settings(template)
 
 	if failures.is_empty():
 		_set_status("Wrote %d file(s)." % written)

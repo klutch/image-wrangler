@@ -1,13 +1,16 @@
 @tool
 class_name IWOperation
-extends RefCounted
+extends Resource
 
 ## Base class for every image operation offered by Image Wrangler.
 ##
-## An operation keeps its settings as ordinary properties and describes them
-## through [method get_settings_schema]. The dock builds the settings form from
-## that description, so adding a new operation never means touching the UI code:
-## write a subclass, list its settings, register it in [code]iw_panel.gd[/code].
+## An operation is the algorithm; its tunables live in a separate settings
+## Resource it points at, so the dock can swap in a different set per image
+## without rebuilding anything. [method get_settings_schema] describes those
+## tunables, and the dock builds the settings form from that description — so
+## adding an operation never means touching the UI code: write a subclass, give
+## it a settings Resource, list its settings, register it in
+## [code]iw_panel.gd[/code].
 
 ## Setting kinds the dock knows how to build a control for.
 enum SettingType {
@@ -15,8 +18,7 @@ enum SettingType {
 	INT,
 	FLOAT,
 	## A list of image positions the user picks off the preview, each standing
-	## for a region to act on. The property must be an
-	## [code]Array[Vector2i][/code].
+	## for a region to act on. The property must hold an [IslandList].
 	ISLAND_PICKER,
 }
 
@@ -26,9 +28,41 @@ func get_operation_name() -> String:
 	return "Operation"
 
 
+## Stable identifier for this operation in saved files.
+##
+## Deliberately not [method get_operation_name]: that is user-facing prose and
+## is exactly the kind of string that gets reworded, which would orphan every
+## file keyed off it.
+func get_operation_id() -> StringName:
+	return &""
+
+
 ## Appended to the source file name when writing the processed image.
 func get_output_suffix() -> String:
 	return "_out"
+
+
+## The Resource holding this operation's tunables.
+##
+## Every [code]property[/code] named in [method get_settings_schema], and the one
+## named by [method get_key_color_property], resolves against this object rather
+## than against the operation.
+func get_settings() -> Resource:
+	return null
+
+
+## Points the operation at a different settings Resource. Implementations reject
+## a Resource of the wrong type rather than storing it.
+func set_settings(_settings: Resource) -> void:
+	pass
+
+
+## A settings Resource of this operation's type, at its defaults.
+##
+## Loading a saved file decodes into one of these, so a key the file is missing
+## comes out at its default rather than at whatever happened to be dialled in.
+func make_settings() -> Resource:
+	return null
 
 
 ## Name of a [Color] property that is this operation's primary input, or an
@@ -49,11 +83,45 @@ func get_key_color_property() -> StringName:
 ## [code]step[/code] (numeric settings only), [code]tooltip[/code] (String) and
 ## [code]group[/code] (String).
 ##
+## Property names resolve against [method get_settings], not against the
+## operation.
+##
 ## Consecutive entries sharing a [code]group[/code] are boxed under a heading of
 ## that name; entries without one sit at the top level. Since grouping follows
 ## the order given here, an operation lists its settings grouped together.
 func get_settings_schema() -> Array[Dictionary]:
 	return []
+
+
+## Pulls every numeric setting back inside the range its schema declares.
+##
+## The schema is the only place ranges are written down, so it is also the only
+## thing that can enforce them on values that did not come from the sliders. A
+## hand-edited file carrying a tolerance of 50 would otherwise leave the setting
+## at 50 while the slider clamps its *display* to 0.5 — the form and the
+## processing silently disagreeing.
+##
+## [param settings] defaults to the operation's own, but a Resource loaded from a
+## file is clamped before the operation is pointed at it, so the target has to be
+## nameable.
+func clamp_settings_to_schema(settings: Resource = null) -> void:
+	if settings == null:
+		settings = get_settings()
+	if settings == null:
+		return
+	for entry in get_settings_schema():
+		var property: StringName = entry.get("property", &"")
+		var type: int = entry.get("type", SettingType.FLOAT)
+		if property == &"":
+			continue
+		if type != SettingType.INT and type != SettingType.FLOAT:
+			continue
+		if not entry.has("min") and not entry.has("max"):
+			continue
+		var low: float = entry.get("min", -INF)
+		var high: float = entry.get("max", INF)
+		var value := clampf(float(settings.get(property)), low, high)
+		settings.set(property, int(value) if type == SettingType.INT else value)
 
 
 ## Runs the operation. [param source] is left untouched; a new image is returned.

@@ -7,9 +7,11 @@ extends VBoxContainer
 ## Owns the list and its buttons, but neither the picking nor the storage. Only
 ## the dock can see the preview, so it listens for [signal pick_toggled], routes
 ## the click back in through [method add_island], and mirrors the entries as
-## markers. The dock also decides what the list is *of* — for the background
-## remover it swaps the contents per image via [method set_islands], so picked
-## islands follow the image they were found on.
+## markers.
+##
+## The [IslandList] it edits is resolved through the operation's settings on
+## every access, so when the dock swaps in another image's settings this control
+## follows without being told — it only needs a [method refresh] to redraw.
 
 ## Emitted when the pick button is toggled. The dock puts the preview into
 ## crosshair mode in response.
@@ -191,14 +193,15 @@ func set_context_label(context: String) -> void:
 
 ## Adds an island at [param at].
 func add_island(at: Vector2i) -> void:
-	var islands := _islands()
+	var islands := _island_list()
+	if islands == null:
+		return
 	if islands.has(at):
 		_hint.text = "That position is already in the list."
 		_select(islands.find(at))
 		return
 
-	islands.append(at)
-	_operation.set(_property, islands)
+	islands.add(at)
 	_refresh()
 	_select(islands.size() - 1)
 	_hint.text = ""
@@ -206,22 +209,15 @@ func add_island(at: Vector2i) -> void:
 
 
 func get_islands() -> Array[Vector2i]:
-	return _islands()
+	var islands := _island_list()
+	return islands.points if islands != null else ([] as Array[Vector2i])
 
 
-## Replaces the whole list and redraws it. Used when the selection changes.
-func set_islands(islands: Array[Vector2i]) -> void:
-	write_islands(islands)
+## Redraws the rows from whatever list the operation now points at. Called when
+## the settings Resource is swapped for another image.
+func refresh() -> void:
 	_hint.text = ""
 	_refresh()
-
-
-## Writes the property without touching the UI, for batch runs that swap islands
-## per image behind the scenes.
-func write_islands(islands: Array[Vector2i]) -> void:
-	var stored: Array[Vector2i] = []
-	stored.assign(islands)
-	_operation.set(_property, stored)
 
 
 ## Row currently highlighted, or -1. Drives which marker is emphasised.
@@ -237,9 +233,15 @@ func set_pick_active(enabled: bool) -> void:
 
 # --- Internals ----------------------------------------------------------
 
-func _islands() -> Array[Vector2i]:
-	var islands: Array[Vector2i] = _operation.get(_property)
-	return islands
+## The list this picker edits, resolved through the operation every time so that
+## swapping the settings Resource for another image needs no re-pointing here.
+func _island_list() -> IslandList:
+	if _operation == null:
+		return null
+	var settings := _operation.get_settings()
+	if settings == null:
+		return null
+	return settings.get(_property) as IslandList
 
 
 func _on_item_selected(_index: int) -> void:
@@ -249,11 +251,10 @@ func _on_item_selected(_index: int) -> void:
 
 func _on_remove_pressed() -> void:
 	var index := selected_index()
-	var islands := _islands()
-	if index < 0 or index >= islands.size():
+	var islands := _island_list()
+	if islands == null or index < 0 or index >= islands.size():
 		return
 	islands.remove_at(index)
-	_operation.set(_property, islands)
 	_refresh()
 	if _list.item_count > 0:
 		_select(mini(index, _list.item_count - 1))
@@ -263,11 +264,10 @@ func _on_remove_pressed() -> void:
 
 
 func _on_clear_pressed() -> void:
-	var islands := _islands()
-	if islands.is_empty():
+	var islands := _island_list()
+	if islands == null or islands.is_empty():
 		return
 	islands.clear()
-	_operation.set(_property, islands)
 	_refresh()
 	_hint.text = ""
 	islands_changed.emit()
@@ -285,9 +285,12 @@ func _select(index: int) -> void:
 func _refresh() -> void:
 	if _list == null:
 		return
-	var islands := _islands()
+	var islands := _island_list()
 	_list.clear()
-	for at in islands:
+	if islands == null:
+		_update_buttons()
+		return
+	for at in islands.points:
 		var index := _list.add_item("(%d, %d)" % [at.x, at.y])
 		if _color_provider.is_valid():
 			_list.set_item_icon(index, _swatch(_color_provider.call(at)))

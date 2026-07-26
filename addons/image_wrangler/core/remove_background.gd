@@ -1,5 +1,5 @@
 @tool
-class_name IWBackgroundRemover
+class_name RemoveBackground
 extends IWOperation
 
 ## Removes a flat background colour while preserving the antialiased silhouette.
@@ -32,7 +32,8 @@ extends IWOperation
 ## rather than by how close to the key they are. See [method _classify].
 ##
 ## [b]More than one background colour.[/b] The image border floods with
-## [member key_color], but each picked island in [member island_points] floods with
+## [member RemoveBackgroundSettings.key_color], but each picked island in
+## [member RemoveBackgroundSettings.islands] floods with
 ## the colour of the pixel it sits on, so an island of some other flat colour
 ## keys out against itself. Every pixel therefore remembers which key claimed it,
 ## and coverage and decontamination are both measured against that key rather
@@ -50,81 +51,20 @@ extends IWOperation
 ## RGB, which is how the background creeps back into an edge that looked clean in
 ## the file.
 
-## Background colour keyed out from the image border inwards.
-var key_color: Color = Color.WHITE
+## This operation's tunables. Swapped by the dock for the image on screen; see
+## [RemoveBackgroundSettings].
+var settings: RemoveBackgroundSettings
 
-## How far a pixel may drift from the colour keying its region and still count as
-## pure background.
-var tolerance: float = 0.02
-
-## Width of the antialiased band, in pixels. Pixels within this many steps of the
-## background are treated as a soft edge and given partial alpha; anything
-## further in is fully opaque subject.
-var edge_width: int = 2
-
-## Only remove background reachable from the image border, so regions enclosed by
-## the subject (eyes, speech bubbles, specular highlights) stay opaque.
-var contiguous: bool = true
-
-## How far from the keying colour the flood may stray to squeeze through a gap
-## too narrow to hold a single clean background pixel. Only has an effect while
-## [member crevice_reach] is above zero. See [method _flood_step].
-var crevice_tolerance: float = 0.5
-
-## How many near-background pixels in a row the flood may cross before it needs
-## solid background again, so it must be at least as long as the constriction it
-## has to squeeze through. Zero disables the whole mechanism, leaving the flood
-## strictly within [member tolerance].
+## Settings the flood fill reads from inside its per-pixel loop, snapshotted once
+## per run by [method _snapshot_settings].
 ##
-## Setting it generously is safer than it sounds. Somewhere the flood reaches
-## only by straying is reclassified as edge rather than background, so it is
-## matted by the usual coverage maths instead of being cut out — and genuine
-## subject measures as fully covered there, so it keeps its alpha. Straying too
-## far wastes work rather than eating the subject.
-var crevice_reach: int = 0
-
-## Extra pixels to start the background flood fill from, on top of the image
-## border. Lets the user hand-pick enclosed regions that [member contiguous]
-## deliberately skips.
-##
-## Each island keys out the colour of the pixel it lands on, sampled at process
-## time rather than stored, so an island always removes exactly what was clicked and
-## can never disagree with the image. Ignored when [member contiguous] is off,
-## since every key-coloured pixel already qualifies then.
-##
-## These describe one particular image, so the dock swaps them per file rather
-## than treating them as a setting shared across a batch. Points outside the
-## image being processed are skipped, which keeps a stale list harmless.
-var island_points: Array[Vector2i] = []
-
-## Un-blend the background out of partially transparent pixels.
-var decontaminate: bool = true
-
-## How far subject colour is pushed into transparent pixels, in pixels.
-var bleed_radius: int = 16
-
-## Run the alpha through a guided filter before compositing, snapping it to the
-## edges the image itself has. See [method _guided_refine].
-var refine_edges: bool = false
-
-## Window radius for that filter. Roughly how far a ragged patch of alpha may be
-## from a real edge and still be pulled onto it.
-var refine_radius: int = 2
-
-## Alpha at or below this is forced clear; [member alpha_ceiling] and above is
-## forced solid; the range between is stretched across the two.
-##
-## The last step before compositing, so it also settles whatever
-## [member refine_edges] left behind. Smoothing pulls a leftover speck of
-## background towards its transparent neighbours rather than removing it, which
-## turns a solid speck into a faint ghost; lifting the floor above where those
-## ghosts land clears them. It costs edge softness in exchange, since genuinely
-## faint edge pixels go with them — the usual clip-black/clip-white trade from
-## keying. At 0 and 1 the whole thing is a no-op.
-var alpha_floor: float = 0.0
-
-## Alpha at or above this is forced solid. See [member alpha_floor].
-var alpha_ceiling: float = 1.0
+## [method _flood_step] is called four times per background pixel and cannot see
+## the locals its caller hoisted, so these three would otherwise be resolved
+## through the settings Resource millions of times. Every other method reads what
+## it needs into a local at the top instead.
+var _tolerance: float
+var _crevice_reach: int
+var _crevice_tolerance: float
 
 ## Pixel classes produced by [method _classify].
 const MASK_BACKGROUND := 0
@@ -154,8 +94,39 @@ const _MIN_SEARCH_RADIUS := 2
 const _REFINE_EPSILON := 0.000001
 
 
+func _init() -> void:
+	settings = RemoveBackgroundSettings.new()
+
+
 func get_operation_name() -> String:
 	return "Remove Background"
+
+
+func get_operation_id() -> StringName:
+	return &"remove_background"
+
+
+func get_settings() -> Resource:
+	return settings
+
+
+func set_settings(new_settings: Resource) -> void:
+	var typed := new_settings as RemoveBackgroundSettings
+	if typed == null:
+		push_error("Image Wrangler: RemoveBackground was handed settings of the wrong type.")
+		return
+	settings = typed
+
+
+func make_settings() -> Resource:
+	return RemoveBackgroundSettings.new()
+
+
+## Copies the settings the flood fill needs into plain fields for the run.
+func _snapshot_settings() -> void:
+	_tolerance = settings.tolerance
+	_crevice_reach = settings.crevice_reach
+	_crevice_tolerance = settings.crevice_tolerance
 
 
 func get_output_suffix() -> String:
@@ -270,7 +241,7 @@ func get_settings_schema() -> Array[Dictionary]:
 			"tooltip": "Alpha at or above this is forced fully solid, with everything between the\nfloor and here stretched across the two. Bring it down towards the floor for\na harder cutoff, leave it at 1 for a soft one.",
 		},
 		{
-			"property": &"island_points",
+			"property": &"islands",
 			"group": "Island Picker",
 			"type": SettingType.ISLAND_PICKER,
 			"tooltip": "Enclosed regions to remove anyway, picked off the preview.\nEach one keys out the color of the pixel you clicked, so an island need\nnot match the main background color. Only applies while\n\"Only Outer Background\" is on.",
@@ -280,12 +251,19 @@ func get_settings_schema() -> Array[Dictionary]:
 
 ## Convenience entry point for code that just wants the default behaviour.
 static func remove_background(source: Image, key := Color.WHITE) -> Image:
-	var operation := IWBackgroundRemover.new()
-	operation.key_color = key
+	var operation := RemoveBackground.new()
+	operation.settings.key_color = key
 	return operation.process_image(source)
 
 
 func process_image(source: Image) -> Image:
+	_snapshot_settings()
+	var bleed_radius := settings.bleed_radius
+	var edge_width := settings.edge_width
+	var refine_edges := settings.refine_edges
+	var alpha_floor := settings.alpha_floor
+	var alpha_ceiling := settings.alpha_ceiling
+
 	var image := Image.new()
 	image.copy_from(source)
 	if image.is_compressed():
@@ -330,7 +308,9 @@ func process_image(source: Image) -> Image:
 ## Stretches alpha so [member alpha_floor] and below lands on clear and
 ## [member alpha_ceiling] and above on solid. Edits [param coverage] in place.
 func _clip_alpha(coverage: PackedFloat32Array) -> void:
-	var low := alpha_floor
+	var alpha_ceiling := settings.alpha_ceiling
+
+	var low := settings.alpha_floor
 	# Letting the ceiling sit at or under the floor is a legitimate request for a
 	# hard cutoff at that value, so it is honoured rather than rejected — just
 	# not by dividing by zero.
@@ -341,6 +321,9 @@ func _clip_alpha(coverage: PackedFloat32Array) -> void:
 
 ## Alpha for every pixel, before any refinement.
 func _coverage_map(data: PackedByteArray, key_dist: PackedFloat32Array, mask: PackedByteArray, key_of: PackedInt32Array, keys: Array[Color], nearest: PackedInt32Array, width: int, height: int) -> PackedFloat32Array:
+	var tolerance := settings.tolerance
+	var edge_width := settings.edge_width
+
 	var pixel_count := width * height
 	var coverage := PackedFloat32Array()
 	coverage.resize(pixel_count)
@@ -382,6 +365,10 @@ func _coverage_map(data: PackedByteArray, key_dist: PackedFloat32Array, mask: Pa
 ## Writes the final image: alpha from [param coverage], colour un-blended and
 ## bled outwards as needed.
 func _compose(data: PackedByteArray, coverage: PackedFloat32Array, key_of: PackedInt32Array, keys: Array[Color], nearest: PackedInt32Array, width: int, height: int) -> Image:
+	var key_color := settings.key_color
+	var bleed_radius := settings.bleed_radius
+	var decontaminate := settings.decontaminate
+
 	var pixel_count := width * height
 	var out := PackedByteArray()
 	out.resize(pixel_count * 4)
@@ -453,7 +440,7 @@ func _compose(data: PackedByteArray, coverage: PackedFloat32Array, key_of: Packe
 ## [code]b[/code] is that value — a solid interior cannot be dragged off 1.0.
 func _guided_refine(coverage: PackedFloat32Array, guide: PackedFloat32Array, width: int, height: int) -> PackedFloat32Array:
 	var pixel_count := width * height
-	var radius := maxi(refine_radius, 1)
+	var radius := maxi(settings.refine_radius, 1)
 
 	var guide_squared := PackedFloat32Array()
 	guide_squared.resize(pixel_count)
@@ -532,6 +519,8 @@ func _box_mean(source: PackedFloat32Array, width: int, height: int, radius: int)
 ## same [code]a[/code], so their maximum does too. A euclidean or luminance
 ## distance would not survive being divided by a neighbour's distance.
 func _distance_map(data: PackedByteArray, pixel_count: int) -> PackedFloat32Array:
+	var key_color := settings.key_color
+
 	var dist := PackedFloat32Array()
 	dist.resize(pixel_count)
 	var to_unit := 1.0 / 255.0
@@ -572,7 +561,7 @@ func _color_at(data: PackedByteArray, index: int) -> Color:
 ##
 ## Two passes over one queue. The first claims the background itself — pixels
 ## within [member tolerance] of the colour keying their region, flood filled
-## inwards from the image border (plus any [member island_points]) when
+## inwards from the image border (plus any [member RemoveBackgroundSettings.islands]) when
 ## [member contiguous] is set, which is what keeps unpicked enclosed regions
 ## opaque. The second walks [member edge_width] steps further in from that
 ## background and calls what it touches the antialiased band, inheriting the key
@@ -583,8 +572,14 @@ func _color_at(data: PackedByteArray, index: int) -> Color:
 ## subject from a fully covered near-key one, but position can: real antialiasing
 ## only ever occurs in a thin band against the background.
 func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, width: int, height: int) -> Array:
+	var tolerance := settings.tolerance
+	var edge_width := settings.edge_width
+	var contiguous := settings.contiguous
+	var crevice_reach := settings.crevice_reach
+	var island_points := settings.islands.points
+
 	var pixel_count := width * height
-	var keys: Array[Color] = [key_color]
+	var keys: Array[Color] = [settings.key_color]
 	var mask := PackedByteArray()
 	mask.resize(pixel_count)
 	mask.fill(MASK_SUBJECT)
@@ -797,9 +792,9 @@ func _region_distance(data: PackedByteArray, key_dist: PackedFloat32Array, index
 ## is background left behind, never subject eaten.
 func _flood_step(data: PackedByteArray, key_dist: PackedFloat32Array, index: int, key_index: int, key: Color, from_weak: int) -> int:
 	var distance := _region_distance(data, key_dist, index, key_index, key)
-	if distance <= tolerance:
+	if distance <= _tolerance:
 		return 0
-	if crevice_reach > 0 and from_weak < crevice_reach and distance <= maxf(crevice_tolerance, tolerance):
+	if _crevice_reach > 0 and from_weak < _crevice_reach and distance <= maxf(_crevice_tolerance, _tolerance):
 		return from_weak + 1
 	return -1
 
@@ -818,6 +813,8 @@ func _flood_step(data: PackedByteArray, key_dist: PackedFloat32Array, index: int
 ## are deliberately not excluded here: a colour an island keys out in one place is
 ## legitimate subject material elsewhere in the image.
 func _nearest_subject_map(mask: PackedByteArray, key_dist: PackedFloat32Array, width: int, height: int, radius: int) -> PackedInt32Array:
+	var tolerance := settings.tolerance
+
 	var pixel_count := width * height
 	var nearest := PackedInt32Array()
 	nearest.resize(pixel_count)

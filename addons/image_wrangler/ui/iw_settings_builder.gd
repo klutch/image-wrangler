@@ -12,6 +12,10 @@ const IslandPicker := preload("res://addons/image_wrangler/ui/iw_island_picker.g
 ## Left indent applied to the contents of a named group.
 const GROUP_INDENT := 8
 
+## Marks a control with the setting it edits, so [method refresh_values] can find
+## it again without the builder having to keep a registry.
+const META_PROPERTY := &"iw_property"
+
 
 ## Replaces the contents of [param container] with controls for every setting
 ## [param operation] declares. [param on_changed] is called after each edit.
@@ -51,6 +55,7 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 			_:
 				control = _build_number(operation, property, label, setting, false, on_changed)
 
+		control.set_meta(META_PROPERTY, property)
 		control.tooltip_text = tooltip
 		target.add_child(control)
 
@@ -100,10 +105,16 @@ static func _build_island_picker(operation: IWOperation, property: StringName) -
 static func _build_bool(operation: IWOperation, property: StringName, label: String, on_changed: Callable) -> Control:
 	var check := CheckBox.new()
 	check.text = label
-	check.button_pressed = operation.get(property)
+	check.button_pressed = operation.get_settings().get(property)
+	# The lambda captures the operation, which is stable, and dereferences its
+	# settings when it fires. Capturing the settings Resource instead would bind
+	# the control to whichever image was selected when the form was built.
 	check.toggled.connect(
 		func(pressed: bool) -> void:
-			operation.set(property, pressed)
+			var settings := operation.get_settings()
+			if settings == null:
+				return
+			settings.set(property, pressed)
 			on_changed.call()
 	)
 	return check
@@ -116,11 +127,45 @@ static func _build_number(operation: IWOperation, property: StringName, label: S
 	slider.max_value = setting.get("max", 1.0)
 	slider.step = setting.get("step", 1.0 if is_int else 0.01)
 	slider.rounded = is_int
-	slider.value = operation.get(property)
+	slider.value = operation.get_settings().get(property)
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.value_changed.connect(
 		func(value: float) -> void:
-			operation.set(property, int(value) if is_int else value)
+			var settings := operation.get_settings()
+			if settings == null:
+				return
+			settings.set(property, int(value) if is_int else value)
 			on_changed.call()
 	)
 	return slider
+
+
+## Pushes the operation's current settings into the controls [method build]
+## created, without firing their change signals.
+##
+## Used when the settings Resource behind the form is swapped for another image.
+## Rebuilding instead would work, but it would destroy the island picker — losing
+## its highlighted row, which drives the emphasised marker — and reset the
+## settings form's scroll position on every click through the image list.
+static func refresh_values(operation: IWOperation, container: Node) -> void:
+	var settings := operation.get_settings()
+	if settings == null:
+		return
+	_refresh_into(settings, container)
+
+
+static func _refresh_into(settings: Resource, node: Node) -> void:
+	for child in node.get_children():
+		if child.has_meta(META_PROPERTY):
+			var property: StringName = child.get_meta(META_PROPERTY)
+			var value: Variant = settings.get(property)
+			if child is CheckBox:
+				(child as CheckBox).set_pressed_no_signal(bool(value))
+			elif child is Range:
+				(child as Range).set_value_no_signal(float(value))
+				# EditorSpinSlider paints its own value, and the no-signal setter
+				# deliberately skips the notification that would repaint it.
+				(child as Control).queue_redraw()
+			elif child is IslandPicker:
+				(child as IslandPicker).refresh()
+		_refresh_into(settings, child)
