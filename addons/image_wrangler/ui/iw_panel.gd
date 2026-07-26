@@ -88,6 +88,7 @@ var _zoom_select: OptionButton
 var _zoom_entry: LineEdit
 var _refresh_button: Button
 var _remove_button: Button
+var _clear_button: Button
 var _suffix_edit: LineEdit
 var _process_selected_button: Button
 var _process_all_button: Button
@@ -212,6 +213,12 @@ func _build_source_column() -> Control:
 	_remove_button.tooltip_text = "Remove the selected image from the list. The file is not touched."
 	_remove_button.pressed.connect(_on_remove_pressed)
 	header.add_child(_remove_button)
+
+	_clear_button = Button.new()
+	_clear_button.text = "Clear"
+	_clear_button.tooltip_text = "Remove every image from the list. The files are not touched."
+	_clear_button.pressed.connect(_on_clear_pressed)
+	header.add_child(_clear_button)
 
 	_file_list = ItemList.new()
 	_file_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -546,6 +553,27 @@ func _on_remove_pressed() -> void:
 		_clear_settings_context()
 		_set_status("No image selected.")
 		_detail_label.text = ""
+	_update_controls()
+
+
+## Empties the Images list. Like Remove, this only changes what the dock is
+## pointed at — nothing on disk is touched, and any sidecars stay where they are
+## to be picked up again if the same files are re-added.
+func _on_clear_pressed() -> void:
+	if _sources.is_empty():
+		return
+	# A pending write goes out before the entry it belongs to disappears.
+	_flush_autosave()
+	_sources = PackedStringArray()
+	_settings_by_path.clear()
+	_autosave_failures.clear()
+	_source_image = null
+	_result_image = null
+	_refresh_file_list()
+	_preview.set_image(null)
+	_clear_settings_context()
+	_set_status("No image selected.")
+	_detail_label.text = ""
 	_update_controls()
 
 
@@ -1000,6 +1028,7 @@ func _update_controls() -> void:
 	var has_selection := _selected_index() >= 0
 	var has_any := not _sources.is_empty()
 	_remove_button.disabled = not has_selection
+	_clear_button.disabled = not has_any
 	_refresh_button.disabled = _source_image == null
 	_process_selected_button.disabled = _source_image == null
 	_process_all_button.disabled = not has_any
