@@ -46,6 +46,11 @@ var _status_label: Label
 var _detail_label: Label
 var _operation_selector: OptionButton
 var _operation_description: Label
+var _key_color_row: HBoxContainer
+var _key_color_button: ColorPickerButton
+
+## Property the key-colour swatch writes to, or empty when the tool has none.
+var _key_color_property := &""
 var _settings_box: VBoxContainer
 var _show_original: CheckButton
 var _auto_preview: CheckButton
@@ -200,6 +205,23 @@ func _build_tool_column() -> Control:
 		_operation_selector.add_item(operation.get_operation_name())
 	_operation_selector.item_selected.connect(_select_operation)
 	column.add_child(_operation_selector)
+
+	# The colour a tool keys out sits right under the tool itself: it is what
+	# the tool is about, not a knob controlling how it works.
+	_key_color_row = HBoxContainer.new()
+	column.add_child(_key_color_row)
+
+	var key_color_label := Label.new()
+	key_color_label.text = "Remove Color"
+	_key_color_row.add_child(key_color_label)
+
+	_key_color_button = ColorPickerButton.new()
+	_key_color_button.edit_alpha = false
+	_key_color_button.custom_minimum_size = Vector2(0, 24)
+	_key_color_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_key_color_button.tooltip_text = "The background color to key out.\nThe picker's eyedropper can sample it off the screen."
+	_key_color_button.color_changed.connect(_on_key_color_changed)
+	_key_color_row.add_child(_key_color_button)
 
 	_operation_description = Label.new()
 	_operation_description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -442,6 +464,7 @@ func _select_operation(index: int) -> void:
 	_operation = _operations[index]
 	_operation_selector.selected = index
 	_operation_description.text = _operation.get_operation_description()
+	_bind_key_color()
 	SettingsBuilder.build(_operation, _settings_box, _on_setting_changed)
 	_bind_point_editor()
 
@@ -453,6 +476,22 @@ func _select_operation(index: int) -> void:
 	_result_image = null
 	if _auto_preview.button_pressed:
 		_schedule_preview()
+
+
+## Points the swatch at the current tool's key colour, hiding it for tools that
+## do not key one out.
+func _bind_key_color() -> void:
+	_key_color_property = _operation.get_key_color_property()
+	_key_color_row.visible = _key_color_property != &""
+	if _key_color_row.visible:
+		_key_color_button.color = _operation.get(_key_color_property)
+
+
+func _on_key_color_changed(color: Color) -> void:
+	if _operation == null or _key_color_property == &"":
+		return
+	_operation.set(_key_color_property, color)
+	_on_setting_changed()
 
 
 ## Hooks up the point-list control the settings builder just created, if the

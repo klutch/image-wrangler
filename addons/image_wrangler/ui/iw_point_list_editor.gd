@@ -24,13 +24,21 @@ signal selection_changed
 const SWATCH_SIZE := 14
 const LIST_MIN_HEIGHT := 96
 
+## Eyedropper artwork for the pick button. Loaded rather than preloaded so that a
+## missing or not-yet-imported file leaves a plain button instead of breaking the
+## addon at parse time.
+const PICK_ICON_PATH := "res://addons/image_wrangler/ui/color-picker.png"
+
+## Edge length the icon is resampled to, before editor DPI scaling.
+const PICK_ICON_SIZE := 16
+
 var _operation: IWOperation
 var _property: StringName
-var _validate := Callable()
 
 ## Supplied by the dock: maps a pixel to its colour in the image on screen.
 ## Swatches are sampled through this rather than stored, so they can never go
-## stale against whichever image is currently selected.
+## stale against whichever image is currently selected — and for the background
+## remover the swatch is not decoration, it is the colour that seed keys out.
 var _color_provider := Callable()
 
 var _base_label := ""
@@ -42,13 +50,10 @@ var _clear_button: Button
 var _hint: Label
 
 
-## Binds this control to [param property] on [param operation]. [param validate]
-## is optional; when valid it is called with each picked colour and may return a
-## warning to display.
-func setup(operation: IWOperation, property: StringName, label: String, validate: Callable) -> void:
+## Binds this control to [param property] on [param operation].
+func setup(operation: IWOperation, property: StringName, label: String) -> void:
 	_operation = operation
 	_property = property
-	_validate = validate
 	_base_label = label
 	_build()
 	_refresh()
@@ -95,11 +100,59 @@ func _build() -> void:
 
 
 func _notification(what: int) -> void:
-	# The editor theme is only reachable once the control is in the tree, so the
-	# eyedropper icon is applied here rather than during construction.
+	# The editor theme is only reachable once the control is in the tree, and the
+	# icon depends on it, so both are resolved here rather than at construction.
 	if what == NOTIFICATION_THEME_CHANGED and _pick_button != null:
-		if has_theme_icon(&"ColorPick", &"EditorIcons"):
-			_pick_button.icon = get_theme_icon(&"ColorPick", &"EditorIcons")
+		_apply_pick_icon()
+
+
+## Builds the pick button's icon for the theme currently in force.
+##
+## The artwork is two-tone line art — a dark outline with light interior detail —
+## so on a dark editor theme the outline would sink into the panel and leave a
+## shapeless blob. Inverting it there keeps the linework reading the same way
+## round in both themes. Tinting cannot do this job: modulation multiplies, so it
+## can darken the light parts but never lift the dark ones.
+func _apply_pick_icon() -> void:
+	var font_color := _pick_button.get_theme_color(&"font_color", &"Button")
+	var icon := _build_pick_icon(font_color.get_luminance() > 0.5)
+	if icon != null:
+		_pick_button.icon = icon
+	elif has_theme_icon(&"ColorPick", &"EditorIcons"):
+		# Only reachable before the editor has imported the PNG.
+		_pick_button.icon = get_theme_icon(&"ColorPick", &"EditorIcons")
+
+
+static func _build_pick_icon(invert: bool) -> Texture2D:
+	var source := load(PICK_ICON_PATH) as Texture2D
+	if source == null:
+		return null
+	var image := source.get_image()
+	if image == null:
+		return null
+
+	image = image.duplicate()
+	if image.is_compressed():
+		image.decompress()
+	if image.get_format() != Image.FORMAT_RGBA8:
+		image.convert(Image.FORMAT_RGBA8)
+
+	var edge := PICK_ICON_SIZE
+	if Engine.is_editor_hint():
+		edge = maxi(roundi(PICK_ICON_SIZE * EditorInterface.get_editor_scale()), 1)
+	if image.get_width() != edge or image.get_height() != edge:
+		image.resize(edge, edge, Image.INTERPOLATE_LANCZOS)
+
+	if invert:
+		# Alpha is left alone, so the silhouette is unchanged.
+		var data := image.get_data()
+		for i in range(0, data.size(), 4):
+			data[i] = 255 - data[i]
+			data[i + 1] = 255 - data[i + 1]
+			data[i + 2] = 255 - data[i + 2]
+		image = Image.create_from_data(edge, edge, false, Image.FORMAT_RGBA8, data)
+
+	return ImageTexture.create_from_image(image)
 
 
 ## Lets the dock supply the colour behind a pixel, for swatches and validation.
@@ -141,7 +194,7 @@ func add_point(point: Vector2i) -> void:
 	_operation.set(_property, points)
 	_refresh()
 	_select(points.size() - 1)
-	_hint.text = _warning_for(point)
+	_hint.text = ""
 	points_changed.emit()
 
 
@@ -163,12 +216,6 @@ func set_pick_active(enabled: bool) -> void:
 func _points() -> Array[Vector2i]:
 	var points: Array[Vector2i] = _operation.get(_property)
 	return points
-
-
-func _warning_for(point: Vector2i) -> String:
-	if not _validate.is_valid() or not _color_provider.is_valid():
-		return ""
-	return _validate.call(_color_provider.call(point))
 
 
 func _on_item_selected(_index: int) -> void:

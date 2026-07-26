@@ -2,12 +2,11 @@
 class_name IWBackgroundRemover
 extends IWOperation
 
-## Removes a flat background (pure white by default) while preserving the
-## antialiased silhouette.
+## Removes a flat background colour while preserving the antialiased silhouette.
 ##
-## Naively deleting every white pixel fails in one of two ways: a tight
-## threshold keeps the half-white edge pixels and leaves a white fringe, a loose
-## one eats the soft edge and leaves a jagged cutout. Neither is fixable by
+## Naively deleting every background-coloured pixel fails in one of two ways: a
+## tight threshold keeps the half-blended edge pixels and leaves a fringe, a
+## loose one eats the soft edge and leaves a jagged cutout. Neither is fixable by
 ## tuning the threshold, because the edge is not a mask — it is a matte.
 ##
 ## An antialiased pixel is a blend of the subject and the background:
@@ -22,53 +21,63 @@ extends IWOperation
 ## [code]a[/code], so a pixel's largest per-channel distance from [code]K[/code]
 ## is exactly [code]a[/code] times the subject's own distance from [code]K[/code].
 ## Divide one by the other and the unknown [code]F[/code] cancels out. The
-## divisor comes from the nearest fully opaque pixel, so the estimate stays
-## local and works whether the subject there is black or barely off-white.
+## divisor comes from the nearest fully opaque pixel, so the estimate stays local
+## and works whether the subject there is far from the key colour or barely off it.
 ##
-## [b]Finding the edge.[/b] Coverage alone cannot say whether a light grey pixel
-## is a half-covered dark subject or a fully covered light grey one — the two
-## are numerically identical. Colour thresholds cannot break that tie, so
+## [b]Finding the edge.[/b] Coverage alone cannot say whether a half-key-coloured
+## pixel is a half-covered distant subject or a fully covered near-key one — the
+## two are numerically identical. Colour thresholds cannot break that tie, so
 ## geometry does: antialiasing lives in a thin band hugging the background, so
 ## pixels are classified by their distance from the flood-filled background
-## rather than by how pale they are. See [method _classify].
+## rather than by how close to the key they are. See [method _classify].
+##
+## [b]More than one background colour.[/b] The image border floods with
+## [member key_color], but each picked seed in [member seed_points] floods with
+## the colour of the pixel it sits on, so an island of some other flat colour
+## keys out against itself. Every pixel therefore remembers which key claimed it,
+## and coverage and decontamination are both measured against that key rather
+## than a single global one.
 ##
 ## [b]Killing the fringe.[/b] Correct alpha is only half the job. The RGB of a
-## half-covered pixel is still half background, and that residue is what shows
-## up as a white outline once the image is composited. So the background is
-## un-blended back out:
+## half-covered pixel is still half background, and that residue is what shows up
+## as an outline once the image is composited. So the background is un-blended
+## back out:
 ## [codeblock]
 ##     F = (C - (1 - a) * K) / a
 ## [/codeblock]
-## Finally the subject colour is bled outwards into the fully transparent
-## pixels. Their alpha is zero, but bilinear filtering and mipmaps still sample
-## their RGB, which is how white creeps back into an edge that looked clean in
+## Finally the subject colour is bled outwards into the fully transparent pixels.
+## Their alpha is zero, but bilinear filtering and mipmaps still sample their
+## RGB, which is how the background creeps back into an edge that looked clean in
 ## the file.
 
-## Background colour to key out. Pure white is the default; the maths holds for
-## any flat colour.
+## Background colour keyed out from the image border inwards.
 var key_color: Color = Color.WHITE
 
-## How far a pixel may drift from [member key_color] and still count as pure
-## background.
+## How far a pixel may drift from the colour keying its region and still count as
+## pure background.
 var tolerance: float = 0.02
 
-## Width of the antialiased band, in pixels. Pixels within this many steps of
-## the background are treated as a soft edge and given partial alpha; anything
+## Width of the antialiased band, in pixels. Pixels within this many steps of the
+## background are treated as a soft edge and given partial alpha; anything
 ## further in is fully opaque subject.
 var edge_width: int = 2
 
-## Pulls the soft edge inwards. Useful when a source image was flattened onto
-## white twice and a faint halo survives.
+## Pulls the soft edge inwards. Useful when a source image was flattened onto the
+## background twice and a faint halo survives.
 var edge_contract: float = 0.0
 
-## Only remove background reachable from the image border, so white enclosed by
-## the subject (eyes, speech bubbles, specular highlights) stays opaque.
+## Only remove background reachable from the image border, so regions enclosed by
+## the subject (eyes, speech bubbles, specular highlights) stay opaque.
 var contiguous: bool = true
 
 ## Extra pixels to start the background flood fill from, on top of the image
 ## border. Lets the user hand-pick enclosed regions that [member contiguous]
-## deliberately skips. Ignored when [member contiguous] is off, since every
-## background-coloured pixel already qualifies then.
+## deliberately skips.
+##
+## Each seed keys out the colour of the pixel it lands on, sampled at process
+## time rather than stored, so a seed always removes exactly what was clicked and
+## can never disagree with the image. Ignored when [member contiguous] is off,
+## since every key-coloured pixel already qualifies then.
 ##
 ## These describe one particular image, so the dock swaps them per file rather
 ## than treating them as a setting shared across a batch. Points outside the
@@ -90,12 +99,12 @@ const MASK_SUBJECT := 2
 const _EPSILON := 0.0001
 
 ## Below this coverage the un-blend divides by such a small number that it
-## amplifies source noise into confetti, so its result is faded into the
-## nearest known subject colour instead.
+## amplifies source noise into confetti, so its result is faded into the nearest
+## known subject colour instead.
 const _DECONTAMINATE_FADE := 0.25
 
-## Minimum reach for the nearest-subject map. Coverage estimation needs a
-## couple of pixels of reach even when colour bleed is switched off.
+## Minimum reach for the nearest-subject map. Coverage estimation needs a couple
+## of pixels of reach even when colour bleed is switched off.
 const _MIN_SEARCH_RADIUS := 2
 
 
@@ -104,23 +113,27 @@ func get_operation_name() -> String:
 
 
 func get_operation_description() -> String:
-	return "Keys out a flat white background and rebuilds the antialiased edge."
+	return "Keys out a flat background color and rebuilds the antialiased edge."
 
 
 func get_output_suffix() -> String:
 	return "_nobg"
 
 
+func get_key_color_property() -> StringName:
+	return &"key_color"
+
+
 func get_settings_schema() -> Array[Dictionary]:
 	return [
 		{
 			"property": &"tolerance",
-			"label": "White Tolerance",
+			"label": "Color Tolerance",
 			"type": SettingType.FLOAT,
 			"min": 0.0,
 			"max": 0.5,
 			"step": 0.005,
-			"tooltip": "How far a pixel may drift from pure white and still count as background.\nRaise this if a re-compressed background leaves speckles behind.",
+			"tooltip": "How far a pixel may drift from the background color and still be keyed out.\nRaise this if a re-compressed background leaves speckles behind.",
 		},
 		{
 			"property": &"edge_width",
@@ -144,20 +157,19 @@ func get_settings_schema() -> Array[Dictionary]:
 			"property": &"contiguous",
 			"label": "Only Outer Background",
 			"type": SettingType.BOOL,
-			"tooltip": "Flood fill inwards from the image border, so white areas enclosed by the\nsubject (eyes, highlights, gaps in lettering) stay opaque.",
+			"tooltip": "Flood fill inwards from the image border, so regions enclosed by the\nsubject (eyes, highlights, gaps in lettering) stay opaque.",
 		},
 		{
 			"property": &"seed_points",
 			"label": "Picked Islands",
 			"type": SettingType.POINT_LIST,
-			"validate": _describe_seed,
-			"tooltip": "Enclosed regions to remove anyway, picked off the preview.\nEach one starts its own flood fill and gets the same antialiased edge\ntreatment as the outer background. Only applies while\n\"Only Outer Background\" is on.",
+			"tooltip": "Enclosed regions to remove anyway, picked off the preview.\nEach one keys out the color of the pixel you clicked, so an island need\nnot match the main background color. Only applies while\n\"Only Outer Background\" is on.",
 		},
 		{
 			"property": &"decontaminate",
-			"label": "Remove White Fringe",
+			"label": "Remove Color Fringe",
 			"type": SettingType.BOOL,
-			"tooltip": "Un-blends white out of partially transparent pixels.\nThis is what stops a white outline appearing once the image is composited.",
+			"tooltip": "Un-blends the background color out of partially transparent pixels.\nThis is what stops an outline appearing once the image is composited.",
 		},
 		{
 			"property": &"bleed_radius",
@@ -166,34 +178,16 @@ func get_settings_schema() -> Array[Dictionary]:
 			"min": 0,
 			"max": 64,
 			"step": 1,
-			"tooltip": "Pushes subject colour into fully transparent pixels, in pixels.\nTexture filtering and mipmaps sample RGB even where alpha is zero, so\nwithout this the background can bleed back into the edge on screen.",
+			"tooltip": "Pushes subject color into fully transparent pixels, in pixels.\nTexture filtering and mipmaps sample RGB even where alpha is zero, so\nwithout this the background can bleed back into the edge on screen.",
 		},
 	]
 
 
 ## Convenience entry point for code that just wants the default behaviour.
-static func remove_white_background(source: Image) -> Image:
-	return IWBackgroundRemover.new().process_image(source)
-
-
-## Warning to show for a picked seed colour, or an empty string when the pick
-## will actually do something. Wired into the settings schema so the dock can
-## explain a pick that quietly does nothing.
-func _describe_seed(color: Color) -> String:
-	if _color_distance(color) <= tolerance:
-		return ""
-	return "That pixel is too far from the background color to flood from. Raise White Tolerance, or pick a paler spot."
-
-
-## Distance metric from [method _distance_map], for one colour.
-##
-## The hot loop works straight off the byte array and cannot call this, so the
-## two must be kept in step: largest per-channel difference from the key colour.
-func _color_distance(color: Color) -> float:
-	return maxf(
-		absf(color.r - key_color.r),
-		maxf(absf(color.g - key_color.g), absf(color.b - key_color.b)),
-	)
+static func remove_background(source: Image, key := Color.WHITE) -> Image:
+	var operation := IWBackgroundRemover.new()
+	operation.key_color = key
+	return operation.process_image(source)
 
 
 func process_image(source: Image) -> Image:
@@ -211,17 +205,22 @@ func process_image(source: Image) -> Image:
 		return image
 
 	var data := image.get_data()
-	var dist := _distance_map(data, pixel_count)
-	var mask := _classify(dist, width, height)
+	# Distances against the tool's own key. Picked seeds bring their own colours
+	# and are measured on demand, but this covers the border flood, which is
+	# nearly every background pixel in a normal image.
+	var key_dist := _distance_map(data, pixel_count)
+
+	var classified := _classify(data, key_dist, width, height)
+	var mask: PackedByteArray = classified[0]
+	var key_of: PackedInt32Array = classified[1]
+	var keys: Array[Color] = classified[2]
+
 	var search_radius := maxi(maxi(bleed_radius, edge_width), _MIN_SEARCH_RADIUS)
-	var nearest := _nearest_subject_map(mask, dist, width, height, search_radius)
+	var nearest := _nearest_subject_map(mask, key_dist, width, height, search_radius)
 
 	var out := PackedByteArray()
 	out.resize(pixel_count * 4)
 	var to_unit := 1.0 / 255.0
-	var key_r := key_color.r
-	var key_g := key_color.g
-	var key_b := key_color.b
 	var contract_scale := 1.0 / maxf(1.0 - edge_contract, _EPSILON)
 
 	for i in pixel_count:
@@ -232,22 +231,27 @@ func process_image(source: Image) -> Image:
 		var source_alpha := data[offset + 3] * to_unit
 		var neighbour := nearest[i]
 		var coverage := 1.0
+		# Only meaningful for edge pixels, which are the only ones un-blended.
+		var pixel_key := key_color
 
 		if mask[i] == MASK_BACKGROUND:
 			coverage = 0.0
 		elif mask[i] == MASK_EDGE:
-			# Measure this pixel against the nearest opaque subject pixel. For a
-			# genuine antialiased edge that ratio *is* the pixel's coverage.
+			var k := key_of[i]
+			pixel_key = keys[k]
+			# Measure this pixel against the nearest opaque subject pixel, both
+			# through the key that claimed this region. For a genuine antialiased
+			# edge that ratio *is* the pixel's coverage.
+			var d := key_dist[i] if k == 0 else _distance_at(data, i, pixel_key)
 			var reference := 0.0
 			if neighbour >= 0:
-				reference = dist[neighbour]
+				reference = key_dist[neighbour] if k == 0 else _distance_at(data, neighbour, pixel_key)
 			else:
 				# Nothing opaque within reach: the band has swallowed a thin
 				# feature whole. Fall back to the strongest pixel nearby, which
 				# for a stroke is its own core, so it keeps its shape instead of
 				# being fattened to fully opaque.
-				reference = _local_maximum(dist, width, height, i, edge_width)
-			var d := dist[i]
+				reference = _local_maximum(data, width, height, i, edge_width, pixel_key)
 			if d > tolerance:
 				coverage = (d - tolerance) / maxf(reference - tolerance, _EPSILON)
 			else:
@@ -266,9 +270,9 @@ func process_image(source: Image) -> Image:
 		elif coverage < 1.0 and decontaminate:
 			var inverse := 1.0 / coverage
 			var rest := 1.0 - coverage
-			var pure_r := clampf((r - rest * key_r) * inverse, 0.0, 1.0)
-			var pure_g := clampf((g - rest * key_g) * inverse, 0.0, 1.0)
-			var pure_b := clampf((b - rest * key_b) * inverse, 0.0, 1.0)
+			var pure_r := clampf((r - rest * pixel_key.r) * inverse, 0.0, 1.0)
+			var pure_g := clampf((g - rest * pixel_key.g) * inverse, 0.0, 1.0)
+			var pure_b := clampf((b - rest * pixel_key.b) * inverse, 0.0, 1.0)
 			if coverage < _DECONTAMINATE_FADE and neighbour >= 0:
 				var weight := coverage / _DECONTAMINATE_FADE
 				var bleed_offset := neighbour * 4
@@ -310,27 +314,53 @@ func _distance_map(data: PackedByteArray, pixel_count: int) -> PackedFloat32Arra
 	return dist
 
 
-## Sorts every pixel into background, antialiased edge, or subject.
+## The same metric as [method _distance_map], for one pixel against any key.
+func _distance_at(data: PackedByteArray, index: int, key: Color) -> float:
+	var offset := index * 4
+	var to_unit := 1.0 / 255.0
+	return maxf(
+		absf(data[offset] * to_unit - key.r),
+		maxf(absf(data[offset + 1] * to_unit - key.g), absf(data[offset + 2] * to_unit - key.b)),
+	)
+
+
+func _color_at(data: PackedByteArray, index: int) -> Color:
+	var offset := index * 4
+	var to_unit := 1.0 / 255.0
+	return Color(data[offset] * to_unit, data[offset + 1] * to_unit, data[offset + 2] * to_unit)
+
+
+## Sorts every pixel into background, antialiased edge, or subject, and records
+## which background colour claimed it.
+##
+## Returns [code][mask, key_of, keys][/code]: the class per pixel, the index into
+## [code]keys[/code] that claimed it (-1 for subject), and the background colours
+## in play — the tool's own key first, then one per picked seed.
 ##
 ## Two passes over one queue. The first claims the background itself — pixels
-## within [member tolerance] of the key colour, flood filled inwards from the
-## image border (plus any [member seed_points]) when [member contiguous] is set,
-## which is what keeps unpicked enclosed white regions opaque. The second walks
-## [member edge_width] steps further in from that background and calls what it
-## touches the antialiased band.
+## within [member tolerance] of the colour keying their region, flood filled
+## inwards from the image border (plus any [member seed_points]) when
+## [member contiguous] is set, which is what keeps unpicked enclosed regions
+## opaque. The second walks [member edge_width] steps further in from that
+## background and calls what it touches the antialiased band, inheriting the key
+## it grew from.
 ##
 ## Classifying by distance-from-background rather than by colour is the whole
-## trick. A pixel's paleness genuinely cannot distinguish a half-covered dark
-## subject from a fully covered pale one, but position can: real antialiasing
+## trick. A pixel's colour genuinely cannot distinguish a half-covered distant
+## subject from a fully covered near-key one, but position can: real antialiasing
 ## only ever occurs in a thin band against the background.
-func _classify(dist: PackedFloat32Array, width: int, height: int) -> PackedByteArray:
+func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, width: int, height: int) -> Array:
 	var pixel_count := width * height
+	var keys: Array[Color] = [key_color]
 	var mask := PackedByteArray()
 	mask.resize(pixel_count)
 	mask.fill(MASK_SUBJECT)
+	var key_of := PackedInt32Array()
+	key_of.resize(pixel_count)
+	key_of.fill(-1)
 
-	# Each pixel is claimed at most once, so the queue can be sized up front
-	# and used as a plain FIFO with no wraparound.
+	# Each pixel is claimed at most once, so the queue can be sized up front and
+	# used as a plain FIFO with no wraparound.
 	var queue := PackedInt32Array()
 	queue.resize(pixel_count)
 	var head := 0
@@ -339,82 +369,101 @@ func _classify(dist: PackedFloat32Array, width: int, height: int) -> PackedByteA
 	if contiguous:
 		for x in width:
 			var top := x
-			if mask[top] != MASK_BACKGROUND and dist[top] <= tolerance:
+			if mask[top] != MASK_BACKGROUND and key_dist[top] <= tolerance:
 				mask[top] = MASK_BACKGROUND
+				key_of[top] = 0
 				queue[tail] = top
 				tail += 1
 			var bottom := (height - 1) * width + x
-			if mask[bottom] != MASK_BACKGROUND and dist[bottom] <= tolerance:
+			if mask[bottom] != MASK_BACKGROUND and key_dist[bottom] <= tolerance:
 				mask[bottom] = MASK_BACKGROUND
+				key_of[bottom] = 0
 				queue[tail] = bottom
 				tail += 1
 		for y in height:
 			var row_start := y * width
-			if mask[row_start] != MASK_BACKGROUND and dist[row_start] <= tolerance:
+			if mask[row_start] != MASK_BACKGROUND and key_dist[row_start] <= tolerance:
 				mask[row_start] = MASK_BACKGROUND
+				key_of[row_start] = 0
 				queue[tail] = row_start
 				tail += 1
 			var row_end := row_start + width - 1
-			if mask[row_end] != MASK_BACKGROUND and dist[row_end] <= tolerance:
+			if mask[row_end] != MASK_BACKGROUND and key_dist[row_end] <= tolerance:
 				mask[row_end] = MASK_BACKGROUND
+				key_of[row_end] = 0
 				queue[tail] = row_end
 				tail += 1
 
-		# Hand-picked islands join the same queue as the border, so a region the
-		# user pointed at is flooded and matted exactly like the outer
-		# background instead of being stamped out as a hard-edged hole.
+		# Hand-picked islands join the same queue as the border, each carrying
+		# the colour of the pixel it landed on. A seed always takes, since its
+		# key is that pixel's own colour — the user pointed at what to remove.
+		# One already swallowed by the border flood adds nothing, so it is
+		# skipped rather than duplicating a key.
 		for point in seed_points:
 			if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
 				continue
 			var seed_index := point.y * width + point.x
-			if mask[seed_index] != MASK_BACKGROUND and dist[seed_index] <= tolerance:
-				mask[seed_index] = MASK_BACKGROUND
-				queue[tail] = seed_index
-				tail += 1
+			if mask[seed_index] == MASK_BACKGROUND:
+				continue
+			keys.append(_color_at(data, seed_index))
+			mask[seed_index] = MASK_BACKGROUND
+			key_of[seed_index] = keys.size() - 1
+			queue[tail] = seed_index
+			tail += 1
 
 		# 4-connected on purpose: 8-connectivity leaks through diagonal
 		# hairlines in thin subjects such as lettering or wire-frame art.
 		while head < tail:
 			var index := queue[head]
 			head += 1
+			var claimed_by := key_of[index]
+			var key: Color = keys[claimed_by]
 			var x := index % width
 			@warning_ignore("integer_division")
 			var y := index / width
 			if x > 0:
 				var left := index - 1
-				if mask[left] != MASK_BACKGROUND and dist[left] <= tolerance:
+				if mask[left] != MASK_BACKGROUND and _region_distance(data, key_dist, left, claimed_by, key) <= tolerance:
 					mask[left] = MASK_BACKGROUND
+					key_of[left] = claimed_by
 					queue[tail] = left
 					tail += 1
 			if x < width - 1:
 				var right := index + 1
-				if mask[right] != MASK_BACKGROUND and dist[right] <= tolerance:
+				if mask[right] != MASK_BACKGROUND and _region_distance(data, key_dist, right, claimed_by, key) <= tolerance:
 					mask[right] = MASK_BACKGROUND
+					key_of[right] = claimed_by
 					queue[tail] = right
 					tail += 1
 			if y > 0:
 				var up := index - width
-				if mask[up] != MASK_BACKGROUND and dist[up] <= tolerance:
+				if mask[up] != MASK_BACKGROUND and _region_distance(data, key_dist, up, claimed_by, key) <= tolerance:
 					mask[up] = MASK_BACKGROUND
+					key_of[up] = claimed_by
 					queue[tail] = up
 					tail += 1
 			if y < height - 1:
 				var down := index + width
-				if mask[down] != MASK_BACKGROUND and dist[down] <= tolerance:
+				if mask[down] != MASK_BACKGROUND and _region_distance(data, key_dist, down, claimed_by, key) <= tolerance:
 					mask[down] = MASK_BACKGROUND
+					key_of[down] = claimed_by
 					queue[tail] = down
 					tail += 1
 	else:
+		# Without contiguity there is nothing to flood from, so picked seeds have
+		# no meaning: every key-coloured pixel already qualifies.
 		for i in pixel_count:
-			if dist[i] <= tolerance:
+			if key_dist[i] <= tolerance:
 				mask[i] = MASK_BACKGROUND
+				key_of[i] = 0
 				queue[tail] = i
 				tail += 1
 
 	# Second pass: grow the edge band inwards from the background. The queue
-	# still holds every background pixel, so rewinding the head walks outwards
-	# in lock-step and depth stays correct. Pixels within tolerance are skipped
-	# so enclosed white keeps its full alpha rather than gaining a torn rim.
+	# still holds every background pixel, so rewinding the head walks outwards in
+	# lock-step and depth stays correct. Pixels within tolerance of the inherited
+	# key are skipped so an unpicked enclosed region keeps its full alpha rather
+	# than gaining a torn rim.
 	var depth := PackedInt32Array()
 	depth.resize(pixel_count)
 	head = 0
@@ -424,51 +473,67 @@ func _classify(dist: PackedFloat32Array, width: int, height: int) -> PackedByteA
 		var step := depth[index] + 1
 		if step > edge_width:
 			continue
+		var claimed_by := key_of[index]
+		var key: Color = keys[claimed_by]
 		var x := index % width
 		@warning_ignore("integer_division")
 		var y := index / width
 		if x > 0:
 			var left := index - 1
-			if mask[left] == MASK_SUBJECT and dist[left] > tolerance:
+			if mask[left] == MASK_SUBJECT and _region_distance(data, key_dist, left, claimed_by, key) > tolerance:
 				mask[left] = MASK_EDGE
+				key_of[left] = claimed_by
 				depth[left] = step
 				queue[tail] = left
 				tail += 1
 		if x < width - 1:
 			var right := index + 1
-			if mask[right] == MASK_SUBJECT and dist[right] > tolerance:
+			if mask[right] == MASK_SUBJECT and _region_distance(data, key_dist, right, claimed_by, key) > tolerance:
 				mask[right] = MASK_EDGE
+				key_of[right] = claimed_by
 				depth[right] = step
 				queue[tail] = right
 				tail += 1
 		if y > 0:
 			var up := index - width
-			if mask[up] == MASK_SUBJECT and dist[up] > tolerance:
+			if mask[up] == MASK_SUBJECT and _region_distance(data, key_dist, up, claimed_by, key) > tolerance:
 				mask[up] = MASK_EDGE
+				key_of[up] = claimed_by
 				depth[up] = step
 				queue[tail] = up
 				tail += 1
 		if y < height - 1:
 			var down := index + width
-			if mask[down] == MASK_SUBJECT and dist[down] > tolerance:
+			if mask[down] == MASK_SUBJECT and _region_distance(data, key_dist, down, claimed_by, key) > tolerance:
 				mask[down] = MASK_EDGE
+				key_of[down] = claimed_by
 				depth[down] = step
 				queue[tail] = down
 				tail += 1
 
-	return mask
+	return [mask, key_of, keys]
+
+
+## Distance from a pixel to the key of the region claiming it, taking the
+## precomputed map for the tool's own key and measuring the rest on demand.
+func _region_distance(data: PackedByteArray, key_dist: PackedFloat32Array, index: int, key_index: int, key: Color) -> float:
+	return key_dist[index] if key_index == 0 else _distance_at(data, index, key)
 
 
 ## For every pixel, the index of the closest opaque subject pixel, or -1 if none
 ## lies within [param radius].
 ##
-## A grassfire expansion seeded from all subject pixels at once, so the whole
-## map costs one pass over the image rather than a windowed search per edge
-## pixel. It feeds both the coverage estimate (as the reference distance) and
-## the colour bleed (as the replacement RGB). Enclosed background pixels are
-## excluded as seeds — they are opaque, but keying off their colour would hand
-## edge pixels the very background colour we are trying to remove.
-func _nearest_subject_map(mask: PackedByteArray, dist: PackedFloat32Array, width: int, height: int, radius: int) -> PackedInt32Array:
+## A grassfire expansion seeded from all subject pixels at once, so the whole map
+## costs one pass over the image rather than a windowed search per edge pixel. It
+## feeds both the coverage estimate (as the reference distance) and the colour
+## bleed (as the replacement RGB).
+##
+## Subject pixels that look like the tool's own background colour are excluded as
+## seeds — an unpicked enclosed region is opaque, but keying off its colour would
+## hand edge pixels the very background we are trying to remove. Seed keys are
+## deliberately not excluded here: a colour a seed keys out in one place is
+## legitimate subject material elsewhere in the image.
+func _nearest_subject_map(mask: PackedByteArray, key_dist: PackedFloat32Array, width: int, height: int, radius: int) -> PackedInt32Array:
 	var pixel_count := width * height
 	var nearest := PackedInt32Array()
 	nearest.resize(pixel_count)
@@ -481,7 +546,7 @@ func _nearest_subject_map(mask: PackedByteArray, dist: PackedFloat32Array, width
 	var tail := 0
 
 	for i in pixel_count:
-		if mask[i] == MASK_SUBJECT and dist[i] > tolerance:
+		if mask[i] == MASK_SUBJECT and key_dist[i] > tolerance:
 			nearest[i] = i
 			queue[tail] = i
 			tail += 1
@@ -528,11 +593,11 @@ func _nearest_subject_map(mask: PackedByteArray, dist: PackedFloat32Array, width
 	return nearest
 
 
-## Highest distance-from-background within [param radius] of [param index].
+## Highest distance from [param key] within [param radius] of [param index].
 ##
 ## Only reached for edge pixels that have no opaque subject nearby, which means
 ## thin features, so the windowed search stays rare.
-func _local_maximum(dist: PackedFloat32Array, width: int, height: int, index: int, radius: int) -> float:
+func _local_maximum(data: PackedByteArray, width: int, height: int, index: int, radius: int, key: Color) -> float:
 	var center_x := index % width
 	@warning_ignore("integer_division")
 	var center_y := index / width
@@ -540,11 +605,11 @@ func _local_maximum(dist: PackedFloat32Array, width: int, height: int, index: in
 	var max_x := mini(center_x + radius, width - 1)
 	var min_y := maxi(center_y - radius, 0)
 	var max_y := mini(center_y + radius, height - 1)
-	var best := dist[index]
+	var best := _distance_at(data, index, key)
 	for y in range(min_y, max_y + 1):
 		var row := y * width
 		for x in range(min_x, max_x + 1):
-			var value := dist[row + x]
+			var value := _distance_at(data, row + x, key)
 			if value > best:
 				best = value
 	return best

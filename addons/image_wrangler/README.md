@@ -16,18 +16,23 @@ exactly what happened to the edge pixels.
 
 ## Remove Background
 
-Keys out a flat white background while rebuilding the antialiased silhouette.
+Keys out a flat background colour while rebuilding the antialiased silhouette.
 
-The problem with deleting white pixels is that the pixels along the edge are not
-white *or* subject — they are a blend of both, produced by the antialiasing that
-drew the image in the first place. Delete them and the cutout goes jagged; keep
-them and you get a white fringe that only shows up later, once the image is
-composited over something dark.
+Set the colour with the **Remove Color** swatch under the tool dropdown. It
+defaults to white; the picker's eyedropper can sample one off the screen. The
+maths is colour-agnostic, so a green screen or a flat blue plate works exactly as
+well as white.
 
-So instead of asking "is this pixel background?", the tool asks "how much of
-this pixel is subject?" and writes the answer to the alpha channel. It then
-un-blends the white back out of the RGB, because a half-transparent pixel that
-is still half white will read as a halo no matter how correct its alpha is.
+The problem with deleting background-coloured pixels is that the pixels along the
+edge are not background *or* subject — they are a blend of both, produced by the
+antialiasing that drew the image in the first place. Delete them and the cutout
+goes jagged; keep them and you get a fringe that only shows up later, once the
+image is composited over something else.
+
+So instead of asking "is this pixel background?", the tool asks "how much of this
+pixel is subject?" and writes the answer to the alpha channel. It then un-blends
+the background back out of the RGB, because a half-transparent pixel that is
+still half background will read as a halo no matter how correct its alpha is.
 Finally it bleeds subject colour outwards into the fully transparent pixels,
 since bilinear filtering and mipmaps sample RGB even where alpha is zero.
 
@@ -38,25 +43,35 @@ The full derivation is in the header comment of
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| White Tolerance | 0.02 | How far a pixel may drift from pure white and still count as background. Raise it if a re-compressed background leaves speckles behind. |
+| Remove Color | white | The background colour to key out. Sits under the tool dropdown, not in this list, because it is what the tool is *about*. |
+| Color Tolerance | 0.02 | How far a pixel may drift from the background colour and still be keyed out. Raise it if a re-compressed background leaves speckles behind. |
 | Edge Width | 2 | How many pixels of antialiasing to rebuild. 2 suits ordinary antialiasing; raise it for soft edges, glows and drop shadows; 0 gives a hard cutout. |
-| Edge Contract | 0.0 | Pulls the soft edge inwards. Only needed if a faint halo survives, usually because the source was flattened onto white twice. |
-| Only Outer Background | on | Flood fills from the image border, so white enclosed by the subject — eyes, highlights, the holes in an "o" — stays opaque. |
+| Edge Contract | 0.0 | Pulls the soft edge inwards. Only needed if a faint halo survives, usually because the source was flattened onto the background twice. |
+| Only Outer Background | on | Flood fills from the image border, so background-coloured regions enclosed by the subject — eyes, highlights, the holes in an "o" — stay opaque. |
 | Picked Islands | empty | Enclosed regions to remove anyway, picked off the preview. Held per image. See below. |
-| Remove White Fringe | on | Un-blends white out of partially transparent pixels. This is the setting that actually kills the halo. |
-| Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging white back in. |
+| Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
+| Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
 
 ### Picking islands
 
-**Only Outer Background** is deliberately conservative — it keeps every white
-region the subject encloses, because it cannot tell an eye highlight from a gap
-you wanted gone. **Picked Islands** is the manual override.
+**Only Outer Background** is deliberately conservative — it keeps every enclosed
+region, because it cannot tell an eye highlight from a gap you wanted gone.
+**Picked Islands** is the manual override.
 
 Hit **Pick** in the settings panel, then click any enclosed region in the
-preview. It's added to the list as `(x, y)` with a swatch of the colour you
-clicked, marked with a ring on the preview, and removed on the next pass.
-Highlight a row to see which marker it is; **Remove** and **Clear** take entries
-back out.
+preview. It's added to the list as `(x, y)`, marked with a ring on the preview,
+and removed on the next pass. Highlight a row to see which marker it is;
+**Remove** and **Clear** take entries back out.
+
+**Each island keys out its own colour** — the colour of the pixel you clicked,
+shown as the swatch on its row. So an island need not match **Remove Color**: a
+white plate with a red panel inside the subject takes two picks and no fiddling
+with tolerance. The colour is sampled from the image at process time rather than
+stored, so a swatch can never disagree with what it will actually remove.
+
+One consequence: clicking the subject by mistake keys out *that* colour and eats
+part of the subject. The preview shows it at once, and removing the row undoes
+it.
 
 **The list belongs to the image, not to the tool.** Its header names the image
 it's showing — `Picked Islands: logo.png` — and switching selection swaps the
@@ -68,22 +83,23 @@ disk.
 
 A picked point is not a hole punch — it seeds the same flood fill the image
 border does, so the region's rim gets the identical antialiasing treatment as
-the outer silhouette. On a test island with a known soft rim, the worst fringe
-after compositing over black was 0.012, against 0.970 for a hard-edged cut.
+the outer silhouette. On a test island of a different colour to the main
+background, the worst fringe after compositing over black was 0.013, against
+0.691 for a hard-edged cut.
 
-Notes:
-
-- Clicking a pixel that isn't background-coloured does nothing, and the panel
-  says so. Raise **White Tolerance** or click a paler spot.
-- Entries are irrelevant while **Only Outer Background** is off, since every
-  background-coloured pixel already qualifies then.
+Entries are irrelevant while **Only Outer Background** is off, since every
+background-coloured pixel already qualifies then. Click the middle of a region
+rather than its edge: an antialiased pixel is a blend, so keying off one keys off
+the blend rather than the region's true colour.
 
 ### Accuracy
 
-Measured against analytically antialiased test shapes composited onto white,
-where the true coverage of every pixel is known. Error is the mean per-channel
-difference from ground truth after compositing the result over black — the
-arrangement that makes any white fringe obvious.
+Measured against analytically antialiased test shapes, where the true coverage of
+every pixel is known. Error is the mean per-channel difference from ground truth
+after compositing the result over black — the arrangement that makes any fringe
+obvious.
+
+Against a white background, by subject colour:
 
 | Subject | Naive threshold cutout | This tool |
 | --- | --- | --- |
@@ -92,12 +108,22 @@ arrangement that makes any white fringe obvious.
 | Mid grey | 0.417 | 0.014 |
 | Near-white (0.88, 0.90, 0.82) | 0.364 | 0.050 |
 
+Across background colours, mean alpha error on the soft edge:
+
+| Background | Alpha error | Fringe |
+| --- | --- | --- |
+| White | 0.009 | 0.009 |
+| Blue (0.15, 0.35, 0.85) | 0.010 | 0.009 |
+| Green screen (0, 1, 0) | 0.010 | 0.010 |
+| Mid grey | 0.017 | 0.007 |
+| Black | 0.008 | 0.009 |
+
 Fully opaque interiors stay at alpha 255 and background stays at alpha 0 in
 every case; the error above is entirely in the soft edge.
 
 ### Known limits
 
-- A subject that is genuinely white where it meets the background cannot be
+- A subject the same colour as the background where the two meet cannot be
   separated from it. That is missing information, not a tuning problem.
 - A feature only one pixel wide is ambiguous — a 50%-covered black line and a
   fully opaque grey line are the same pixels. Such features are kept opaque
@@ -112,10 +138,12 @@ Subclass `IWOperation` in `core/`, override `get_operation_name()`,
 `OPERATION_SCRIPTS` in `ui/iw_panel.gd`. The dock builds the settings form from
 the schema, so there is no UI work.
 
-Setting types are `BOOL`, `INT`, `FLOAT` and `POINT_LIST`. The last one gives
-you the pick-off-the-preview list described above for any `Array[Vector2i]`
-property; add an optional `"validate"` key holding a `Callable(Color) -> String`
-to warn about picks that would do nothing.
+Setting types are `BOOL`, `INT`, `FLOAT` and `POINT_LIST`. The last one gives you
+the pick-off-the-preview list described above for any `Array[Vector2i]` property.
+
+Override `get_key_color_property()` to return the name of a `Color` property and
+the dock gives it a swatch under the tool dropdown instead of a row in the
+settings form.
 
 ```gdscript
 @tool

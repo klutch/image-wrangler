@@ -15,9 +15,7 @@ enum SettingType {
 	INT,
 	FLOAT,
 	## A list of pixel coordinates the user picks off the preview. The property
-	## must be an [code]Array[Vector2i][/code]. Entries may carry an optional
-	## [code]validate[/code] key: a [Callable] taking the picked [Color] and
-	## returning a warning to show, or an empty string when the pick is sound.
+	## must be an [code]Array[Vector2i][/code].
 	POINT_LIST,
 }
 
@@ -35,6 +33,16 @@ func get_operation_description() -> String:
 ## Appended to the source file name when writing the processed image.
 func get_output_suffix() -> String:
 	return "_out"
+
+
+## Name of a [Color] property that is this tool's primary input, or an empty
+## name when it has none.
+##
+## The dock gives it a swatch directly under the tool picker instead of burying
+## it in the settings form, since it is the thing the tool is *about* rather than
+## a parameter of how it works.
+func get_key_color_property() -> StringName:
+	return &""
 
 
 ## Describes the editable settings, in display order.

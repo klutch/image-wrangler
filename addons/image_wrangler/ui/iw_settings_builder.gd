@@ -34,7 +34,7 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 			IWOperation.SettingType.INT:
 				control = _build_number(operation, property, label, setting, true, on_changed)
 			IWOperation.SettingType.POINT_LIST:
-				control = _build_point_list(operation, property, label, setting)
+				control = _build_point_list(operation, property, label)
 			_:
 				control = _build_number(operation, property, label, setting, false, on_changed)
 
@@ -57,10 +57,10 @@ static func _build_bool(operation: IWOperation, property: StringName, label: Str
 ## Point lists are deliberately not wired to [param on_changed] here. Picking
 ## needs the preview, which only the dock can reach, so it connects the editor's
 ## signals itself and re-runs the operation from there.
-static func _build_point_list(operation: IWOperation, property: StringName, label: String, setting: Dictionary) -> Control:
+static func _build_point_list(operation: IWOperation, property: StringName, label: String) -> Control:
 	var editor := PointListEditor.new()
 	editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	editor.setup(operation, property, label, setting.get("validate", Callable()))
+	editor.setup(operation, property, label)
 	return editor
 
 
