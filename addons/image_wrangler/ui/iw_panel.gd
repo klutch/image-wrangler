@@ -1142,16 +1142,22 @@ func _verify_then_remove_sources() -> void:
 
 	var removed := 0
 	var failures := PackedStringArray()
+	# Only the ones that actually went get re-pointed below, so a file that
+	# refused to move keeps its entry rather than being sent somewhere it isn't.
+	var moved := {}
 	for source: String in candidates:
 		# Trash rather than unlink: the copy is verified, but the judgement that
 		# the original is no longer wanted is the user's to reverse.
 		if OS.move_to_trash(ProjectSettings.globalize_path(source)) == OK:
 			removed += 1
+			moved[source] = candidates[source]
 		else:
 			failures.append(source.get_file())
 
+	_repoint_sources(moved)
+
 	if failures.is_empty():
-		_set_status("Removed %d original(s) to the trash." % removed)
+		_set_status("Removed %d original(s) to the trash; the Images list now points at the new files." % removed)
 	else:
 		_set_status("Removed %d original(s); %d could not be removed: %s" % [
 			removed, failures.size(), ", ".join(failures),
@@ -1160,6 +1166,50 @@ func _verify_then_remove_sources() -> void:
 
 	if Engine.is_editor_hint():
 		EditorInterface.get_resource_filesystem().scan()
+
+
+## Points the Images list at the files that replaced the ones just removed.
+##
+## Only reached when originals were actually deleted, which is the only time an
+## entry goes stale — a rename that left its sources alone has nothing to fix.
+## Left unrepointed, selecting one of those rows would fail to load and a second
+## run would skip it.
+func _repoint_sources(moved: Dictionary) -> void:
+	if moved.is_empty():
+		return
+
+	# Tracked by path rather than index, because the rebuild below can drop a row.
+	var selected := _current_path()
+	var rebuilt := PackedStringArray()
+	for source in _sources:
+		var path: String = moved[source] if moved.has(source) else source
+		# A destination already in the list would otherwise appear twice.
+		if not rebuilt.has(path):
+			rebuilt.append(path)
+		if source == selected:
+			selected = path
+	_sources = rebuilt
+
+	# Per-image settings describe the image, so they follow it to its new path.
+	# The old sidecar is left where it is, beside a file now in the trash.
+	for source: String in moved:
+		if not _settings_by_path.has(source):
+			continue
+		_settings_by_path[moved[source]] = _settings_by_path[source]
+		_settings_by_path.erase(source)
+
+	# A pending write against the old path would resolve to nothing now.
+	if moved.has(_autosave_path):
+		_autosave_path = moved[_autosave_path]
+
+	_refresh_file_list()
+	var index := _sources.find(selected)
+	if index >= 0:
+		_file_list.select(index)
+		# Reloads the image from its new path, so the preview is not left showing
+		# a file that no longer exists.
+		_on_file_selected(index)
+	_update_controls()
 
 
 ## Output file name for a source, which the operation decides: a rename has a

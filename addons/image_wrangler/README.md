@@ -359,6 +359,14 @@ deletion:
 A source that failed to copy is never a candidate, and neither is one whose
 destination is itself.
 
+Once the originals are gone, the **Images** list re-points at the files that
+replaced them — keeping its order, its selection, and each image's settings — so
+the rows are not left aiming at files in the trash. Only entries whose original
+actually moved are touched; a rename that left its sources alone changes nothing,
+because nothing went stale. Each image's `.json` sidecar is *not* moved with it:
+the old one stays where it was, and editing a setting writes a fresh one beside
+the new file.
+
 ## Adding an operation
 
 Write two classes in `core/`: a `Resource` holding the tunables as `@export`
