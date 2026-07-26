@@ -32,6 +32,14 @@ const PICK_ICON_PATH := "res://addons/image_wrangler/ui/color-picker.png"
 ## Edge length the icon is resampled to, before editor DPI scaling.
 const PICK_ICON_SIZE := 16
 
+## Longest file name shown in the title before it is elided from the middle.
+##
+## Generous on purpose: the label reports a minimum width of one pixel either
+## way, so this only decides how much is shown when there is room. Too tight a
+## limit eats the index in names like [code]sheet__0002_[Generated]-...[/code],
+## which is the one part that tells a batch of exports apart.
+const CONTEXT_MAX_CHARS := 40
+
 var _operation: IWOperation
 var _property: StringName
 
@@ -169,8 +177,25 @@ func set_color_provider(provider: Callable) -> void:
 ## Names what the list currently belongs to, so it is obvious the entries are
 ## scoped to one image rather than to the tool.
 func set_context_label(context: String) -> void:
-	_title.text = _base_label if context.is_empty() else "%s: %s" % [_base_label, context]
-	_title.tooltip_text = _title.text
+	if context.is_empty():
+		_title.text = _base_label
+		_title.tooltip_text = ""
+		return
+	_title.text = "%s: %s" % [_base_label, _elide_middle(context, CONTEXT_MAX_CHARS)]
+	_title.tooltip_text = context
+
+
+## Shortens a long name from the middle, keeping both ends.
+##
+## Generated file names tend to share a long descriptive tail, so trimming only
+## the end — which is all the label's own ellipsis can do — throws away the part
+## that actually distinguishes them, and the extension with it.
+static func _elide_middle(text: String, limit: int) -> String:
+	if text.length() <= limit:
+		return text
+	var head := floori((limit - 1) * 0.5)
+	var tail := limit - 1 - head
+	return "%s…%s" % [text.substr(0, head), text.substr(text.length() - tail)]
 
 
 ## Replaces the whole list and redraws it. Used when the selection changes.
