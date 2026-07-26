@@ -255,43 +255,59 @@ func _relayout() -> void:
 	_viewport.x = maxf(_viewport.x, 0.0)
 	_viewport.y = maxf(_viewport.y, 0.0)
 
-	_scroll.x = clampf(_scroll.x, 0.0, maxf(_content_size.x - _viewport.x, 0.0))
-	_scroll.y = clampf(_scroll.y, 0.0, maxf(_content_size.y - _viewport.y, 0.0))
+	# One rule governs how far the image may be dragged, whether it fits or
+	# overflows: it stops once only MIN_VISIBLE pixels of it are left on screen.
+	# For an overflowing axis that means the scroll range runs past both edges,
+	# so the image can be pulled clear of them rather than sticking.
+	var keep := Vector2(
+		minf(MIN_VISIBLE, minf(_content_size.x, _viewport.x)),
+		minf(MIN_VISIBLE, minf(_content_size.y, _viewport.y)),
+	)
+	var scroll_min := Vector2(keep.x - _viewport.x, keep.y - _viewport.y)
+	var scroll_max := Vector2(_content_size.x - keep.x, _content_size.y - keep.y)
 
 	# Centred plus however far it has been dragged when it fits, scrolled when it
 	# does not. Floored so the image lands on whole pixels and nearest sampling
 	# stays exact.
 	if _content_size.x <= _viewport.x:
+		# Scroll means nothing on this axis; the offset carries the drag.
+		_scroll.x = 0.0
 		var limit_x := _pan_limit(_content_size.x, _viewport.x)
 		_pan_offset.x = clampf(_pan_offset.x, -limit_x, limit_x)
 		_content_origin.x = floorf((_viewport.x - _content_size.x) * 0.5 + _pan_offset.x)
 	else:
+		_scroll.x = clampf(_scroll.x, scroll_min.x, scroll_max.x)
 		_content_origin.x = -_scroll.x
 	if _content_size.y <= _viewport.y:
+		_scroll.y = 0.0
 		var limit_y := _pan_limit(_content_size.y, _viewport.y)
 		_pan_offset.y = clampf(_pan_offset.y, -limit_y, limit_y)
 		_content_origin.y = floorf((_viewport.y - _content_size.y) * 0.5 + _pan_offset.y)
 	else:
+		_scroll.y = clampf(_scroll.y, scroll_min.y, scroll_max.y)
 		_content_origin.y = -_scroll.y
 
 	_canvas.position = Vector2.ZERO
 	_canvas.size = _viewport
 
 	_syncing_bars = true
+	# A Range clamps its value to [min_value, max_value - page], so the bars have
+	# to span the overscroll too. Left at the plain content extent they would
+	# clamp the value back on every sync and fight the drag.
 	_h_scroll.visible = show_h
 	if show_h:
 		_h_scroll.position = Vector2(0.0, size.y - bar_height)
 		_h_scroll.size = Vector2(_viewport.x, bar_height)
-		_h_scroll.min_value = 0.0
-		_h_scroll.max_value = _content_size.x
+		_h_scroll.min_value = scroll_min.x
+		_h_scroll.max_value = scroll_max.x + _viewport.x
 		_h_scroll.page = _viewport.x
 		_h_scroll.value = _scroll.x
 	_v_scroll.visible = show_v
 	if show_v:
 		_v_scroll.position = Vector2(size.x - bar_width, 0.0)
 		_v_scroll.size = Vector2(bar_width, _viewport.y)
-		_v_scroll.min_value = 0.0
-		_v_scroll.max_value = _content_size.y
+		_v_scroll.min_value = scroll_min.y
+		_v_scroll.max_value = scroll_max.y + _viewport.y
 		_v_scroll.page = _viewport.y
 		_v_scroll.value = _scroll.y
 	_syncing_bars = false
