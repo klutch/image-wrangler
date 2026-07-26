@@ -62,10 +62,6 @@ var tolerance: float = 0.02
 ## further in is fully opaque subject.
 var edge_width: int = 2
 
-## Pulls the soft edge inwards. Useful when a source image was flattened onto the
-## background twice and a faint halo survives.
-var edge_contract: float = 0.0
-
 ## Only remove background reachable from the image border, so regions enclosed by
 ## the subject (eyes, speech bubbles, specular highlights) stay opaque.
 var contiguous: bool = true
@@ -191,16 +187,6 @@ func get_settings_schema() -> Array[Dictionary]:
 			"max": 16,
 			"step": 1,
 			"tooltip": "How many pixels of antialiasing to rebuild around the subject.\n2 suits ordinary antialiasing. Raise it for soft edges, glows or\ndrop shadows; set it to 0 for a hard-edged cutout.",
-		},
-		{
-			"property": &"edge_contract",
-			"label": "Edge Contract",
-			"group": "Settings",
-			"type": SettingType.FLOAT,
-			"min": 0.0,
-			"max": 0.9,
-			"step": 0.01,
-			"tooltip": "Pulls the soft edge inwards. Leave at zero unless a faint halo survives.",
 		},
 		{
 			"property": &"contiguous",
@@ -358,7 +344,6 @@ func _coverage_map(data: PackedByteArray, key_dist: PackedFloat32Array, mask: Pa
 	var pixel_count := width * height
 	var coverage := PackedFloat32Array()
 	coverage.resize(pixel_count)
-	var contract_scale := 1.0 / maxf(1.0 - edge_contract, _EPSILON)
 
 	for i in pixel_count:
 		if mask[i] == MASK_BACKGROUND:
@@ -389,8 +374,6 @@ func _coverage_map(data: PackedByteArray, key_dist: PackedFloat32Array, mask: Pa
 		if d > tolerance:
 			value = (d - tolerance) / maxf(reference - tolerance, _EPSILON)
 		value = clampf(value, 0.0, 1.0)
-		if edge_contract > 0.0:
-			value = clampf((value - edge_contract) * contract_scale, 0.0, 1.0)
 		coverage[i] = value
 
 	return coverage

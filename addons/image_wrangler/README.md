@@ -71,7 +71,6 @@ The form is split into a **Settings** group and an **Island Picker** group.
 | Remove Color | white | The background colour to key out. Sits under the operation dropdown, not in this list, because it is what the operation is *about*. |
 | Color Tolerance | 0.02 | How far a pixel may drift from the background colour and still be keyed out. Raise it if a re-compressed background leaves speckles behind. |
 | Edge Width | 2 | How many pixels of antialiasing to rebuild. 2 suits ordinary antialiasing; raise it for soft edges, glows and drop shadows; 0 gives a hard cutout. |
-| Edge Contract | 0.0 | Pulls the soft edge inwards. Only needed if a faint halo survives, usually because the source was flattened onto the background twice. |
 | Crevice Reach | 0 (off) | Lets the flood squeeze into nooks it would otherwise stop outside. See below. |
 | Crevice Tolerance | 0.5 | How far from the background colour those squeezed-through pixels may be. |
 | Only Outer Background | on | Flood fills from the image border, so background-coloured regions enclosed by the subject — eyes, highlights, the holes in an "o" — stay opaque. |
