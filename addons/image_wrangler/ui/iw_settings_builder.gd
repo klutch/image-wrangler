@@ -7,6 +7,8 @@ extends RefCounted
 ## operation lists its properties, this fills a container with controls wired
 ## straight back to them.
 
+const PointListEditor := preload("res://addons/image_wrangler/ui/iw_point_list_editor.gd")
+
 
 ## Replaces the contents of [param container] with controls for every setting
 ## [param operation] declares. [param on_changed] is called after each edit.
@@ -31,6 +33,8 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 				control = _build_bool(operation, property, label, on_changed)
 			IWOperation.SettingType.INT:
 				control = _build_number(operation, property, label, setting, true, on_changed)
+			IWOperation.SettingType.POINT_LIST:
+				control = _build_point_list(operation, property, label, setting)
 			_:
 				control = _build_number(operation, property, label, setting, false, on_changed)
 
@@ -48,6 +52,16 @@ static func _build_bool(operation: IWOperation, property: StringName, label: Str
 			on_changed.call()
 	)
 	return check
+
+
+## Point lists are deliberately not wired to [param on_changed] here. Picking
+## needs the preview, which only the dock can reach, so it connects the editor's
+## signals itself and re-runs the operation from there.
+static func _build_point_list(operation: IWOperation, property: StringName, label: String, setting: Dictionary) -> Control:
+	var editor := PointListEditor.new()
+	editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	editor.setup(operation, property, label, setting.get("validate", Callable()))
+	return editor
 
 
 static func _build_number(operation: IWOperation, property: StringName, label: String, setting: Dictionary, is_int: bool, on_changed: Callable) -> Control:

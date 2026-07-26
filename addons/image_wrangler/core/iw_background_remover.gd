@@ -65,6 +65,12 @@ var edge_contract: float = 0.0
 ## the subject (eyes, speech bubbles, specular highlights) stays opaque.
 var contiguous: bool = true
 
+## Extra pixels to start the background flood fill from, on top of the image
+## border. Lets the user hand-pick enclosed regions that [member contiguous]
+## deliberately skips. Ignored when [member contiguous] is off, since every
+## background-coloured pixel already qualifies then.
+var seed_points: Array[Vector2i] = []
+
 ## Un-blend the background out of partially transparent pixels.
 var decontaminate: bool = true
 
@@ -137,6 +143,13 @@ func get_settings_schema() -> Array[Dictionary]:
 			"tooltip": "Flood fill inwards from the image border, so white areas enclosed by the\nsubject (eyes, highlights, gaps in lettering) stay opaque.",
 		},
 		{
+			"property": &"seed_points",
+			"label": "Picked Islands",
+			"type": SettingType.POINT_LIST,
+			"validate": _describe_seed,
+			"tooltip": "Enclosed regions to remove anyway, picked off the preview.\nEach one starts its own flood fill and gets the same antialiased edge\ntreatment as the outer background. Only applies while\n\"Only Outer Background\" is on.",
+		},
+		{
 			"property": &"decontaminate",
 			"label": "Remove White Fringe",
 			"type": SettingType.BOOL,
@@ -157,6 +170,26 @@ func get_settings_schema() -> Array[Dictionary]:
 ## Convenience entry point for code that just wants the default behaviour.
 static func remove_white_background(source: Image) -> Image:
 	return IWBackgroundRemover.new().process_image(source)
+
+
+## Warning to show for a picked seed colour, or an empty string when the pick
+## will actually do something. Wired into the settings schema so the dock can
+## explain a pick that quietly does nothing.
+func _describe_seed(color: Color) -> String:
+	if _color_distance(color) <= tolerance:
+		return ""
+	return "That pixel is too far from the background color to flood from. Raise White Tolerance, or pick a paler spot."
+
+
+## Distance metric from [method _distance_map], for one colour.
+##
+## The hot loop works straight off the byte array and cannot call this, so the
+## two must be kept in step: largest per-channel difference from the key colour.
+func _color_distance(color: Color) -> float:
+	return maxf(
+		absf(color.r - key_color.r),
+		maxf(absf(color.g - key_color.g), absf(color.b - key_color.b)),
+	)
 
 
 func process_image(source: Image) -> Image:
@@ -277,9 +310,10 @@ func _distance_map(data: PackedByteArray, pixel_count: int) -> PackedFloat32Arra
 ##
 ## Two passes over one queue. The first claims the background itself — pixels
 ## within [member tolerance] of the key colour, flood filled inwards from the
-## image border when [member contiguous] is set, which is what keeps enclosed
-## white regions opaque. The second walks [member edge_width] steps further in
-## from that background and calls what it touches the antialiased band.
+## image border (plus any [member seed_points]) when [member contiguous] is set,
+## which is what keeps unpicked enclosed white regions opaque. The second walks
+## [member edge_width] steps further in from that background and calls what it
+## touches the antialiased band.
 ##
 ## Classifying by distance-from-background rather than by colour is the whole
 ## trick. A pixel's paleness genuinely cannot distinguish a half-covered dark
@@ -320,6 +354,18 @@ func _classify(dist: PackedFloat32Array, width: int, height: int) -> PackedByteA
 			if mask[row_end] != MASK_BACKGROUND and dist[row_end] <= tolerance:
 				mask[row_end] = MASK_BACKGROUND
 				queue[tail] = row_end
+				tail += 1
+
+		# Hand-picked islands join the same queue as the border, so a region the
+		# user pointed at is flooded and matted exactly like the outer
+		# background instead of being stamped out as a hard-edged hole.
+		for point in seed_points:
+			if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
+				continue
+			var seed_index := point.y * width + point.x
+			if mask[seed_index] != MASK_BACKGROUND and dist[seed_index] <= tolerance:
+				mask[seed_index] = MASK_BACKGROUND
+				queue[tail] = seed_index
 				tail += 1
 
 		# 4-connected on purpose: 8-connectivity leaks through diagonal

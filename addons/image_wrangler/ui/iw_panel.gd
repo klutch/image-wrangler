@@ -5,6 +5,7 @@ extends VBoxContainer
 
 const SettingsBuilder := preload("res://addons/image_wrangler/ui/iw_settings_builder.gd")
 const PreviewView := preload("res://addons/image_wrangler/ui/iw_preview_view.gd")
+const PointListEditor := preload("res://addons/image_wrangler/ui/iw_point_list_editor.gd")
 
 ## Every tool the dock offers. Add new [IWOperation] subclasses here.
 const OPERATION_SCRIPTS := [
@@ -31,6 +32,10 @@ var _pending_outputs: Dictionary = {}
 
 var _file_list: ItemList
 var _preview: PreviewView
+
+## The current tool's point-list control, when it has one. Non-null means the
+## preview can be picked on.
+var _point_editor: PointListEditor
 var _status_label: Label
 var _detail_label: Label
 var _operation_selector: OptionButton
@@ -170,6 +175,7 @@ func _build_preview_column() -> Control:
 	_preview = PreviewView.new()
 	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_preview.pixel_picked.connect(_on_pixel_picked)
 	column.add_child(_preview)
 
 	return column
@@ -423,6 +429,7 @@ func _select_operation(index: int) -> void:
 	_operation_selector.selected = index
 	_operation_description.text = _operation.get_operation_description()
 	SettingsBuilder.build(_operation, _settings_box, _on_setting_changed)
+	_bind_point_editor()
 
 	# Only reset the suffix while the user has not claimed it as their own.
 	if _suffix_is_default or _suffix_edit.text == previous_suffix:
@@ -432,6 +439,51 @@ func _select_operation(index: int) -> void:
 	_result_image = null
 	if _auto_preview.button_pressed:
 		_schedule_preview()
+
+
+## Hooks up the point-list control the settings builder just created, if the
+## tool declared one. Tools without one leave picking switched off.
+func _bind_point_editor() -> void:
+	_point_editor = null
+	for child in _settings_box.get_children():
+		if child is PointListEditor:
+			_point_editor = child
+			_point_editor.pick_toggled.connect(_on_pick_toggled)
+			_point_editor.points_changed.connect(_on_points_changed)
+			_point_editor.selection_changed.connect(_update_markers)
+			break
+	# Switching tools always drops out of pick mode, so a fresh settings form
+	# never inherits a crosshair from the tool before it.
+	_preview.pick_mode = false
+	if _point_editor != null:
+		_point_editor.set_pick_active(false)
+	_update_markers()
+
+
+func _on_pick_toggled(enabled: bool) -> void:
+	_preview.pick_mode = enabled
+	if enabled:
+		_status_label.text = "Click a spot in the preview to add it to the list."
+
+
+func _on_pixel_picked(pixel: Vector2i) -> void:
+	if _point_editor == null or _source_image == null:
+		return
+	_point_editor.add_point(pixel, _source_image.get_pixelv(pixel))
+	_status_label.text = "Picked (%d, %d)." % [pixel.x, pixel.y]
+
+
+func _on_points_changed() -> void:
+	_update_markers()
+	_on_setting_changed()
+
+
+func _update_markers() -> void:
+	if _point_editor == null:
+		var empty: Array[Vector2i] = []
+		_preview.set_markers(empty, -1)
+		return
+	_preview.set_markers(_point_editor.get_points(), _point_editor.selected_index())
 
 
 func _on_setting_changed() -> void:

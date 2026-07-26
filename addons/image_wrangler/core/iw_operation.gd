@@ -14,6 +14,11 @@ enum SettingType {
 	BOOL,
 	INT,
 	FLOAT,
+	## A list of pixel coordinates the user picks off the preview. The property
+	## must be an [code]Array[Vector2i][/code]. Entries may carry an optional
+	## [code]validate[/code] key: a [Callable] taking the picked [Color] and
+	## returning a warning to show, or an empty string when the pick is sound.
+	POINT_LIST,
 }
 
 
