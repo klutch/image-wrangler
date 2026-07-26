@@ -8,8 +8,10 @@ main screen tabs at the top, alongside **2D**, **3D** and **Script**.
 
 1. Add images with the **Add** button, or drag them in from the FileSystem dock.
 2. Pick an operation and tune its settings. The preview updates as you drag.
-3. **Process Selected** / **Process All** writes the results as PNG. You are
-   asked before any existing file is replaced.
+3. **Process Current Only** saves the selected image, asking where to put it.
+   **Process All** processes the whole list into a folder you pick, naming each
+   output after its source plus the **Suffix**. Results are always PNG, and you
+   are asked before anything existing is replaced.
 
 The preview sits on a checkerboard and is drawn unfiltered, so you can see
 exactly what happened to the edge pixels.

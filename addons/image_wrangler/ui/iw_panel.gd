@@ -88,15 +88,17 @@ var _zoom_entry: LineEdit
 var _refresh_button: Button
 var _remove_button: Button
 var _suffix_edit: LineEdit
-var _output_dir_edit: LineEdit
-var _output_dir_button: Button
-var _use_source_dir: CheckBox
 var _process_selected_button: Button
 var _process_all_button: Button
 var _debounce: Timer
 var _autosave: Timer
 var _open_dialog: FileDialog
 var _output_dialog: FileDialog
+var _save_dialog: FileDialog
+
+## Which source a pending Save As belongs to, held between opening the dialog
+## and the user choosing a name.
+var _save_source := ""
 var _overwrite_dialog: ConfirmationDialog
 
 
@@ -395,36 +397,19 @@ func _build_output_section() -> Control:
 	suffix_row.add_child(suffix_label)
 	_suffix_edit = LineEdit.new()
 	_suffix_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_suffix_edit.tooltip_text = "Appended to the file name. Results are always written as PNG.\nLeave empty to write over the source when saving beside it."
+	_suffix_edit.tooltip_text = "Appended to the file name. Results are always written as PNG.\nSuggests a name when saving one image, and names them all when\nprocessing the whole list."
 	_suffix_edit.text_changed.connect(func(_text: String) -> void: _suffix_is_default = false)
 	suffix_row.add_child(_suffix_edit)
 
-	_use_source_dir = CheckBox.new()
-	_use_source_dir.text = "Save Beside Source"
-	_use_source_dir.button_pressed = true
-	_use_source_dir.toggled.connect(_on_use_source_dir_toggled)
-	section.add_child(_use_source_dir)
-
-	var dir_row := HBoxContainer.new()
-	section.add_child(dir_row)
-	_output_dir_edit = LineEdit.new()
-	_output_dir_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_output_dir_edit.text = "res://"
-	_output_dir_edit.editable = false
-	dir_row.add_child(_output_dir_edit)
-	_output_dir_button = Button.new()
-	_output_dir_button.text = "..."
-	_output_dir_button.disabled = true
-	_output_dir_button.pressed.connect(func() -> void: _output_dialog.popup_centered_ratio(0.6))
-	dir_row.add_child(_output_dir_button)
-
 	_process_selected_button = Button.new()
-	_process_selected_button.text = "Process Selected"
+	_process_selected_button.text = "Process Current Only"
+	_process_selected_button.tooltip_text = "Process the selected image and ask where to save it."
 	_process_selected_button.pressed.connect(_on_process_selected)
 	section.add_child(_process_selected_button)
 
 	_process_all_button = Button.new()
 	_process_all_button.text = "Process All"
+	_process_all_button.tooltip_text = "Process every image in the list and ask for a folder to put them in."
 	_process_all_button.pressed.connect(_on_process_all)
 	section.add_child(_process_all_button)
 
@@ -446,9 +431,19 @@ func _build_dialogs() -> void:
 	_output_dialog = FileDialog.new()
 	_output_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 	_output_dialog.access = FileDialog.ACCESS_FILESYSTEM
-	_output_dialog.title = "Choose Output Folder"
-	_output_dialog.dir_selected.connect(func(dir: String) -> void: _output_dir_edit.text = dir)
+	_output_dialog.title = "Process All Into Folder"
+	_output_dialog.dir_selected.connect(_on_output_dir_chosen)
 	add_child(_output_dialog)
+
+	# Save mode prompts about an existing file itself, which is why the single
+	# image path does not also go through the overwrite dialog.
+	_save_dialog = FileDialog.new()
+	_save_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	_save_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_save_dialog.title = "Save Processed Image"
+	_save_dialog.add_filter("*.png", "PNG Image")
+	_save_dialog.file_selected.connect(_on_save_file_chosen)
+	add_child(_save_dialog)
 
 	_overwrite_dialog = ConfirmationDialog.new()
 	_overwrite_dialog.title = "Overwrite Existing Files?"
@@ -980,36 +975,49 @@ func _update_controls() -> void:
 	_process_all_button.disabled = not has_any
 
 
-func _on_use_source_dir_toggled(pressed: bool) -> void:
-	_output_dir_edit.editable = not pressed
-	_output_dir_button.disabled = pressed
-
-
 # --- Writing results ----------------------------------------------------
 
+## Processing one image asks where to put it, so the Save As dialog carries the
+## whole decision — no destination is remembered between runs.
 func _on_process_selected() -> void:
 	var index := _selected_index()
-	if index < 0:
+	if index < 0 or _operation == null:
 		return
-	_start_jobs(PackedStringArray([_sources[index]]))
+	var path := _sources[index]
+	_save_source = path
+	_save_dialog.current_dir = path.get_base_dir()
+	_save_dialog.current_file = _output_name_for(path)
+	_save_dialog.popup_centered_ratio(0.6)
 
 
+func _on_save_file_chosen(destination: String) -> void:
+	var source := _save_source
+	_save_source = ""
+	if source.is_empty():
+		return
+	# FILE_MODE_SAVE_FILE has already asked about replacing an existing file, so
+	# this goes straight to writing.
+	_pending_outputs = {source: destination}
+	_write_pending_outputs()
+
+
+## Processing the whole list asks for a folder instead: one dialog cannot name
+## every output, so the suffix does the naming and this only picks where.
 func _on_process_all() -> void:
-	_start_jobs(_sources)
-
-
-## Maps each source to its destination, then asks before clobbering anything.
-func _start_jobs(paths: PackedStringArray) -> void:
-	if paths.is_empty() or _operation == null:
+	if _sources.is_empty() or _operation == null:
 		return
-	if not _use_source_dir.button_pressed and _output_dir_edit.text.strip_edges().is_empty():
-		_set_status("Choose an output folder first.")
+	_output_dialog.current_dir = _sources[0].get_base_dir()
+	_output_dialog.popup_centered_ratio(0.6)
+
+
+func _on_output_dir_chosen(directory: String) -> void:
+	if _operation == null:
 		return
 
 	var jobs := {}
 	var existing := PackedStringArray()
-	for path in paths:
-		var destination := _output_path_for(path)
+	for path in _sources:
+		var destination := directory.path_join(_output_name_for(path))
 		jobs[path] = destination
 		if FileAccess.file_exists(destination):
 			existing.append(destination.get_file())
@@ -1019,6 +1027,7 @@ func _start_jobs(paths: PackedStringArray) -> void:
 		_write_pending_outputs()
 		return
 
+	# No native prompt on a folder pick, so this names what would be replaced.
 	var preview := existing
 	var trailer := ""
 	if existing.size() > 8:
@@ -1030,9 +1039,10 @@ func _start_jobs(paths: PackedStringArray) -> void:
 	_overwrite_dialog.popup_centered()
 
 
-func _output_path_for(path: String) -> String:
-	var directory := path.get_base_dir() if _use_source_dir.button_pressed else _output_dir_edit.text.strip_edges()
-	return directory.path_join(path.get_file().get_basename() + _suffix_edit.text + ".png")
+## Output file name for a source: its own name, plus the suffix, always PNG.
+func _output_name_for(path: String) -> String:
+	return path.get_file().get_basename() + _suffix_edit.text + ".png"
+
 
 
 ## Runs the operation over every queued source and writes the results.
