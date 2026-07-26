@@ -101,6 +101,12 @@ var _save_dialog: FileDialog
 ## and the user choosing a name.
 var _save_source := ""
 var _overwrite_dialog: ConfirmationDialog
+var _removal_dialog: ConfirmationDialog
+
+## Sources whose originals may be deleted, mapped to the copy that replaced them.
+## Filled during a run and acted on only after the user confirms and every copy
+## has been proved identical to its source.
+var _pending_removals: Dictionary = {}
 
 
 func _ready() -> void:
@@ -452,6 +458,13 @@ func _build_dialogs() -> void:
 	_overwrite_dialog.confirmed.connect(_write_pending_outputs)
 	_overwrite_dialog.canceled.connect(func() -> void: _pending_outputs.clear())
 	add_child(_overwrite_dialog)
+
+	_removal_dialog = ConfirmationDialog.new()
+	_removal_dialog.title = "Remove Old Files?"
+	_removal_dialog.ok_button_text = "Remove"
+	_removal_dialog.confirmed.connect(_verify_then_remove_sources)
+	_removal_dialog.canceled.connect(func() -> void: _pending_removals.clear())
+	add_child(_removal_dialog)
 
 
 # --- Sources ------------------------------------------------------------
@@ -1045,6 +1058,99 @@ func _on_output_dir_chosen(directory: String) -> void:
 	_overwrite_dialog.popup_centered()
 
 
+## Whether two paths name the same file on disk.
+##
+## Compared after globalising, because a source dragged from the FileSystem dock
+## arrives as res:// while the destination comes back from a native dialog as an
+## OS path — textually different, same file.
+static func _is_same_file(a: String, b: String) -> bool:
+	return ProjectSettings.globalize_path(a).simplify_path() 			== ProjectSettings.globalize_path(b).simplify_path()
+
+
+## Asks before deleting anything, naming how many and which.
+func _confirm_source_removal() -> void:
+	if _pending_removals.is_empty():
+		return
+
+	var names := PackedStringArray()
+	for source: String in _pending_removals:
+		names.append(source.get_file())
+	var listed := names
+	var trailer := ""
+	if names.size() > 8:
+		listed = names.slice(0, 8)
+		trailer = "\n... and %d more" % (names.size() - 8)
+
+	_removal_dialog.dialog_text = "Are you sure you want to remove %d file(s)?\n\n%s%s\n\nEach copy is checked against its source first, and they go to the trash." % [
+		names.size(), "\n".join(listed), trailer,
+	]
+	_removal_dialog.popup_centered()
+
+
+## Proves every copy is byte-identical to its source, then trashes the sources.
+##
+## All or nothing on purpose. A partial delete after a partial verification is
+## the worst outcome available here, so a single mismatch stops the lot.
+func _verify_then_remove_sources() -> void:
+	var candidates := _pending_removals
+	_pending_removals = {}
+	if candidates.is_empty():
+		return
+
+	# Two sources landing on one destination means the second overwrote the
+	# first, and the first's original is now the only copy of it in existence.
+	# Deleting on a checksum match would destroy it, because the survivor
+	# matches its own source perfectly.
+	var claimed := {}
+	for source: String in candidates:
+		var destination: String = candidates[source]
+		if claimed.has(destination):
+			_set_status("Nothing removed: %s and %s were both written to %s." % [
+				String(claimed[destination]).get_file(), source.get_file(), destination.get_file(),
+			])
+			push_warning("Image Wrangler: refused to remove sources, two of them share an output name.")
+			return
+		claimed[destination] = source
+
+	var unverified := PackedStringArray()
+	for source: String in candidates:
+		var destination: String = candidates[source]
+		if not FileAccess.file_exists(destination) or not FileAccess.file_exists(source):
+			unverified.append(source.get_file())
+			continue
+		var source_hash := FileAccess.get_sha256(source)
+		if source_hash.is_empty() or source_hash != FileAccess.get_sha256(destination):
+			unverified.append(source.get_file())
+
+	if not unverified.is_empty():
+		_set_status("Nothing removed: %d copy/copies did not match their source: %s" % [
+			unverified.size(), ", ".join(unverified),
+		])
+		push_error("Image Wrangler: refused to remove sources, %s did not verify." % ", ".join(unverified))
+		return
+
+	var removed := 0
+	var failures := PackedStringArray()
+	for source: String in candidates:
+		# Trash rather than unlink: the copy is verified, but the judgement that
+		# the original is no longer wanted is the user's to reverse.
+		if OS.move_to_trash(ProjectSettings.globalize_path(source)) == OK:
+			removed += 1
+		else:
+			failures.append(source.get_file())
+
+	if failures.is_empty():
+		_set_status("Removed %d original(s) to the trash." % removed)
+	else:
+		_set_status("Removed %d original(s); %d could not be removed: %s" % [
+			removed, failures.size(), ", ".join(failures),
+		])
+		push_error("Image Wrangler: could not remove %s" % ", ".join(failures))
+
+	if Engine.is_editor_hint():
+		EditorInterface.get_resource_filesystem().scan()
+
+
 ## Output file name for a source, which the operation decides: a rename has a
 ## whole scheme to apply, where an image operation just keeps the name.
 func _output_name_for(path: String) -> String:
@@ -1094,6 +1200,10 @@ func _write_pending_outputs() -> void:
 				failures.append(source_path.get_file())
 				continue
 			written += 1
+			# Only a candidate, and only because this one copy landed. Whether any
+			# of them are actually deleted is decided after the whole run.
+			if _operation.removes_sources() and not _is_same_file(source_path, destination):
+				_pending_removals[source_path] = destination
 			continue
 
 		var image := _load_image(source_path)
@@ -1116,3 +1226,8 @@ func _write_pending_outputs() -> void:
 
 	if Engine.is_editor_hint():
 		EditorInterface.get_resource_filesystem().scan()
+
+	# Last, so the outcome of the run is already on screen when the question is
+	# asked, and so a failed copy has had its chance to keep its source off the
+	# list above.
+	_confirm_source_removal()

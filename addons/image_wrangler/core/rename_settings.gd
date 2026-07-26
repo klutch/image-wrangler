@@ -57,6 +57,13 @@ enum LetterCase { UNCHANGED, LOWER, UPPER, TITLE }
 ## consistent.
 @export var lowercase_extension: bool = true
 
+## Offer to delete each source once its copy has been written and checked.
+##
+## Off by default, and deliberately never automatic: the dock asks first, then
+## proves every copy matches its source by checksum before anything is deleted,
+## and sends the originals to the system trash rather than unlinking them.
+@export var remove_old_files: bool = false
+
 
 ## A copy that belongs to another image.
 ##

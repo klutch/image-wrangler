@@ -56,6 +56,15 @@ func transforms_pixels() -> bool:
 	return true
 
 
+## Whether a source should be offered for deletion once its output is written.
+##
+## Only ever an offer: the dock confirms with the user and verifies the copy
+## before acting on it. An operation that rewrites pixels has no business
+## returning true, since its output is not a copy of anything.
+func removes_sources() -> bool:
+	return false
+
+
 ## Name to write [param source_path]'s result under, without any directory.
 ##
 ## [param suffix] is the dock's Output suffix, and [param index] is the source's

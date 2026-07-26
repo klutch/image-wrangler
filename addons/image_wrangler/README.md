@@ -315,6 +315,7 @@ a `.jpg` name.
 | Separator / Number At | The text between name and counter, and which end it goes on. |
 | Letter Case | Unchanged, lowercase, UPPERCASE or Title Case. Never applied to the extension. |
 | Lowercase Extension | So a folder of mixed `.PNG` and `.png` comes out consistent. |
+| Remove Old Files | Off by default. Deletes each source once its copy has been written — see below. |
 
 The name is composed in a fixed order, so the result does not depend on which
 fields happen to be filled in:
@@ -330,6 +331,29 @@ base name (or the file's own)
 
 The preview cannot show a rename — the pixels are unchanged — so the status bar
 shows the result instead: `flower_0002.png → tile_003.png`.
+
+### Removing the originals
+
+With **Remove Old Files** ticked, the run finishes normally and *then* asks:
+*"Are you sure you want to remove N file(s)?"*, naming them. Only if you confirm
+does anything get deleted, and four things stand between the confirmation and the
+deletion:
+
+- **Every copy is checked against its source by SHA-256.** A file that was not
+  written, has gone missing, or does not match is a failure.
+- **It is all or nothing.** One mismatch anywhere and *nothing* is deleted, not
+  even the files that did verify. A half-deleted batch after a half-passed
+  verification is the worst outcome available here.
+- **Shared output names abort the whole thing.** Two sources renamed to the same
+  file means the second overwrote the first, so that first source is now the only
+  copy of itself in existence — and it would pass a checksum test against the
+  survivor's content. This is easy to trigger by accident: set **Base Name** with
+  numbering off and every file lands on one name.
+- **Originals go to the system trash**, not straight out, so the judgement that
+  you no longer want them stays reversible.
+
+A source that failed to copy is never a candidate, and neither is one whose
+destination is itself.
 
 ## Adding an operation
 

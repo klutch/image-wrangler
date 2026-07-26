@@ -42,6 +42,10 @@ func transforms_pixels() -> bool:
 	return false
 
 
+func removes_sources() -> bool:
+	return settings.remove_old_files
+
+
 func get_settings() -> Resource:
 	return settings
 
@@ -154,6 +158,13 @@ func get_settings_schema() -> Array[Dictionary]:
 			"group": "Format",
 			"type": SettingType.BOOL,
 			"tooltip": "So a folder of mixed .PNG and .png files comes out consistent.",
+		},
+		{
+			"property": &"remove_old_files",
+			"label": "Remove Old Files",
+			"group": "Format",
+			"type": SettingType.BOOL,
+			"tooltip": "Delete each source once its copy has been written.\nYou are asked first, every copy is checked against its source by checksum,\nand nothing is deleted unless all of them match. The originals go to the\nsystem trash, not straight out.",
 		},
 	]
 
