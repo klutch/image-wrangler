@@ -185,11 +185,11 @@ sit right on top of the edges you are trying to judge. The shortcut is scoped to
 the dock, so H stays free everywhere else in the editor and never steals a
 keystroke from a text field.
 
-**The list belongs to the image, not to the operation.** It names the image it is
-showing, and changing selection swaps the list to whatever that image has, so you
-can work through a batch picking each image's islands and then process the lot in
-one go. Islands are saved with the rest of that image's settings — see
-[Per-image settings](#per-image-settings) — so they survive an editor restart.
+**The list belongs to the image**, like every other setting: changing selection
+swaps it to whatever that image has, so you can work through a batch picking each
+image's islands and then process the lot in one go. Islands are saved with the
+rest of that image's settings — see [Per-image settings](#per-image-settings) —
+so they survive an editor restart.
 
 A picked island is not a hole punch — it starts the same flood fill the image
 border does, so the region's rim gets the identical antialiasing treatment as

@@ -709,7 +709,6 @@ func _apply_settings_for(path: String) -> void:
 	_refresh_key_color()
 	if _island_picker != null:
 		_island_picker.refresh()
-		_island_picker.set_context_label(path.get_file())
 	_update_markers()
 	_refreshing = false
 
@@ -767,7 +766,6 @@ func _clear_settings_context() -> void:
 		_operation.set_settings(current.duplicate_for_new_image())
 	if _island_picker != null:
 		_island_picker.refresh()
-		_island_picker.set_context_label("")
 	_update_markers()
 	_refreshing = false
 
@@ -1042,7 +1040,6 @@ func _on_output_dir_chosen(directory: String) -> void:
 ## Output file name for a source: its own name, plus the suffix, always PNG.
 func _output_name_for(path: String) -> String:
 	return path.get_file().get_basename() + _suffix_edit.text + ".png"
-
 
 
 ## Runs the operation over every queued source and writes the results.

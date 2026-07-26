@@ -35,14 +35,6 @@ const PICK_ICON_PATH := "res://addons/image_wrangler/ui/color-picker.png"
 ## Edge length the icon is resampled to, before editor DPI scaling.
 const PICK_ICON_SIZE := 16
 
-## Longest file name shown before it is elided from the middle.
-##
-## Generous on purpose: the label reports a minimum width of one pixel either
-## way, so this only decides how much is shown when there is room. Too tight a
-## limit eats the index in names like [code]sheet__0002_[Generated]-...[/code],
-## which is the one part that tells a batch of exports apart.
-const CONTEXT_MAX_CHARS := 40
-
 var _operation: IWOperation
 var _property: StringName
 
@@ -52,7 +44,6 @@ var _property: StringName
 ## remover the swatch is not decoration, it is the colour that island keys out.
 var _color_provider := Callable()
 
-var _context: Label
 var _list: ItemList
 var _pick_button: Button
 var _remove_button: Button
@@ -99,16 +90,6 @@ func _build() -> void:
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.item_selected.connect(_on_item_selected)
 	add_child(_list)
-
-	# Captions the list rather than heading the whole control, so it cannot push
-	# the buttons away from the group heading. It names the selected image, and
-	# the settings form it lives in cannot scroll horizontally, so its width
-	# would otherwise become a floor for the whole column — ellipsising drops its
-	# reported minimum width to nothing.
-	_context = Label.new()
-	_context.modulate = Color(1, 1, 1, 0.6)
-	_context.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	add_child(_context)
 
 	_hint = Label.new()
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -178,17 +159,6 @@ static func _build_pick_icon(invert: bool) -> Texture2D:
 func set_color_provider(provider: Callable) -> void:
 	_color_provider = provider
 	_refresh()
-
-
-## Names the image the list currently belongs to, so it is obvious the entries
-## are scoped to one image rather than to the operation.
-func set_context_label(context: String) -> void:
-	if context.is_empty():
-		_context.text = "No image selected."
-		_context.tooltip_text = ""
-		return
-	_context.text = _elide_middle(context, CONTEXT_MAX_CHARS)
-	_context.tooltip_text = context
 
 
 ## Adds an island at [param at].
@@ -300,19 +270,6 @@ func _refresh() -> void:
 func _update_buttons() -> void:
 	_remove_button.disabled = selected_index() < 0
 	_clear_button.disabled = _list.item_count == 0
-
-
-## Shortens a long name from the middle, keeping both ends.
-##
-## Generated file names tend to share a long descriptive tail, so trimming only
-## the end — which is all the label's own ellipsis can do — throws away the part
-## that actually distinguishes them, and the extension with it.
-static func _elide_middle(text: String, limit: int) -> String:
-	if text.length() <= limit:
-		return text
-	var head := floori((limit - 1) * 0.5)
-	var tail := limit - 1 - head
-	return "%s…%s" % [text.substr(0, head), text.substr(text.length() - tail)]
 
 
 ## Small bordered colour chip, so a white pick is still visible on the row.
