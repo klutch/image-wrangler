@@ -31,12 +31,16 @@ extends IWOperation
 ## pixels are classified by their distance from the flood-filled background
 ## rather than by how close to the key they are. See [method _classify].
 ##
-## [b]More than one background colour.[/b] Backgrounds come from two places. Every
-## entry in [member RemoveBackgroundSettings.remove_colors] is offered to the image
-## border, so a frame with different backgrounds down opposite edges floods from
-## both; and each picked island in [member RemoveBackgroundSettings.islands] floods
-## with the colour of the pixel it sits on, so an enclosed region of some other
-## flat colour keys out against itself.
+## [b]More than one background colour.[/b] Backgrounds come from two places, and
+## which one to reach for is decided by [i]where[/i] the colour is, not by what it
+## is. Every entry in [member RemoveBackgroundSettings.remove_colors] is offered to
+## the image border, so a frame with different backgrounds down opposite edges
+## floods from both — but only where they meet the border, since that is the only
+## place the flood may start while [member RemoveBackgroundSettings.contiguous] is
+## set. A region enclosed by the subject is not reached by listing its colour, no
+## matter how exactly it is listed; that is what [member
+## RemoveBackgroundSettings.islands] is for, and each picked island floods with the
+## colour of the pixel it sits on so it keys out against itself.
 ##
 ## Each carries its own tolerance rather than sharing a global one, because the
 ## number that swallows a speckled JPEG background would eat into the subject
@@ -196,7 +200,7 @@ func get_settings_schema() -> Array[Dictionary]:
 			"property": &"remove_colors",
 			"group": "Remove Colors",
 			"type": SettingType.COLOR_LIST,
-			"tooltip": "The background colors to key out, each with its own tolerance.\nPick them off the preview, or add one and set it by hand. An image with\ntwo flat backgrounds needs two entries: one tolerance loose enough for a\nspeckled one would eat into the subject beside the clean one.\n\nWhere two entries could both claim a pixel, the higher one wins.",
+			"tooltip": "The background colors to key out, each with its own tolerance.\nPick them off the preview, or add one and set it by hand. An image with\ntwo flat backgrounds needs two entries: one tolerance loose enough for a\nspeckled one would eat into the subject beside the clean one.\n\nWhile \"Only Outer Background\" is on, an entry only takes where its color\nreaches the image border. A region enclosed by the subject is not removed\nby listing its color — pick it with the Island Picker instead.\n\nWhere two entries could both claim a pixel, the higher one wins.",
 		},
 		{
 			"property": &"edge_width",
@@ -213,7 +217,7 @@ func get_settings_schema() -> Array[Dictionary]:
 			"label": "Only Outer Background",
 			"group": "Settings",
 			"type": SettingType.BOOL,
-			"tooltip": "Flood fill inwards from the image border, so regions enclosed by the\nsubject (eyes, highlights, gaps in lettering) stay opaque.",
+			"tooltip": "Flood fill inwards from the image border, so regions enclosed by the\nsubject (eyes, highlights, gaps in lettering) stay opaque.\n\nThis is also what makes Remove Colors border-only: an entry seeds the flood\nwhere its color meets the border, and nowhere else. Turn it off and every\nlisted color is removed wherever it appears — enclosed regions included.",
 		},
 		{
 			"property": &"crevice_reach",

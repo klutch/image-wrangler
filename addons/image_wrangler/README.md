@@ -71,11 +71,11 @@ The form is split into a **Remove Colors** group, a **Settings** group and an
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Remove Colors | one white entry at 0.02 | The background colours to key out, each with a tolerance of its own. See below. |
+| Remove Colors | one white entry at 0.02 | The background colours to key out, each with a tolerance of its own. Only takes where the colour reaches the image border. See below. |
 | Edge Width | 2 | How many pixels of antialiasing to rebuild. 2 suits ordinary antialiasing; raise it for soft edges, glows and drop shadows; 0 gives a hard cutout. |
 | Crevice Reach | 0 (off) | Lets the flood squeeze into nooks it would otherwise stop outside. See below. |
 | Crevice Tolerance | 0.5 | How far from the background colour those squeezed-through pixels may be. |
-| Only Outer Background | on | Flood fills from the image border, so background-coloured regions enclosed by the subject — eyes, highlights, the holes in an "o" — stay opaque. |
+| Only Outer Background | on | Flood fills from the image border, so background-coloured regions enclosed by the subject — eyes, highlights, the holes in an "o" — stay opaque. Also what confines **Remove Colors** to the border. |
 | Island Picker | empty | Enclosed regions to remove anyway, picked off the preview. Held per image. See below. |
 | Refine Edges | off | Runs the alpha through a guided filter, snapping it to the edges the image itself has. See below. |
 | Refine Radius | 2 | Window radius for that filter: roughly how far a ragged patch of alpha may sit from a real edge and still be pulled onto it. |
@@ -92,9 +92,24 @@ later padded with grey has two; a scan has the paper and the shadow under it.
 
 Hit **Pick** and click the preview to sample a colour off the image, or **Add**
 for an entry to set by hand with the swatch. **Remove** and **Clear** take
-entries back out. Every border pixel is offered to the whole list, so a frame
-with one background down one edge and another down the opposite edge floods from
-both without either being picked as an island.
+entries back out.
+
+**An entry only takes where its colour reaches the image border.** This is the
+one thing to know about the list, and it catches everyone once. Every border
+pixel is offered to the whole list — so a frame with one background down one edge
+and another down the opposite edge floods from both — but the border is the only
+place a flood may start while **Only Outer Background** is on. Listing a colour is
+not the same as removing every pixel of it.
+
+So a grey panel sitting *inside* the subject is not removed by adding grey to the
+list, however exactly you match it. That region is what the **Island Picker** is
+for: click it and it floods from there, keying out against its own colour. The
+rule of thumb is that the list describes the colours around your subject and the
+picker describes the holes in it.
+
+Turning **Only Outer Background** off removes every listed colour wherever it
+appears, enclosed regions included — which is also why it takes the eye
+highlights with it.
 
 **Each entry carries its own tolerance**, and that is the point of the list. One
 global number has to be tuned for the worst background in the image: loose enough

@@ -26,6 +26,8 @@ signal pick_toggled(enabled: bool)
 ## the preview and save the settings against the current image.
 signal colors_changed
 
+const PickIcon := preload("res://addons/image_wrangler/ui/iw_pick_icon.gd")
+
 const SWATCH_SIZE := 14
 const LIST_MIN_HEIGHT := 84
 
@@ -127,6 +129,13 @@ func _build() -> void:
 	add_child(_hint)
 
 
+func _notification(what: int) -> void:
+	# The editor theme is only reachable once the control is in the tree, and the
+	# icon depends on it, so it is resolved here rather than at construction.
+	if what == NOTIFICATION_THEME_CHANGED and _pick_button != null:
+		PickIcon.apply_to(_pick_button)
+
+
 # --- Public API ---------------------------------------------------------
 
 ## Adds an entry for [param color], or highlights the one already holding it.
@@ -146,7 +155,10 @@ func add_color(color: Color) -> void:
 	colors.add(color)
 	_refresh()
 	_select(colors.size() - 1)
-	_hint.text = ""
+	# Said on the way in rather than left to the tooltip. A colour picked off a
+	# region enclosed by the subject looks like it should work and does nothing,
+	# and this is the moment that misunderstanding happens.
+	_hint.text = "Takes where this color reaches the image border. For a region enclosed by the subject, use the Island Picker."
 	colors_changed.emit()
 
 

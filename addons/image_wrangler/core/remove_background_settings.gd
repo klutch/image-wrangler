@@ -18,6 +18,11 @@ extends Resource
 ## Background colours keyed out from the image border inwards, each with its own
 ## tolerance. See [RemoveColorEntry].
 ##
+## From the border [i]inwards[/i], and only from there while [member contiguous]
+## is set: an entry seeds the flood where its colour meets the edge of the image.
+## Listing a colour is therefore not the same as removing every pixel of it —
+## a region enclosed by the subject needs an entry in [member islands] instead.
+##
 ## An empty list keys nothing out from the border. That is a real state rather
 ## than a broken one — an image whose only backgrounds are enclosed regions is
 ## described by islands alone.
