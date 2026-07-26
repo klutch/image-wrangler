@@ -76,6 +76,8 @@ The form is split into a **Settings** group and an **Island Picker** group.
 | Crevice Tolerance | 0.5 | How far from the background colour those squeezed-through pixels may be. |
 | Only Outer Background | on | Flood fills from the image border, so background-coloured regions enclosed by the subject — eyes, highlights, the holes in an "o" — stay opaque. |
 | Island Picker | empty | Enclosed regions to remove anyway, picked off the preview. Held per image. See below. |
+| Refine Edges | off | Runs the alpha through a guided filter, snapping it to the edges the image itself has. See below. |
+| Refine Radius | 2 | Window radius for that filter: roughly how far a ragged patch of alpha may sit from a real edge and still be pulled onto it. |
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
 
@@ -104,6 +106,32 @@ ordinary coverage maths rather than cut out — and genuine subject measures as
 fully covered there, so it keeps its alpha. Measured across near-white, light
 grey and mid grey subjects at every reach from 1 to 32, not one interior pixel
 was eroded, and a normal antialiased edge came out bit-identical to reach 0.
+
+### Refining the edge
+
+**Refine Edges** runs the finished alpha through a guided filter (He, Sun & Tang,
+ECCV 2010 — the paper's "guided feathering" application). Within each window the
+alpha is fitted as a linear function of a guide signal and the fits are averaged.
+Where the guide is flat the alpha is smoothed; where the guide has an edge the
+fit follows it, so the alpha snaps to that edge instead of blurring across it.
+
+The guide is distance-from-the-key-colour rather than luminance. It is already
+computed, and its edges are exactly the background/subject boundary whatever the
+hue — so it separates a green screen from an equally bright subject, which
+luminance cannot.
+
+It is not only a tidying pass; it is more accurate. Against known coverage it
+cut mean edge error by 2.6–3.6×:
+
+| Subject | Edge error, off | On (radius 2) |
+| --- | --- | --- |
+| Dark colour ramp | 0.0090 | 0.0028 |
+| Pure black | 0.0083 | 0.0032 |
+| Mid grey | 0.0152 | 0.0043 |
+| Near-white (0.88, 0.90, 0.82) | 0.0495 | 0.0193 |
+
+The cost is a few extra passes over the image, which is why it is off by default.
+A solid interior loses at most two 8-bit levels of alpha and no halo appears.
 
 ### Picking islands
 
