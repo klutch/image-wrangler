@@ -6,6 +6,7 @@ extends VBoxContainer
 const SettingsBuilder := preload("res://addons/image_wrangler/ui/iw_settings_builder.gd")
 const PreviewView := preload("res://addons/image_wrangler/ui/iw_preview_view.gd")
 const IslandPicker := preload("res://addons/image_wrangler/ui/iw_island_picker.gd")
+const ColorList := preload("res://addons/image_wrangler/ui/iw_color_list.gd")
 const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
 
 ## Every operation the dock offers. Add new [IWOperation] subclasses here.
@@ -71,9 +72,18 @@ var _autosave_failures := {}
 var _file_list: ItemList
 var _preview: PreviewView
 
-## The current operation's island picker, when it has one. Non-null means the
-## preview can be picked on.
+## The current operation's island picker, when it has one.
 var _island_picker: IslandPicker
+
+## The current operation's Remove Colors list, when it has one.
+var _color_list: ColorList
+
+## Whichever list control currently owns the preview crosshair, or null.
+##
+## Both list controls have a Pick button and there is only one preview, so a click
+## would otherwise be ambiguous. Turning one on turns the other off, and this is
+## what the click is then delivered to.
+var _pick_target: Control
 var _status_label: Label
 var _detail_label: Label
 var _operation_selector: OptionButton
@@ -635,9 +645,10 @@ func _select_operation(index: int) -> void:
 	_operation_selector.selected = index
 	_bind_key_color()
 	SettingsBuilder.build(_operation, _settings_box, _on_setting_changed)
-	_bind_island_picker()
-	# _bind_island_picker already applied this image's settings for the operation
-	# just selected, so the form and the operation agree before the first run.
+	_bind_settings_controls()
+	# _bind_settings_controls already applied this image's settings for the
+	# operation just selected, so the form and the operation agree before the
+	# first run.
 
 	# Only reset the suffix while the user has not claimed it as their own.
 	if _suffix_is_default or _suffix_edit.text == previous_suffix:
@@ -667,37 +678,51 @@ func _on_key_color_changed(color: Color) -> void:
 	_on_setting_changed()
 
 
-## Searches the settings form for the picker at any depth.
+## Finds the list controls in the settings form, at any depth.
 ##
 ## A grouped setting is nested inside its heading box rather than sitting
 ## directly in the form, so scanning only the form's own children finds nothing
 ## and every picker feature goes quietly dead.
-func _find_island_picker(node: Node) -> IslandPicker:
+func _scan_settings_controls(node: Node) -> void:
 	for child in node.get_children():
-		if child is IslandPicker:
-			return child
-		var found := _find_island_picker(child)
-		if found != null:
-			return found
-	return null
+		if child is IslandPicker and _island_picker == null:
+			_island_picker = child
+		elif child is ColorList and _color_list == null:
+			_color_list = child
+		_scan_settings_controls(child)
 
 
-## Hooks up the island picker the settings builder just created, if the
-## operation declared one. Operations without one leave picking switched off.
-func _bind_island_picker() -> void:
-	_island_picker = _find_island_picker(_settings_box)
+## Hooks up the list controls the settings builder just created, for whichever of
+## them the operation declared. An operation with neither leaves picking off.
+func _bind_settings_controls() -> void:
+	_island_picker = null
+	_color_list = null
+	_scan_settings_controls(_settings_box)
+
 	if _island_picker != null:
-		_island_picker.pick_toggled.connect(_on_pick_toggled)
+		_island_picker.pick_toggled.connect(_on_pick_toggled.bind(_island_picker))
 		_island_picker.islands_changed.connect(_on_islands_changed)
 		_island_picker.selection_changed.connect(_update_markers)
 		_island_picker.set_color_provider(_sample_source_color)
+	if _color_list != null:
+		_color_list.pick_toggled.connect(_on_pick_toggled.bind(_color_list))
+		_color_list.colors_changed.connect(_on_setting_changed)
+
 	# Switching operations always drops out of pick mode, so a fresh settings
 	# form never inherits a crosshair from the one before it.
+	_release_pick()
+	_apply_settings_for(_current_path())
+	_update_markers()
+
+
+## Drops out of pick mode, leaving every picker's button unpressed.
+func _release_pick() -> void:
+	_pick_target = null
 	_preview.pick_mode = false
 	if _island_picker != null:
 		_island_picker.set_pick_active(false)
-	_apply_settings_for(_current_path())
-	_update_markers()
+	if _color_list != null:
+		_color_list.set_pick_active(false)
 
 
 ## Path of the highlighted source, or an empty string when nothing is selected.
@@ -824,6 +849,10 @@ func _clear_settings_context() -> void:
 		_operation.set_settings(current.duplicate_for_new_image())
 	if _island_picker != null:
 		_island_picker.refresh()
+	# The colours survived the duplicate, but they are a fresh list now and the
+	# control is still holding rows from the one that was swapped out.
+	if _color_list != null:
+		_color_list.refresh()
 	_update_markers()
 	_refreshing = false
 
@@ -846,17 +875,45 @@ func _sample_source_color(pixel: Vector2i) -> Color:
 	return _source_image.get_pixelv(pixel)
 
 
-func _on_pick_toggled(enabled: bool) -> void:
-	_preview.pick_mode = enabled
-	if enabled:
+## Hands the crosshair to [param source], taking it off whoever had it.
+##
+## Only one control can own the preview, so the other's button is released rather
+## than left pressed over a picker that no longer receives anything.
+func _on_pick_toggled(enabled: bool, source: Control) -> void:
+	if not enabled:
+		# Only when it still holds the crosshair. Otherwise this is the echo of the
+		# other picker having taken it, not the user switching picking off.
+		if _pick_target == source:
+			_pick_target = null
+			_preview.pick_mode = false
+		return
+
+	# The one that did not just get pressed is released, rather than left looking
+	# pressed over a picker no click will reach. Its own button is already down,
+	# which is what raised this signal.
+	if _island_picker != null and source != _island_picker:
+		_island_picker.set_pick_active(false)
+	if _color_list != null and source != _color_list:
+		_color_list.set_pick_active(false)
+
+	_pick_target = source
+	_preview.pick_mode = true
+	if source == _color_list:
+		_set_status("Click the preview to add that color to the list.")
+	else:
 		_set_status("Click a spot in the preview to add it to the list.")
 
 
 func _on_pixel_picked(pixel: Vector2i) -> void:
-	if _island_picker == null or _source_image == null:
+	if _source_image == null or _pick_target == null:
 		return
-	_island_picker.add_island(pixel)
-	_set_status("Picked (%d, %d)." % [pixel.x, pixel.y])
+	if _pick_target == _color_list:
+		var color := _sample_source_color(pixel)
+		_color_list.add_color(color)
+		_set_status("Picked #%s." % color.to_html(false))
+	elif _pick_target == _island_picker:
+		_island_picker.add_island(pixel)
+		_set_status("Picked (%d, %d)." % [pixel.x, pixel.y])
 
 
 func _on_islands_changed() -> void:

@@ -66,12 +66,12 @@ The full derivation is in the header comment of
 
 ### Settings
 
-The form is split into a **Settings** group and an **Island Picker** group.
+The form is split into a **Remove Colors** group, a **Settings** group and an
+**Island Picker** group.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Remove Color | white | The background colour to key out. Sits under the operation dropdown, not in this list, because it is what the operation is *about*. |
-| Color Tolerance | 0.02 | How far a pixel may drift from the background colour and still be keyed out. Raise it if a re-compressed background leaves speckles behind. |
+| Remove Colors | one white entry at 0.02 | The background colours to key out, each with a tolerance of its own. See below. |
 | Edge Width | 2 | How many pixels of antialiasing to rebuild. 2 suits ordinary antialiasing; raise it for soft edges, glows and drop shadows; 0 gives a hard cutout. |
 | Crevice Reach | 0 (off) | Lets the flood squeeze into nooks it would otherwise stop outside. See below. |
 | Crevice Tolerance | 0.5 | How far from the background colour those squeezed-through pixels may be. |
@@ -84,6 +84,35 @@ The form is split into a **Settings** group and an **Island Picker** group.
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
 
+### Remove Colors
+
+A list rather than a single swatch, because one background colour is an
+assumption rather than a fact. A sprite sheet exported over a white plate and
+later padded with grey has two; a scan has the paper and the shadow under it.
+
+Hit **Pick** and click the preview to sample a colour off the image, or **Add**
+for an entry to set by hand with the swatch. **Remove** and **Clear** take
+entries back out. Every border pixel is offered to the whole list, so a frame
+with one background down one edge and another down the opposite edge floods from
+both without either being picked as an island.
+
+**Each entry carries its own tolerance**, and that is the point of the list. One
+global number has to be tuned for the worst background in the image: loose enough
+to swallow a speckled JPEG plate, it eats into the subject beside a clean flat
+one. Separate entries let the speckled one sit at 0.08 while the flat one stays
+at 0.02. The tolerance travels with the flood, so a region seeded by a tight
+entry stays tight even where it runs alongside a loose one — and coverage,
+decontamination and the edge band are all measured against the key that claimed
+each pixel.
+
+Where two entries could both claim a pixel, the higher one wins. That makes the
+list read top to bottom as the ordered set of rules it is, rather than depending
+on which entry happens to fit more tightly.
+
+**An empty list is a real state**, not a broken one: nothing is keyed out from
+the border, and an image whose only backgrounds are enclosed regions is described
+by islands alone. With no colours *and* no islands the image comes back untouched.
+
 ### Nooks and crannies
 
 Background sometimes survives in a tight concave corner. The usual cause is not
@@ -93,7 +122,7 @@ colour to pass the flood's test. The flood stops at the mouth, and everything
 behind it stays opaque.
 
 **Crevice Reach** is the remedy — Canny's double-threshold trick applied to
-region growing instead of edge linking. A pixel within **Color Tolerance** is
+region growing instead of edge linking. A pixel within its own key's tolerance is
 solid background and resets the count; one merely within **Crevice Tolerance**
 may still be crossed, but only this many in a row before solid background is
 needed again. That squeezes through a constriction while stopping the flood
@@ -171,10 +200,16 @@ and removed on the next pass. Highlight a row to see which marker it is;
 **Remove** and **Clear** take entries back out.
 
 **Each island keys out its own colour** — the colour of the pixel you clicked,
-shown as the swatch on its row. So an island need not match **Remove Color**: a
-white plate with a red panel inside the subject takes two picks and no fiddling
-with tolerance. The colour is sampled from the image at process time rather than
+shown as the swatch on its row. So an island need not match anything in **Remove
+Colors**: a white plate with a red panel inside the subject takes one entry and
+one pick. The colour is sampled from the image at process time rather than
 stored, so a swatch can never disagree with what it will actually remove.
+
+An island has no row to carry a tolerance on, so it uses the default 0.02.
+Loosening a **Remove Colors** entry does not loosen the islands — the entries
+there describe colours an island by definition is not, or the border flood would
+have reached it already. An island that needs a looser tolerance is really a
+background colour: add it to the list instead.
 
 One consequence: clicking the subject by mistake keys out *that* colour and eats
 part of the subject. The preview shows it at once, and removing the row undoes
@@ -403,21 +438,25 @@ example.
 
 That is the whole job. The dock builds the settings form from the schema and the
 sidecar codec reflects over the settings Resource, so neither the UI nor the
-persistence needs touching — including for a setting deliberately left out of the
-schema, as `key_color` is.
+persistence needs touching — including for a value no schema entry ever names,
+such as the tolerance on a `RemoveColorEntry`, which sits a level below the
+property the schema declares.
 
 Ranges belong in the schema, not in `@export_range`, so there is one source of
-truth for them.
+truth for them. A range on something the schema cannot name is the one case
+needing work: override `clamp_settings_to_schema()`, call `super()`, and clamp
+the rest yourself, or a hand-edited file will disagree with its own slider.
 
 Setting types are `BOOL`, `INT`, `FLOAT`, `STRING`, `ENUM` (which needs an
-`options` list) and `ISLAND_PICKER`. The last one gives
-you the pick-off-the-preview list described above for any `Array[Vector2i]`
-property. Give consecutive entries a matching `"group"` and they are boxed under
-a heading of that name.
+`options` list), `ISLAND_PICKER` and `COLOR_LIST`. The last two give you the
+pick-off-the-preview lists described above, for an `IslandList` and a
+`RemoveColorList` property respectively. Give consecutive entries a matching
+`"group"` and they are boxed under a heading of that name.
 
 Override `get_key_color_property()` to return the name of a `Color` property and
 the dock gives it a swatch under the operation dropdown instead of a row in the
-settings form.
+settings form. No operation currently does — `RemoveBackground` used to, before
+its single colour became a list.
 
 ```gdscript
 @tool

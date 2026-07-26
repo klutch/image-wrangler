@@ -8,6 +8,7 @@ extends RefCounted
 ## straight back to them.
 
 const IslandPicker := preload("res://addons/image_wrangler/ui/iw_island_picker.gd")
+const ColorList := preload("res://addons/image_wrangler/ui/iw_color_list.gd")
 
 ## Left indent applied to the contents of a named group.
 const GROUP_INDENT := 8
@@ -59,6 +60,8 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 				control = _build_enum(operation, property, label, setting, on_changed)
 			IWOperation.SettingType.ISLAND_PICKER:
 				control = _build_island_picker(operation, property)
+			IWOperation.SettingType.COLOR_LIST:
+				control = _build_color_list(operation, property)
 			_:
 				control = _build_number(operation, property, label, setting, false, on_changed)
 
@@ -108,6 +111,16 @@ static func _build_island_picker(operation: IWOperation, property: StringName) -
 	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	picker.setup(operation, property)
 	return picker
+
+
+## Colour lists are left unwired here for the same reason island pickers are:
+## their Pick button needs the preview, and only the dock can reach it. The dock
+## connects the signals and re-runs the operation from there.
+static func _build_color_list(operation: IWOperation, property: StringName) -> Control:
+	var list := ColorList.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.setup(operation, property)
+	return list
 
 
 ## A labelled row. The numeric controls carry their own label, but a LineEdit or
@@ -203,9 +216,10 @@ static func _build_number(operation: IWOperation, property: StringName, label: S
 ## created, without firing their change signals.
 ##
 ## Used when the settings Resource behind the form is swapped for another image.
-## Rebuilding instead would work, but it would destroy the island picker — losing
-## its highlighted row, which drives the emphasised marker — and reset the
-## settings form's scroll position on every click through the image list.
+## Rebuilding instead would work, but it would destroy the list controls — losing
+## the island picker's highlighted row, which drives the emphasised marker, and
+## the colour list's, which drives its editor — and reset the settings form's
+## scroll position on every click through the image list.
 static func refresh_values(operation: IWOperation, container: Node) -> void:
 	var settings := operation.get_settings()
 	if settings == null:
@@ -234,4 +248,6 @@ static func _refresh_into(settings: Resource, node: Node) -> void:
 				(child as LineEdit).text = String(value)
 			elif child is IslandPicker:
 				(child as IslandPicker).refresh()
+			elif child is ColorList:
+				(child as ColorList).refresh()
 		_refresh_into(settings, child)

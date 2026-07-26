@@ -15,12 +15,13 @@ extends Resource
 ## sources of truth free to drift apart. Values arriving from a saved file are
 ## put back inside those ranges by [method IWOperation.clamp_settings_to_schema].
 
-## Background colour keyed out from the image border inwards.
-@export var key_color: Color = Color.WHITE
-
-## How far a pixel may drift from the colour keying its region and still count as
-## pure background.
-@export var tolerance: float = 0.02
+## Background colours keyed out from the image border inwards, each with its own
+## tolerance. See [RemoveColorEntry].
+##
+## An empty list keys nothing out from the border. That is a real state rather
+## than a broken one — an image whose only backgrounds are enclosed regions is
+## described by islands alone.
+@export var remove_colors: RemoveColorList
 
 ## Width of the antialiased band, in pixels. Pixels within this many steps of the
 ## background are treated as a soft edge and given partial alpha; anything
@@ -34,12 +35,17 @@ extends Resource
 ## How far from the keying colour the flood may stray to squeeze through a gap
 ## too narrow to hold a single clean background pixel. Only has an effect while
 ## [member crevice_reach] is above zero. See [method RemoveBackground._flood_step].
+##
+## One number for every key, unlike [member RemoveColorEntry.color_tolerance].
+## This is not a description of a background — it is how far the flood may leave
+## one behind to get somewhere, and that is a property of the geometry it is
+## squeezing through rather than of the colour it started from.
 @export var crevice_tolerance: float = 0.5
 
 ## How many near-background pixels in a row the flood may cross before it needs
 ## solid background again, so it must be at least as long as the constriction it
 ## has to squeeze through. Zero disables the whole mechanism, leaving the flood
-## strictly within [member tolerance].
+## strictly within each key's own tolerance.
 ##
 ## Setting it generously is safer than it sounds. Somewhere the flood reaches
 ## only by straying is reclassified as edge rather than background, so it is
@@ -94,6 +100,10 @@ extends Resource
 
 func _init() -> void:
 	islands = IslandList.new()
+	# One white entry rather than none, so a fresh image starts where the single
+	# Remove Color swatch used to: keying out white at 0.02.
+	remove_colors = RemoveColorList.new()
+	remove_colors.add(Color.WHITE)
 
 
 ## A copy that belongs to no image: every value kept except the islands, which
@@ -103,10 +113,11 @@ func _init() -> void:
 ## nothing. The numbers can stay on screen; the picked coordinates cannot, since
 ## the image they were picked in is gone.
 ##
-## [method Resource.duplicate] copies the *reference* held in [member islands],
-## so without the replacement below the copy would share one list with the
-## original and picking on either would silently edit both.
+## [method Resource.duplicate] copies the *references* held in [member islands]
+## and [member remove_colors], so without the replacements below the copy would
+## share both with the original and editing either would silently edit both.
 func duplicate_for_new_image() -> RemoveBackgroundSettings:
 	var copy: RemoveBackgroundSettings = duplicate()
 	copy.islands = IslandList.new()
+	copy.remove_colors = remove_colors.duplicate_colors()
 	return copy

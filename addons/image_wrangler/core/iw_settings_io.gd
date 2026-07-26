@@ -21,9 +21,10 @@ extends RefCounted
 ## than hand-written per class. The addon's whole premise is that adding an
 ## operation needs no plumbing beyond the operation itself, and persistence has
 ## to follow the same rule as the UI does or that promise is only half true. It
-## also means a setting deliberately left out of the schema — [member
-## RemoveBackgroundSettings.key_color] is — persists anyway, and that a
-## fourteenth tunable cannot be added and silently not saved.
+## also means a value no schema entry ever names — [member
+## RemoveColorEntry.color_tolerance] is one, sitting a level below the property
+## the schema declares — persists anyway, and that a fourteenth tunable cannot be
+## added and silently not saved.
 
 const FORMAT := "image_wrangler"
 const VERSION := 1
@@ -226,9 +227,12 @@ static func _decode(target: Variant, encoded: Variant) -> Variant:
 			# appends below stay typed without anyone reading a hint string.
 			var out: Array = (target as Array).duplicate()
 			out.clear()
-			var blank: Variant = _blank_element(target as Array)
 			for item in (encoded as Array):
-				out.append(_decode(blank, item))
+				# A fresh blank per item, not one hoisted out of the loop. For a
+				# primitive that is the same value either way, but an object blank
+				# is decoded into *in place* — reusing one would append the same
+				# instance under every index and every entry would read alike.
+				out.append(_decode(_blank_element(target as Array), item))
 			return out
 		TYPE_OBJECT:
 			if not (encoded is Dictionary) or target == null:
@@ -239,6 +243,11 @@ static func _decode(target: Variant, encoded: Variant) -> Variant:
 
 
 ## A zero value of [param array]'s element type, to decode each item against.
+##
+## For an array of Resources that means a real instance at its own defaults,
+## built from the element script the array is typed to. Without it a stored entry
+## would decode against [code]null[/code] and come back as null, so an
+## [code]Array[RemoveColorEntry][/code] would survive a save as a row of nothing.
 static func _blank_element(array: Array) -> Variant:
 	if not array.is_typed():
 		return null
@@ -250,6 +259,10 @@ static func _blank_element(array: Array) -> Variant:
 		TYPE_VECTOR2I: return Vector2i.ZERO
 		TYPE_VECTOR2: return Vector2.ZERO
 		TYPE_COLOR: return Color.WHITE
+		TYPE_OBJECT:
+			var element_script: Variant = array.get_typed_script()
+			if element_script is Script:
+				return (element_script as Script).new()
 	return null
 
 
@@ -283,6 +296,14 @@ static func self_test(operation: IWOperation) -> bool:
 				var nested := original.get(name)
 				if nested is IslandList:
 					(nested as IslandList).points = [Vector2i(128, 64), Vector2i(3, 900)]
+				elif nested is RemoveColorList:
+					# Two entries with different tolerances, because one would not
+					# catch a decoder that returned the same instance for every
+					# index — the failure an array of Resources invites.
+					var colors := nested as RemoveColorList
+					colors.clear()
+					colors.add(Color(0.25, 0.5, 0.75), 0.011)
+					colors.add(Color(0.9, 0.1, 0.2), 0.333)
 
 	var round_tripped: Variant = JSON.parse_string(JSON.stringify(to_dict(original)))
 	if not (round_tripped is Dictionary):
@@ -298,10 +319,15 @@ static func self_test(operation: IWOperation) -> bool:
 		var name: String = property.get("name", "")
 		var before: Variant = original.get(name)
 		var after: Variant = restored.get(name)
-		if before is IslandList:
-			if (before as IslandList).points != (after as IslandList).points:
+		if before is Resource:
+			# Compared through the codec rather than by identity, since two
+			# Resources holding identical values are never the same object. This
+			# is the only comparison that reaches inside a nested list.
+			var before_dict := JSON.stringify(to_dict(before as Resource))
+			var after_dict := JSON.stringify(to_dict(after as Resource) if after is Resource else {})
+			if before_dict != after_dict:
 				push_error("Image Wrangler self-test: %s did not round-trip (%s vs %s)."
-						% [name, (before as IslandList).points, (after as IslandList).points])
+						% [name, before_dict, after_dict])
 				passed = false
 		elif before != after:
 			push_error("Image Wrangler self-test: %s did not round-trip (%s vs %s)." % [name, before, after])
