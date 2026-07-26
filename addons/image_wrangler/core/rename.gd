@@ -10,6 +10,10 @@ extends IWOperation
 ## already looking at a list of images and about to write them somewhere — and
 ## because the answer still goes through the same Process buttons.
 ##
+## Its settings are held once for the session rather than per image: a rename
+## scheme describes the batch, and a counter that restarted for every file would
+## mean nothing. Nothing is written to a sidecar.
+##
 ## Nothing is renamed in place. Processing writes copies under the new names, to
 ## wherever the Process buttons ask for, and the sources are left alone. A rename
 ## tool that moved the originals would be a different and much less forgiving
@@ -36,6 +40,10 @@ func get_operation_id() -> StringName:
 
 func get_output_suffix() -> String:
 	return ""
+
+
+func settings_are_per_image() -> bool:
+	return false
 
 
 func transforms_pixels() -> bool:
@@ -91,13 +99,6 @@ func get_settings_schema() -> Array[Dictionary]:
 			"group": "Name",
 			"type": SettingType.STRING,
 			"tooltip": "Goes in front of the finished name, ahead of any number.",
-		},
-		{
-			"property": &"numbering",
-			"label": "Add Numbers",
-			"group": "Numbering",
-			"type": SettingType.BOOL,
-			"tooltip": "Number each file by its position in the Images list, so Process All and\nProcess Current Only agree on what any one file is called.",
 		},
 		{
 			"property": &"start_at",
@@ -191,16 +192,18 @@ func get_output_name(source_path: String, suffix: String, index: int) -> String:
 
 	name = settings.prefix + name + suffix
 
-	if settings.numbering:
-		var counter := settings.start_at + index * settings.step
-		var digits := maxi(settings.digits, 1)
-		var number := str(absi(counter)).pad_zeros(digits)
-		if counter < 0:
-			number = "-" + number
-		if settings.number_at == RenameSettings.NumberAt.START:
-			name = number + settings.separator + name
-		else:
-			name = name + settings.separator + number
+	# Always numbered: the counter is what makes a batch rename a batch rename.
+	# Its value comes from the file's position in the list, so a single run and
+	# a whole run agree on what any one file is called.
+	var counter := settings.start_at + index * settings.step
+	var digits := maxi(settings.digits, 1)
+	var number := str(absi(counter)).pad_zeros(digits)
+	if counter < 0:
+		number = "-" + number
+	if settings.number_at == RenameSettings.NumberAt.START:
+		name = number + settings.separator + name
+	else:
+		name = name + settings.separator + number
 
 	match settings.letter_case:
 		RenameSettings.LetterCase.LOWER:

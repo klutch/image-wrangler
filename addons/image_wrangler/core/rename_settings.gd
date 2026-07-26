@@ -2,13 +2,13 @@
 class_name RenameSettings
 extends Resource
 
-## Every tunable of [Rename], in one object the dock can swap.
+## Every tunable of [Rename].
 ##
-## Like all settings here these belong to the image on screen, which is a little
-## unusual for a batch rename: dialling in a scheme and then selecting a file
-## that has its own saved settings will show that file's scheme instead. The
-## carry-over rule means a run of untouched images all share whatever was last
-## dialled in, which is the case that matters.
+## Unlike the other settings here these are not per-image and are never written
+## to a sidecar. A rename scheme describes the batch rather than any one file —
+## a counter that restarted per image would be meaningless — so one set is held
+## for as long as the dock is open and every image is named by it.
+## [method IWOperation.settings_are_per_image] is what says so.
 
 ## Where the counter goes in the finished name.
 enum NumberAt { END, START }
@@ -30,9 +30,6 @@ enum LetterCase { UNCHANGED, LOWER, UPPER, TITLE }
 ## Goes in front of the finished name, ahead of any number.
 @export var prefix: String = ""
 
-## Number each file according to its position in the list.
-@export var numbering: bool = false
-
 ## Counter value for the first file in the list.
 @export var start_at: int = 1
 
@@ -40,13 +37,13 @@ enum LetterCase { UNCHANGED, LOWER, UPPER, TITLE }
 @export var step: int = 1
 
 ## Zero-pads the counter to at least this many digits, so names sort correctly in
-## a file browser.
+## a file browser. Every file is numbered by its position in the list.
 @export var digits: int = 3
 
 ## Which end of the name the counter goes on. See [enum NumberAt].
 @export var number_at: int = NumberAt.END
 
-## Text between the name and the counter. Ignored when numbering is off.
+## Text between the name and the counter.
 @export var separator: String = "_"
 
 ## See [enum LetterCase]. Applied to the whole finished name, never to the
@@ -63,11 +60,3 @@ enum LetterCase { UNCHANGED, LOWER, UPPER, TITLE }
 ## proves every copy matches its source by checksum before anything is deleted,
 ## and sends the originals to the system trash rather than unlinking them.
 @export var remove_old_files: bool = false
-
-
-## A copy that belongs to another image.
-##
-## Nothing here is positional the way an island coordinate is, so unlike
-## [RemoveBackgroundSettings] a plain duplicate carries everything.
-func duplicate_for_new_image() -> RenameSettings:
-	return duplicate()

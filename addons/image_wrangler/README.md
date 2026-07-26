@@ -301,6 +301,11 @@ wherever the Process buttons ask for; the sources are untouched. A rename tool
 that moved the originals would be a far less forgiving thing to point at a folder
 of art.
 
+**Its settings are not per-image**, unlike every other operation's. A rename
+scheme describes the batch rather than any one file — a counter that restarted
+for each image would mean nothing — so one set is held for as long as the dock is
+open, and nothing is written to a sidecar.
+
 Because it does not touch pixels, the file is **copied byte-for-byte** rather
 than re-encoded, so a renamed JPEG stays a JPEG instead of becoming a PNG wearing
 a `.jpg` name.
@@ -310,8 +315,7 @@ a `.jpg` name.
 | Base Name | Replaces every file's name. Leave it empty and each keeps its own — which is what makes Find and numbering useful across a mixed batch. |
 | Find / Replace With | Substring replacement. An empty **Find** switches it off, so an empty **Replace With** cannot quietly strip something. |
 | Prefix | Goes in front, ahead of any number. |
-| Add Numbers | Numbers each file by its position in the Images list, so **Process All** and **Process Current Only** agree on what any one file is called. |
-| Start At / Step / Digits | Counter start, increment, and zero padding — pad so the names sort correctly in a file browser. |
+| Start At / Step / Digits | Every file is numbered by its position in the Images list, so **Process All** and **Process Current Only** agree on what any one file is called. These set the counter's start, increment and zero padding — pad so the names sort correctly in a file browser. |
 | Separator / Number At | The text between name and counter, and which end it goes on. |
 | Letter Case | Unchanged, lowercase, UPPERCASE or Title Case. Never applied to the extension. |
 | Lowercase Extension | So a folder of mixed `.PNG` and `.png` comes out consistent. |

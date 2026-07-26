@@ -598,6 +598,9 @@ static func _load_image(path: String) -> Image:
 func _select_operation(index: int) -> void:
 	if index < 0 or index >= _operations.size():
 		return
+	# Any pending write belongs to the operation on its way out, and the flush
+	# resolves it by the *current* operation's id — so it has to go first.
+	_flush_autosave()
 	var previous_suffix := _operation.get_output_suffix() if _operation != null else ""
 	_operation = _operations[index]
 	_operation_selector.selected = index
@@ -687,6 +690,11 @@ func _settings_for(path: String, template: Resource) -> Resource:
 	if path.is_empty() or _operation == null:
 		return null
 
+	# An operation whose settings describe the batch keeps one set for the whole
+	# session: no per-path entry, no sidecar, nothing to swap.
+	if not _operation.settings_are_per_image():
+		return _operation.get_settings()
+
 	var id := _operation.get_operation_id()
 	if not _settings_by_path.has(path):
 		_settings_by_path[path] = {}
@@ -757,6 +765,9 @@ func _flush_autosave() -> void:
 
 
 func _schedule_autosave() -> void:
+	if _operation != null and not _operation.settings_are_per_image():
+		# Nothing to save: these settings do not belong to any one file.
+		return
 	var path := _current_path()
 	if path.is_empty() or _autosave == null:
 		return

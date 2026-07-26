@@ -56,6 +56,16 @@ func transforms_pixels() -> bool:
 	return true
 
 
+## Whether these settings belong to one image or to the whole session.
+##
+## Per-image is the default, and the dock then keeps a set per source and saves
+## it beside the file. An operation that describes the batch rather than any one
+## image returns false: one set is held for as long as the dock is open, nothing
+## is read or written to a sidecar, and every image is processed by it.
+func settings_are_per_image() -> bool:
+	return true
+
+
 ## Whether a source should be offered for deletion once its output is written.
 ##
 ## Only ever an offer: the dock confirms with the user and verifies the copy
