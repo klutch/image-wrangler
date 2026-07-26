@@ -1,22 +1,23 @@
 @tool
 extends VBoxContainer
 
-## Settings control for an [code]Array[Vector2i][/code] of picked pixels.
+## The Island Picker: a list of image positions the user clicks off the preview,
+## each standing for a region the operation should act on.
 ##
 ## Owns the list and its buttons, but neither the picking nor the storage. Only
 ## the dock can see the preview, so it listens for [signal pick_toggled], routes
-## the click back in through [method add_point], and mirrors the entries as
+## the click back in through [method add_island], and mirrors the entries as
 ## markers. The dock also decides what the list is *of* — for the background
-## remover it swaps the contents per image via [method set_points], so picked
+## remover it swaps the contents per image via [method set_islands], so picked
 ## islands follow the image they were found on.
 
 ## Emitted when the pick button is toggled. The dock puts the preview into
 ## crosshair mode in response.
 signal pick_toggled(enabled: bool)
 
-## Emitted whenever the underlying array changes, so the dock can re-run the
+## Emitted whenever the underlying list changes, so the dock can re-run the
 ## preview and write the list back against the current image.
-signal points_changed
+signal islands_changed
 
 ## Emitted when a different row is highlighted, so the matching marker can be.
 signal selection_changed
@@ -32,7 +33,7 @@ const PICK_ICON_PATH := "res://addons/image_wrangler/ui/color-picker.png"
 ## Edge length the icon is resampled to, before editor DPI scaling.
 const PICK_ICON_SIZE := 16
 
-## Longest file name shown in the title before it is elided from the middle.
+## Longest file name shown before it is elided from the middle.
 ##
 ## Generous on purpose: the label reports a minimum width of one pixel either
 ## way, so this only decides how much is shown when there is room. Too tight a
@@ -43,14 +44,13 @@ const CONTEXT_MAX_CHARS := 40
 var _operation: IWOperation
 var _property: StringName
 
-## Supplied by the dock: maps a pixel to its colour in the image on screen.
+## Supplied by the dock: maps a position to its colour in the image on screen.
 ## Swatches are sampled through this rather than stored, so they can never go
 ## stale against whichever image is currently selected — and for the background
-## remover the swatch is not decoration, it is the colour that seed keys out.
+## remover the swatch is not decoration, it is the colour that island keys out.
 var _color_provider := Callable()
 
-var _base_label := ""
-var _title: Label
+var _context: Label
 var _list: ItemList
 var _pick_button: Button
 var _remove_button: Button
@@ -59,44 +59,36 @@ var _hint: Label
 
 
 ## Binds this control to [param property] on [param operation].
-func setup(operation: IWOperation, property: StringName, label: String) -> void:
+func setup(operation: IWOperation, property: StringName) -> void:
 	_operation = operation
 	_property = property
-	_base_label = label
 	_build()
 	_refresh()
 
 
 func _build() -> void:
-	_title = Label.new()
-	_title.text = _base_label
-	# This label names the selected image, and the settings form it lives in
-	# cannot scroll horizontally, so its width becomes a floor for the whole tool
-	# column. Ellipsising drops its reported minimum width to nothing, which is
-	# what keeps a long file name from pinning the splitters open.
-	_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	add_child(_title)
-
+	# The buttons come first so they sit flush under the group heading. This
+	# control has no title of its own — the settings form already provides one.
 	var buttons := HBoxContainer.new()
 	add_child(buttons)
 
 	_pick_button = Button.new()
 	_pick_button.text = "Pick"
 	_pick_button.toggle_mode = true
-	_pick_button.tooltip_text = "Click a spot in the preview to add it to the list."
+	_pick_button.tooltip_text = "Click a region in the preview to add it to the list.\nPress H over the dock to show or hide the markers."
 	_pick_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_pick_button.toggled.connect(func(pressed: bool) -> void: pick_toggled.emit(pressed))
 	buttons.add_child(_pick_button)
 
 	_remove_button = Button.new()
 	_remove_button.text = "Remove"
-	_remove_button.tooltip_text = "Remove the highlighted entry."
+	_remove_button.tooltip_text = "Remove the highlighted island."
 	_remove_button.pressed.connect(_on_remove_pressed)
 	buttons.add_child(_remove_button)
 
 	_clear_button = Button.new()
 	_clear_button.text = "Clear"
-	_clear_button.tooltip_text = "Remove every entry for this image."
+	_clear_button.tooltip_text = "Remove every island for this image."
 	_clear_button.pressed.connect(_on_clear_pressed)
 	buttons.add_child(_clear_button)
 
@@ -105,6 +97,16 @@ func _build() -> void:
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.item_selected.connect(_on_item_selected)
 	add_child(_list)
+
+	# Captions the list rather than heading the whole control, so it cannot push
+	# the buttons away from the group heading. It names the selected image, and
+	# the settings form it lives in cannot scroll horizontally, so its width
+	# would otherwise become a floor for the whole column — ellipsising drops its
+	# reported minimum width to nothing.
+	_context = Label.new()
+	_context.modulate = Color(1, 1, 1, 0.6)
+	_context.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	add_child(_context)
 
 	_hint = Label.new()
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -168,69 +170,58 @@ static func _build_pick_icon(invert: bool) -> Texture2D:
 	return ImageTexture.create_from_image(image)
 
 
-## Lets the dock supply the colour behind a pixel, for swatches and validation.
+# --- Public API ---------------------------------------------------------
+
+## Lets the dock supply the colour behind a position, for the row swatches.
 func set_color_provider(provider: Callable) -> void:
 	_color_provider = provider
 	_refresh()
 
 
-## Names what the list currently belongs to, so it is obvious the entries are
-## scoped to one image rather than to the tool.
+## Names the image the list currently belongs to, so it is obvious the entries
+## are scoped to one image rather than to the operation.
 func set_context_label(context: String) -> void:
 	if context.is_empty():
-		_title.text = _base_label
-		_title.tooltip_text = ""
+		_context.text = "No image selected."
+		_context.tooltip_text = ""
 		return
-	_title.text = "%s: %s" % [_base_label, _elide_middle(context, CONTEXT_MAX_CHARS)]
-	_title.tooltip_text = context
+	_context.text = _elide_middle(context, CONTEXT_MAX_CHARS)
+	_context.tooltip_text = context
 
 
-## Shortens a long name from the middle, keeping both ends.
-##
-## Generated file names tend to share a long descriptive tail, so trimming only
-## the end — which is all the label's own ellipsis can do — throws away the part
-## that actually distinguishes them, and the extension with it.
-static func _elide_middle(text: String, limit: int) -> String:
-	if text.length() <= limit:
-		return text
-	var head := floori((limit - 1) * 0.5)
-	var tail := limit - 1 - head
-	return "%s…%s" % [text.substr(0, head), text.substr(text.length() - tail)]
+## Adds an island at [param at].
+func add_island(at: Vector2i) -> void:
+	var islands := _islands()
+	if islands.has(at):
+		_hint.text = "That position is already in the list."
+		_select(islands.find(at))
+		return
+
+	islands.append(at)
+	_operation.set(_property, islands)
+	_refresh()
+	_select(islands.size() - 1)
+	_hint.text = ""
+	islands_changed.emit()
+
+
+func get_islands() -> Array[Vector2i]:
+	return _islands()
 
 
 ## Replaces the whole list and redraws it. Used when the selection changes.
-func set_points(points: Array[Vector2i]) -> void:
-	write_points(points)
+func set_islands(islands: Array[Vector2i]) -> void:
+	write_islands(islands)
 	_hint.text = ""
 	_refresh()
 
 
-## Writes the property without touching the UI, for batch runs that swap points
+## Writes the property without touching the UI, for batch runs that swap islands
 ## per image behind the scenes.
-func write_points(points: Array[Vector2i]) -> void:
+func write_islands(islands: Array[Vector2i]) -> void:
 	var stored: Array[Vector2i] = []
-	stored.assign(points)
+	stored.assign(islands)
 	_operation.set(_property, stored)
-
-
-## Adds a picked pixel to the list.
-func add_point(point: Vector2i) -> void:
-	var points := _points()
-	if points.has(point):
-		_hint.text = "That pixel is already in the list."
-		_select(points.find(point))
-		return
-
-	points.append(point)
-	_operation.set(_property, points)
-	_refresh()
-	_select(points.size() - 1)
-	_hint.text = ""
-	points_changed.emit()
-
-
-func get_points() -> Array[Vector2i]:
-	return _points()
 
 
 ## Row currently highlighted, or -1. Drives which marker is emphasised.
@@ -244,9 +235,11 @@ func set_pick_active(enabled: bool) -> void:
 	_pick_button.set_pressed_no_signal(enabled)
 
 
-func _points() -> Array[Vector2i]:
-	var points: Array[Vector2i] = _operation.get(_property)
-	return points
+# --- Internals ----------------------------------------------------------
+
+func _islands() -> Array[Vector2i]:
+	var islands: Array[Vector2i] = _operation.get(_property)
+	return islands
 
 
 func _on_item_selected(_index: int) -> void:
@@ -256,28 +249,28 @@ func _on_item_selected(_index: int) -> void:
 
 func _on_remove_pressed() -> void:
 	var index := selected_index()
-	var points := _points()
-	if index < 0 or index >= points.size():
+	var islands := _islands()
+	if index < 0 or index >= islands.size():
 		return
-	points.remove_at(index)
-	_operation.set(_property, points)
+	islands.remove_at(index)
+	_operation.set(_property, islands)
 	_refresh()
 	if _list.item_count > 0:
 		_select(mini(index, _list.item_count - 1))
 	_hint.text = ""
-	points_changed.emit()
+	islands_changed.emit()
 	selection_changed.emit()
 
 
 func _on_clear_pressed() -> void:
-	var points := _points()
-	if points.is_empty():
+	var islands := _islands()
+	if islands.is_empty():
 		return
-	points.clear()
-	_operation.set(_property, points)
+	islands.clear()
+	_operation.set(_property, islands)
 	_refresh()
 	_hint.text = ""
-	points_changed.emit()
+	islands_changed.emit()
 	selection_changed.emit()
 
 
@@ -292,18 +285,31 @@ func _select(index: int) -> void:
 func _refresh() -> void:
 	if _list == null:
 		return
-	var points := _points()
+	var islands := _islands()
 	_list.clear()
-	for point in points:
-		var index := _list.add_item("(%d, %d)" % [point.x, point.y])
+	for at in islands:
+		var index := _list.add_item("(%d, %d)" % [at.x, at.y])
 		if _color_provider.is_valid():
-			_list.set_item_icon(index, _swatch(_color_provider.call(point)))
+			_list.set_item_icon(index, _swatch(_color_provider.call(at)))
 	_update_buttons()
 
 
 func _update_buttons() -> void:
 	_remove_button.disabled = selected_index() < 0
 	_clear_button.disabled = _list.item_count == 0
+
+
+## Shortens a long name from the middle, keeping both ends.
+##
+## Generated file names tend to share a long descriptive tail, so trimming only
+## the end — which is all the label's own ellipsis can do — throws away the part
+## that actually distinguishes them, and the extension with it.
+static func _elide_middle(text: String, limit: int) -> String:
+	if text.length() <= limit:
+		return text
+	var head := floori((limit - 1) * 0.5)
+	var tail := limit - 1 - head
+	return "%s…%s" % [text.substr(0, head), text.substr(text.length() - tail)]
 
 
 ## Small bordered colour chip, so a white pick is still visible on the row.

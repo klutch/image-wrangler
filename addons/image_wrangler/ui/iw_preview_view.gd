@@ -3,7 +3,7 @@ extends Control
 
 ## A zoomable, scrollable image view over a checkerboard, so cut-out
 ## transparency and any surviving fringe are actually visible. Doubles as the
-## picking surface for tools that need the user to point at the image.
+## picking surface for operations that need the user to point at the image.
 ##
 ## The image is never stretched to fit. Below the viewport size it sits centred
 ## with transparent margins around it; above, scrollbars appear and it is shown
@@ -41,6 +41,16 @@ var pick_mode := false:
 		if _canvas != null:
 			_canvas.mouse_default_cursor_shape = Control.CURSOR_CROSS if value else Control.CURSOR_ARROW
 
+## Whether the island markers are drawn. They sit right on top of the edges
+## being judged, so being able to blink them away matters.
+var markers_visible := true:
+	set(value):
+		if markers_visible == value:
+			return
+		markers_visible = value
+		if _canvas != null:
+			_canvas.queue_redraw()
+
 var _texture: Texture2D
 var _checker: Texture2D
 var _image_size := Vector2i.ZERO
@@ -73,7 +83,7 @@ func _init() -> void:
 	_canvas = Control.new()
 	_canvas.clip_contents = true
 	# Nearest keeps edge pixels honest — a filtered preview would smear exactly
-	# the fringe this tool exists to remove — and keeps the tiled checkerboard
+	# the fringe the background remover exists to kill — and keeps the checkerboard
 	# seam-free.
 	_canvas.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_canvas.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
@@ -119,6 +129,12 @@ func set_markers(markers: Array[Vector2i], selected: int) -> void:
 	_markers = markers.duplicate()
 	_selected_marker = selected
 	_canvas.queue_redraw()
+
+
+## Flips marker visibility and reports the new state.
+func toggle_markers() -> bool:
+	markers_visible = not markers_visible
+	return markers_visible
 
 
 func get_zoom() -> float:
@@ -320,6 +336,8 @@ func _draw_canvas() -> void:
 
 
 func _draw_markers() -> void:
+	if not markers_visible:
+		return
 	var scale := _scale()
 	for i in _markers.size():
 		var point := _markers[i]

@@ -32,7 +32,7 @@ extends IWOperation
 ## rather than by how close to the key they are. See [method _classify].
 ##
 ## [b]More than one background colour.[/b] The image border floods with
-## [member key_color], but each picked seed in [member seed_points] floods with
+## [member key_color], but each picked island in [member island_points] floods with
 ## the colour of the pixel it sits on, so an island of some other flat colour
 ## keys out against itself. Every pixel therefore remembers which key claimed it,
 ## and coverage and decontamination are both measured against that key rather
@@ -74,15 +74,15 @@ var contiguous: bool = true
 ## border. Lets the user hand-pick enclosed regions that [member contiguous]
 ## deliberately skips.
 ##
-## Each seed keys out the colour of the pixel it lands on, sampled at process
-## time rather than stored, so a seed always removes exactly what was clicked and
+## Each island keys out the colour of the pixel it lands on, sampled at process
+## time rather than stored, so an island always removes exactly what was clicked and
 ## can never disagree with the image. Ignored when [member contiguous] is off,
 ## since every key-coloured pixel already qualifies then.
 ##
 ## These describe one particular image, so the dock swaps them per file rather
 ## than treating them as a setting shared across a batch. Points outside the
 ## image being processed are skipped, which keeps a stale list harmless.
-var seed_points: Array[Vector2i] = []
+var island_points: Array[Vector2i] = []
 
 ## Un-blend the background out of partially transparent pixels.
 var decontaminate: bool = true
@@ -112,10 +112,6 @@ func get_operation_name() -> String:
 	return "Remove Background"
 
 
-func get_operation_description() -> String:
-	return "Keys out a flat background color and rebuilds the antialiased edge."
-
-
 func get_output_suffix() -> String:
 	return "_nobg"
 
@@ -129,6 +125,7 @@ func get_settings_schema() -> Array[Dictionary]:
 		{
 			"property": &"tolerance",
 			"label": "Color Tolerance",
+			"group": "Settings",
 			"type": SettingType.FLOAT,
 			"min": 0.0,
 			"max": 0.5,
@@ -138,6 +135,7 @@ func get_settings_schema() -> Array[Dictionary]:
 		{
 			"property": &"edge_width",
 			"label": "Edge Width",
+			"group": "Settings",
 			"type": SettingType.INT,
 			"min": 0,
 			"max": 16,
@@ -147,6 +145,7 @@ func get_settings_schema() -> Array[Dictionary]:
 		{
 			"property": &"edge_contract",
 			"label": "Edge Contract",
+			"group": "Settings",
 			"type": SettingType.FLOAT,
 			"min": 0.0,
 			"max": 0.9,
@@ -156,29 +155,32 @@ func get_settings_schema() -> Array[Dictionary]:
 		{
 			"property": &"contiguous",
 			"label": "Only Outer Background",
+			"group": "Settings",
 			"type": SettingType.BOOL,
 			"tooltip": "Flood fill inwards from the image border, so regions enclosed by the\nsubject (eyes, highlights, gaps in lettering) stay opaque.",
 		},
 		{
-			"property": &"seed_points",
-			"label": "Picked Islands",
-			"type": SettingType.POINT_LIST,
-			"tooltip": "Enclosed regions to remove anyway, picked off the preview.\nEach one keys out the color of the pixel you clicked, so an island need\nnot match the main background color. Only applies while\n\"Only Outer Background\" is on.",
-		},
-		{
 			"property": &"decontaminate",
 			"label": "Remove Color Fringe",
+			"group": "Settings",
 			"type": SettingType.BOOL,
 			"tooltip": "Un-blends the background color out of partially transparent pixels.\nThis is what stops an outline appearing once the image is composited.",
 		},
 		{
 			"property": &"bleed_radius",
 			"label": "Color Bleed",
+			"group": "Settings",
 			"type": SettingType.INT,
 			"min": 0,
 			"max": 64,
 			"step": 1,
 			"tooltip": "Pushes subject color into fully transparent pixels, in pixels.\nTexture filtering and mipmaps sample RGB even where alpha is zero, so\nwithout this the background can bleed back into the edge on screen.",
+		},
+		{
+			"property": &"island_points",
+			"group": "Island Picker",
+			"type": SettingType.ISLAND_PICKER,
+			"tooltip": "Enclosed regions to remove anyway, picked off the preview.\nEach one keys out the color of the pixel you clicked, so an island need\nnot match the main background color. Only applies while\n\"Only Outer Background\" is on.",
 		},
 	]
 
@@ -205,7 +207,7 @@ func process_image(source: Image) -> Image:
 		return image
 
 	var data := image.get_data()
-	# Distances against the tool's own key. Picked seeds bring their own colours
+	# Distances against the operation's own key. Picked islands bring their own
 	# and are measured on demand, but this covers the border flood, which is
 	# nearly every background pixel in a normal image.
 	var key_dist := _distance_map(data, pixel_count)
@@ -335,11 +337,11 @@ func _color_at(data: PackedByteArray, index: int) -> Color:
 ##
 ## Returns [code][mask, key_of, keys][/code]: the class per pixel, the index into
 ## [code]keys[/code] that claimed it (-1 for subject), and the background colours
-## in play — the tool's own key first, then one per picked seed.
+## in play — the operation's own key first, then one per picked island.
 ##
 ## Two passes over one queue. The first claims the background itself — pixels
 ## within [member tolerance] of the colour keying their region, flood filled
-## inwards from the image border (plus any [member seed_points]) when
+## inwards from the image border (plus any [member island_points]) when
 ## [member contiguous] is set, which is what keeps unpicked enclosed regions
 ## opaque. The second walks [member edge_width] steps further in from that
 ## background and calls what it touches the antialiased band, inheriting the key
@@ -394,21 +396,21 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, width: int, 
 				queue[tail] = row_end
 				tail += 1
 
-		# Hand-picked islands join the same queue as the border, each carrying
-		# the colour of the pixel it landed on. A seed always takes, since its
+		# Picked islands join the same queue as the border, each carrying
+		# the colour of the pixel it landed on. An island always takes, since its
 		# key is that pixel's own colour — the user pointed at what to remove.
 		# One already swallowed by the border flood adds nothing, so it is
 		# skipped rather than duplicating a key.
-		for point in seed_points:
+		for point in island_points:
 			if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
 				continue
-			var seed_index := point.y * width + point.x
-			if mask[seed_index] == MASK_BACKGROUND:
+			var island_index := point.y * width + point.x
+			if mask[island_index] == MASK_BACKGROUND:
 				continue
-			keys.append(_color_at(data, seed_index))
-			mask[seed_index] = MASK_BACKGROUND
-			key_of[seed_index] = keys.size() - 1
-			queue[tail] = seed_index
+			keys.append(_color_at(data, island_index))
+			mask[island_index] = MASK_BACKGROUND
+			key_of[island_index] = keys.size() - 1
+			queue[tail] = island_index
 			tail += 1
 
 		# 4-connected on purpose: 8-connectivity leaks through diagonal
@@ -450,7 +452,7 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, width: int, 
 					queue[tail] = down
 					tail += 1
 	else:
-		# Without contiguity there is nothing to flood from, so picked seeds have
+		# Without contiguity there is nothing to flood from, so picked islands have
 		# no meaning: every key-coloured pixel already qualifies.
 		for i in pixel_count:
 			if key_dist[i] <= tolerance:
@@ -515,7 +517,7 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, width: int, 
 
 
 ## Distance from a pixel to the key of the region claiming it, taking the
-## precomputed map for the tool's own key and measuring the rest on demand.
+## precomputed map for the operation's own key and measuring the rest on demand.
 func _region_distance(data: PackedByteArray, key_dist: PackedFloat32Array, index: int, key_index: int, key: Color) -> float:
 	return key_dist[index] if key_index == 0 else _distance_at(data, index, key)
 
@@ -528,10 +530,10 @@ func _region_distance(data: PackedByteArray, key_dist: PackedFloat32Array, index
 ## feeds both the coverage estimate (as the reference distance) and the colour
 ## bleed (as the replacement RGB).
 ##
-## Subject pixels that look like the tool's own background colour are excluded as
-## seeds — an unpicked enclosed region is opaque, but keying off its colour would
-## hand edge pixels the very background we are trying to remove. Seed keys are
-## deliberately not excluded here: a colour a seed keys out in one place is
+## Subject pixels that look like the operation's own background colour are excluded
+## as sources — an unpicked enclosed region is opaque, but keying off its colour
+## would hand edge pixels the very background we are trying to remove. Island keys
+## are deliberately not excluded here: a colour an island keys out in one place is
 ## legitimate subject material elsewhere in the image.
 func _nearest_subject_map(mask: PackedByteArray, key_dist: PackedFloat32Array, width: int, height: int, radius: int) -> PackedInt32Array:
 	var pixel_count := width * height

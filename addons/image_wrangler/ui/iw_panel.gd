@@ -1,13 +1,13 @@
 @tool
 extends VBoxContainer
 
-## The Image Wrangler bottom panel: pick images, tweak a tool, write results.
+## The Image Wrangler bottom panel: pick images, tweak an operation, write results.
 
 const SettingsBuilder := preload("res://addons/image_wrangler/ui/iw_settings_builder.gd")
 const PreviewView := preload("res://addons/image_wrangler/ui/iw_preview_view.gd")
-const PointListEditor := preload("res://addons/image_wrangler/ui/iw_point_list_editor.gd")
+const IslandPicker := preload("res://addons/image_wrangler/ui/iw_island_picker.gd")
 
-## Every tool the dock offers. Add new [IWOperation] subclasses here.
+## Every operation the dock offers. Add new [IWOperation] subclasses here.
 const OPERATION_SCRIPTS := [
 	"res://addons/image_wrangler/core/iw_background_remover.gd",
 ]
@@ -31,25 +31,24 @@ var _suffix_is_default := true
 var _pending_outputs: Dictionary = {}
 
 ## Picked islands keyed by source path. They describe a place in one particular
-## image, so they live with the image rather than with the tool: they follow the
-## selection, are swapped in per file during a batch run, and are dropped when
-## the image leaves the list.
-var _seeds_by_path: Dictionary = {}
+## image, so they live with the image rather than with the operation: they follow
+## the selection, are swapped in per file during a batch run, and are dropped
+## when the image leaves the list.
+var _islands_by_path: Dictionary = {}
 
 var _file_list: ItemList
 var _preview: PreviewView
 
-## The current tool's point-list control, when it has one. Non-null means the
+## The current operation's island picker, when it has one. Non-null means the
 ## preview can be picked on.
-var _point_editor: PointListEditor
+var _island_picker: IslandPicker
 var _status_label: Label
 var _detail_label: Label
 var _operation_selector: OptionButton
-var _operation_description: Label
 var _key_color_row: HBoxContainer
 var _key_color_button: ColorPickerButton
 
-## Property the key-colour swatch writes to, or empty when the tool has none.
+## Property the key-colour swatch writes to, or empty when the operation has none.
 var _key_color_property := &""
 var _settings_box: VBoxContainer
 var _show_original: CheckButton
@@ -80,6 +79,28 @@ func _ready() -> void:
 	_update_controls()
 
 
+## H toggles the island markers, which otherwise sit right on top of the edges
+## you are trying to judge.
+##
+## Scoped to the dock rather than bound globally: it only fires while the panel
+## is on screen and the pointer is inside it, so H stays free everywhere else in
+## the editor. Being unhandled input, it also never steals a keystroke from a
+## focused text field.
+func _unhandled_key_input(event: InputEvent) -> void:
+	if _preview == null or not is_visible_in_tree():
+		return
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	if key.keycode != KEY_H or key.ctrl_pressed or key.alt_pressed or key.shift_pressed or key.meta_pressed:
+		return
+	if not get_global_rect().has_point(get_global_mouse_position()):
+		return
+	var shown := _preview.toggle_markers()
+	_set_status("Island markers %s." % ("shown" if shown else "hidden"))
+	accept_event()
+
+
 func _build_operations() -> void:
 	for path: String in OPERATION_SCRIPTS:
 		var script: GDScript = load(path)
@@ -104,7 +125,7 @@ func _build_ui() -> void:
 	right_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	columns.add_child(right_split)
 	right_split.add_child(_build_preview_column())
-	right_split.add_child(_build_tool_column())
+	right_split.add_child(_build_operation_column())
 
 	add_child(_build_status_bar())
 	_build_dialogs()
@@ -175,7 +196,7 @@ func _build_preview_column() -> Control:
 	_auto_preview = CheckButton.new()
 	_auto_preview.text = "Auto"
 	_auto_preview.button_pressed = true
-	_auto_preview.tooltip_text = "Re-run the tool whenever a setting changes."
+	_auto_preview.tooltip_text = "Re-run the operation whenever a setting changes."
 	_auto_preview.toggled.connect(_on_auto_preview_toggled)
 	toolbar.add_child(_auto_preview)
 
@@ -185,7 +206,7 @@ func _build_preview_column() -> Control:
 
 	_refresh_button = Button.new()
 	_refresh_button.text = "Refresh"
-	_refresh_button.tooltip_text = "Re-run the tool on the selected image."
+	_refresh_button.tooltip_text = "Re-run the operation on the selected image."
 	_refresh_button.pressed.connect(_run_preview)
 	toolbar.add_child(_refresh_button)
 
@@ -241,12 +262,12 @@ func _build_zoom_controls() -> Control:
 	return row
 
 
-func _build_tool_column() -> Control:
+func _build_operation_column() -> Control:
 	var column := VBoxContainer.new()
 	column.custom_minimum_size = Vector2(220, 0)
 
 	var title := Label.new()
-	title.text = "Tool"
+	title.text = "Operation"
 	column.add_child(title)
 
 	_operation_selector = OptionButton.new()
@@ -255,8 +276,8 @@ func _build_tool_column() -> Control:
 	_operation_selector.item_selected.connect(_select_operation)
 	column.add_child(_operation_selector)
 
-	# The colour a tool keys out sits right under the tool itself: it is what
-	# the tool is about, not a knob controlling how it works.
+	# The colour an operation keys out sits right under the operation itself: it
+	# is what the operation is about, not a knob controlling how it works.
 	_key_color_row = HBoxContainer.new()
 	column.add_child(_key_color_row)
 
@@ -271,11 +292,6 @@ func _build_tool_column() -> Control:
 	_key_color_button.tooltip_text = "The background color to key out.\nThe picker's eyedropper can sample it off the screen."
 	_key_color_button.color_changed.connect(_on_key_color_changed)
 	_key_color_row.add_child(_key_color_button)
-
-	_operation_description = Label.new()
-	_operation_description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_operation_description.modulate = Color(1, 1, 1, 0.6)
-	column.add_child(_operation_description)
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -451,7 +467,7 @@ func _on_remove_pressed() -> void:
 	if index < 0:
 		return
 	# Islands are scoped to the image, so they go with it.
-	_seeds_by_path.erase(_sources[index])
+	_islands_by_path.erase(_sources[index])
 	_sources.remove_at(index)
 	_source_image = null
 	_result_image = null
@@ -462,7 +478,7 @@ func _on_remove_pressed() -> void:
 		_on_file_selected(next)
 	else:
 		_preview.set_image(null)
-		_apply_seeds_for("")
+		_apply_islands_for("")
 		_set_status("No image selected.")
 		_detail_label.text = ""
 	_update_controls()
@@ -478,13 +494,13 @@ func _on_file_selected(index: int) -> void:
 		_set_status("Could not read %s" % path.get_file())
 		_detail_label.text = ""
 		_preview.set_image(null)
-		_apply_seeds_for("")
+		_apply_islands_for("")
 		_update_controls()
 		return
 
 	# Islands belong to this image, so they are swapped in before anything is
 	# processed with them.
-	_apply_seeds_for(path)
+	_apply_islands_for(path)
 
 	var pixel_count := _source_image.get_width() * _source_image.get_height()
 	if pixel_count > AUTO_PREVIEW_PIXEL_LIMIT and _auto_preview.button_pressed:
@@ -517,10 +533,9 @@ func _select_operation(index: int) -> void:
 	var previous_suffix := _operation.get_output_suffix() if _operation != null else ""
 	_operation = _operations[index]
 	_operation_selector.selected = index
-	_operation_description.text = _operation.get_operation_description()
 	_bind_key_color()
 	SettingsBuilder.build(_operation, _settings_box, _on_setting_changed)
-	_bind_point_editor()
+	_bind_island_picker()
 
 	# Only reset the suffix while the user has not claimed it as their own.
 	if _suffix_is_default or _suffix_edit.text == previous_suffix:
@@ -532,8 +547,8 @@ func _select_operation(index: int) -> void:
 		_schedule_preview()
 
 
-## Points the swatch at the current tool's key colour, hiding it for tools that
-## do not key one out.
+## Points the swatch at the current operation's key colour, hiding it for
+## operations that do not key one out.
 func _bind_key_color() -> void:
 	_key_color_property = _operation.get_key_color_property()
 	_key_color_row.visible = _key_color_property != &""
@@ -549,23 +564,23 @@ func _on_key_color_changed(color: Color) -> void:
 
 
 ## Hooks up the point-list control the settings builder just created, if the
-## tool declared one. Tools without one leave picking switched off.
-func _bind_point_editor() -> void:
-	_point_editor = null
+## operation declared one. Operations without one leave picking switched off.
+func _bind_island_picker() -> void:
+	_island_picker = null
 	for child in _settings_box.get_children():
-		if child is PointListEditor:
-			_point_editor = child
-			_point_editor.pick_toggled.connect(_on_pick_toggled)
-			_point_editor.points_changed.connect(_on_points_changed)
-			_point_editor.selection_changed.connect(_update_markers)
-			_point_editor.set_color_provider(_sample_source_color)
+		if child is IslandPicker:
+			_island_picker = child
+			_island_picker.pick_toggled.connect(_on_pick_toggled)
+			_island_picker.islands_changed.connect(_on_islands_changed)
+			_island_picker.selection_changed.connect(_update_markers)
+			_island_picker.set_color_provider(_sample_source_color)
 			break
-	# Switching tools always drops out of pick mode, so a fresh settings form
-	# never inherits a crosshair from the tool before it.
+	# Switching operations always drops out of pick mode, so a fresh settings
+	# form never inherits a crosshair from the one before it.
 	_preview.pick_mode = false
-	if _point_editor != null:
-		_point_editor.set_pick_active(false)
-	_apply_seeds_for(_current_path())
+	if _island_picker != null:
+		_island_picker.set_pick_active(false)
+	_apply_islands_for(_current_path())
 	_update_markers()
 
 
@@ -577,38 +592,38 @@ func _current_path() -> String:
 	return _sources[index]
 
 
-func _seeds_for(path: String) -> Array[Vector2i]:
-	var points: Array[Vector2i] = []
-	if not path.is_empty() and _seeds_by_path.has(path):
-		points.assign(_seeds_by_path[path])
-	return points
+func _islands_for(path: String) -> Array[Vector2i]:
+	var islands: Array[Vector2i] = []
+	if not path.is_empty() and _islands_by_path.has(path):
+		islands.assign(_islands_by_path[path])
+	return islands
 
 
-## Loads one image's islands into the tool and the list.
-func _apply_seeds_for(path: String) -> void:
-	if _point_editor == null:
+## Loads one image's islands into the operation and the list.
+func _apply_islands_for(path: String) -> void:
+	if _island_picker == null:
 		return
-	_point_editor.set_points(_seeds_for(path))
-	_point_editor.set_context_label(path.get_file())
+	_island_picker.set_islands(_islands_for(path))
+	_island_picker.set_context_label(path.get_file())
 	_update_markers()
 
 
 ## Saves the list back against the image it was picked on. An emptied list drops
 ## its entry rather than leaving a stale key behind.
-func _store_seeds() -> void:
-	if _point_editor == null:
+func _store_islands() -> void:
+	if _island_picker == null:
 		return
 	var path := _current_path()
 	if path.is_empty():
 		return
-	var points := _point_editor.get_points()
-	if points.is_empty():
-		_seeds_by_path.erase(path)
+	var islands := _island_picker.get_islands()
+	if islands.is_empty():
+		_islands_by_path.erase(path)
 	else:
-		_seeds_by_path[path] = points.duplicate()
+		_islands_by_path[path] = islands.duplicate()
 
 
-## Colour behind a pixel of the image on screen, for swatches and pick warnings.
+## Colour behind a pixel of the image on screen, for the island row swatches.
 func _sample_source_color(pixel: Vector2i) -> Color:
 	if _source_image == null:
 		return Color.MAGENTA
@@ -624,24 +639,24 @@ func _on_pick_toggled(enabled: bool) -> void:
 
 
 func _on_pixel_picked(pixel: Vector2i) -> void:
-	if _point_editor == null or _source_image == null:
+	if _island_picker == null or _source_image == null:
 		return
-	_point_editor.add_point(pixel)
+	_island_picker.add_island(pixel)
 	_set_status("Picked (%d, %d)." % [pixel.x, pixel.y])
 
 
-func _on_points_changed() -> void:
-	_store_seeds()
+func _on_islands_changed() -> void:
+	_store_islands()
 	_update_markers()
 	_on_setting_changed()
 
 
 func _update_markers() -> void:
-	if _point_editor == null:
+	if _island_picker == null:
 		var empty: Array[Vector2i] = []
 		_preview.set_markers(empty, -1)
 		return
-	_preview.set_markers(_point_editor.get_points(), _point_editor.selected_index())
+	_preview.set_markers(_island_picker.get_islands(), _island_picker.selected_index())
 
 
 func _on_setting_changed() -> void:
@@ -805,16 +820,16 @@ func _write_pending_outputs() -> void:
 				continue
 		# Each image is processed with its own islands, not the selected
 		# image's. The list UI is left alone and restored below.
-		if _point_editor != null:
-			_point_editor.write_points(_seeds_for(source_path))
+		if _island_picker != null:
+			_island_picker.write_islands(_islands_for(source_path))
 		var result := _operation.process_image(image)
 		if result.save_png(destination) != OK:
 			failures.append(source_path.get_file())
 			continue
 		written += 1
 
-	if _point_editor != null:
-		_point_editor.write_points(_seeds_for(_current_path()))
+	if _island_picker != null:
+		_island_picker.write_islands(_islands_for(_current_path()))
 
 	if failures.is_empty():
 		_set_status("Wrote %d file(s)." % written)

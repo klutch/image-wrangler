@@ -7,7 +7,7 @@ the bottom panel.
 ## Using it
 
 1. Add images with the **Add** button, or drag them in from the FileSystem dock.
-2. Pick a tool and tune its settings. The preview updates as you drag.
+2. Pick an operation and tune its settings. The preview updates as you drag.
 3. **Process Selected** / **Process All** writes the results as PNG. You are
    asked before any existing file is replaced.
 
@@ -29,7 +29,7 @@ requested zoom with nearest sampling, so at 800% you are looking at real pixel
 boundaries rather than a smoothed guess.
 
 Opening an image fits it, so a large one doesn't appear as a corner crop. Zoom
-and scroll then survive everything else — re-running the tool, toggling **Show
+and scroll then survive everything else — re-running the operation, toggling **Show
 Original** — so you can sit at 400% on an edge and watch a setting change it.
 
 The three columns are split by draggable dividers, and the panel itself resizes
@@ -39,7 +39,7 @@ from its top edge like any other bottom-panel dock.
 
 Keys out a flat background colour while rebuilding the antialiased silhouette.
 
-Set the colour with the **Remove Color** swatch under the tool dropdown. It
+Set the colour with the **Remove Color** swatch under the operation dropdown. It
 defaults to white; the picker's eyedropper can sample one off the screen. The
 maths is colour-agnostic, so a green screen or a flat blue plate works exactly as
 well as white.
@@ -50,7 +50,7 @@ antialiasing that drew the image in the first place. Delete them and the cutout
 goes jagged; keep them and you get a fringe that only shows up later, once the
 image is composited over something else.
 
-So instead of asking "is this pixel background?", the tool asks "how much of this
+So instead of asking "is this pixel background?", it asks "how much of this
 pixel is subject?" and writes the answer to the alpha channel. It then un-blends
 the background back out of the RGB, because a half-transparent pixel that is
 still half background will read as a halo no matter how correct its alpha is.
@@ -62,14 +62,16 @@ The full derivation is in the header comment of
 
 ### Settings
 
+The form is split into a **Settings** group and an **Island Picker** group.
+
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Remove Color | white | The background colour to key out. Sits under the tool dropdown, not in this list, because it is what the tool is *about*. |
+| Remove Color | white | The background colour to key out. Sits under the operation dropdown, not in this list, because it is what the operation is *about*. |
 | Color Tolerance | 0.02 | How far a pixel may drift from the background colour and still be keyed out. Raise it if a re-compressed background leaves speckles behind. |
 | Edge Width | 2 | How many pixels of antialiasing to rebuild. 2 suits ordinary antialiasing; raise it for soft edges, glows and drop shadows; 0 gives a hard cutout. |
 | Edge Contract | 0.0 | Pulls the soft edge inwards. Only needed if a faint halo survives, usually because the source was flattened onto the background twice. |
 | Only Outer Background | on | Flood fills from the image border, so background-coloured regions enclosed by the subject — eyes, highlights, the holes in an "o" — stay opaque. |
-| Picked Islands | empty | Enclosed regions to remove anyway, picked off the preview. Held per image. See below. |
+| Island Picker | empty | Enclosed regions to remove anyway, picked off the preview. Held per image. See below. |
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
 
@@ -77,7 +79,7 @@ The full derivation is in the header comment of
 
 **Only Outer Background** is deliberately conservative — it keeps every enclosed
 region, because it cannot tell an eye highlight from a gap you wanted gone.
-**Picked Islands** is the manual override.
+The **Island Picker** is the manual override.
 
 Hit **Pick** in the settings panel, then click any enclosed region in the
 preview. It's added to the list as `(x, y)`, marked with a ring on the preview,
@@ -94,15 +96,19 @@ One consequence: clicking the subject by mistake keys out *that* colour and eats
 part of the subject. The preview shows it at once, and removing the row undoes
 it.
 
-**The list belongs to the image, not to the tool.** Its header names the image
-it's showing — `Picked Islands: logo.png` — and switching selection swaps the
-list to whatever that image has. Entries stay put until you remove them or
-remove the image from the queue, so you can work through a batch picking each
-image's islands and then process the lot in one go; **Process All** gives every
-image its own seeds. Seeds live for the editor session and are not written to
-disk.
+Press **H** with the pointer over the dock to hide and show the markers — they
+sit right on top of the edges you are trying to judge. The shortcut is scoped to
+the dock, so H stays free everywhere else in the editor and never steals a
+keystroke from a text field.
 
-A picked point is not a hole punch — it seeds the same flood fill the image
+**The list belongs to the image, not to the operation.** It names the image it is
+showing, and changing selection swaps the list to whatever that image has.
+Entries stay put until you remove them or remove the image from the queue, so you
+can work through a batch picking each image's islands and then process the lot in
+one go; **Process All** gives every image its own. Islands live for the editor
+session and are not written to disk.
+
+A picked island is not a hole punch — it starts the same flood fill the image
 border does, so the region's rim gets the identical antialiasing treatment as
 the outer silhouette. On a test island of a different colour to the main
 background, the worst fringe after compositing over black was 0.013, against
@@ -122,7 +128,7 @@ obvious.
 
 Against a white background, by subject colour:
 
-| Subject | Naive threshold cutout | This tool |
+| Subject | Naive threshold cutout | This operation |
 | --- | --- | --- |
 | Dark colour ramp | 0.420 | 0.009 |
 | Pure black | 0.419 | 0.000 |
@@ -152,29 +158,31 @@ every case; the error above is entirely in the soft edge.
 - An edge softer than **Edge Width** keeps part of its halo. Raise the setting;
   overshooting it costs nothing, as the coverage estimate self-corrects.
 
-## Adding a tool
+## Adding an operation
 
 Subclass `IWOperation` in `core/`, override `get_operation_name()`,
 `get_settings_schema()` and `process_image()`, then add the script path to
 `OPERATION_SCRIPTS` in `ui/iw_panel.gd`. The dock builds the settings form from
 the schema, so there is no UI work.
 
-Setting types are `BOOL`, `INT`, `FLOAT` and `POINT_LIST`. The last one gives you
-the pick-off-the-preview list described above for any `Array[Vector2i]` property.
+Setting types are `BOOL`, `INT`, `FLOAT` and `ISLAND_PICKER`. The last one gives
+you the pick-off-the-preview list described above for any `Array[Vector2i]`
+property. Give consecutive entries a matching `"group"` and they are boxed under
+a heading of that name.
 
 Override `get_key_color_property()` to return the name of a `Color` property and
-the dock gives it a swatch under the tool dropdown instead of a row in the
+the dock gives it a swatch under the operation dropdown instead of a row in the
 settings form.
 
 ```gdscript
 @tool
-class_name IWMyTool
+class_name IWMyOperation
 extends IWOperation
 
 var amount: float = 0.5
 
 func get_operation_name() -> String:
-	return "My Tool"
+	return "My Operation"
 
 func get_settings_schema() -> Array[Dictionary]:
 	return [{
