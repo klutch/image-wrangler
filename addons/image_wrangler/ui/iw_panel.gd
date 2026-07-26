@@ -238,7 +238,7 @@ func _build_zoom_controls() -> Control:
 	_zoom_field.text = "100%"
 	_zoom_field.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_zoom_field.custom_minimum_size = Vector2(58, 0)
-	_zoom_field.tooltip_text = "Zoom level, 1% to 1000%. Type a value and press Enter.\nThe mouse wheel zooms in 25% steps, towards the pixel under the cursor."
+	_zoom_field.tooltip_text = "Zoom level, 1% to 1000%. Type a value and press Enter.\nThe mouse wheel zooms in 25% steps, towards the pixel under the cursor.\nDrag with the middle button or Ctrl+left to pan."
 	_zoom_field.text_submitted.connect(_on_zoom_submitted)
 	_zoom_field.focus_exited.connect(func() -> void: _on_zoom_submitted(_zoom_field.text))
 	row.add_child(_zoom_field)

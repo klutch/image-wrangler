@@ -38,8 +38,7 @@ var pick_mode := false:
 		if pick_mode == value:
 			return
 		pick_mode = value
-		if _canvas != null:
-			_canvas.mouse_default_cursor_shape = Control.CURSOR_CROSS if value else Control.CURSOR_ARROW
+		_update_cursor()
 
 ## Whether the island markers are drawn. They sit right on top of the edges
 ## being judged, so being able to blink them away matters.
@@ -58,6 +57,8 @@ var _markers: Array[Vector2i] = []
 var _selected_marker := -1
 
 var _zoom_percent := 100.0
+## True between grabbing the image and letting go of it.
+var _panning := false
 ## Top-left of the viewport in content space, in screen pixels.
 var _scroll := Vector2.ZERO
 ## Drawing area, i.e. this control minus whichever scrollbars are showing.
@@ -296,6 +297,10 @@ func _on_v_scroll_changed(value: float) -> void:
 # --- Input --------------------------------------------------------------
 
 func _on_canvas_gui_input(event: InputEvent) -> void:
+	# Panning claims Ctrl+left before picking can see it, so the two never fight.
+	if _handle_pan(event):
+		return
+
 	if not (event is InputEventMouseButton) or not event.pressed:
 		return
 
@@ -310,6 +315,61 @@ func _on_canvas_gui_input(event: InputEvent) -> void:
 		if pixel.x >= 0:
 			pixel_picked.emit(pixel)
 		_canvas.accept_event()
+
+
+## Grab-and-drag panning on the middle button or Ctrl+left. Returns whether the
+## event was consumed.
+func _handle_pan(event: InputEvent) -> bool:
+	var button := event as InputEventMouseButton
+	if button != null:
+		if not button.pressed:
+			# Any release ends a pan. Testing the modifier here instead would
+			# strand the drag whenever Ctrl came up before the mouse button.
+			if _panning and button.button_index in [MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_LEFT]:
+				_set_panning(false)
+				_canvas.accept_event()
+				return true
+			return false
+		if button.button_index == MOUSE_BUTTON_MIDDLE \
+				or (button.button_index == MOUSE_BUTTON_LEFT and button.ctrl_pressed):
+			_set_panning(true)
+			_canvas.accept_event()
+			return true
+		return false
+
+	var motion := event as InputEventMouseMotion
+	if motion == null or not _panning:
+		return false
+
+	# A release swallowed elsewhere — an alt-tab mid-drag, say — would otherwise
+	# leave the view stuck to the cursor.
+	if not (Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)):
+		_set_panning(false)
+		return false
+
+	# The image follows the cursor, so the scroll offset moves against it.
+	_scroll -= motion.relative
+	_relayout()
+	_canvas.accept_event()
+	return true
+
+
+func _set_panning(active: bool) -> void:
+	if _panning == active:
+		return
+	_panning = active
+	_update_cursor()
+
+
+func _update_cursor() -> void:
+	if _canvas == null:
+		return
+	if _panning:
+		_canvas.mouse_default_cursor_shape = Control.CURSOR_DRAG
+	elif pick_mode:
+		_canvas.mouse_default_cursor_shape = Control.CURSOR_CROSS
+	else:
+		_canvas.mouse_default_cursor_shape = Control.CURSOR_ARROW
 
 
 ## Image pixel under a position in the drawing area, or (-1, -1) when outside
