@@ -11,6 +11,7 @@ const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd"
 ## Every operation the dock offers. Add new [IWOperation] subclasses here.
 const OPERATION_SCRIPTS := [
 	"res://addons/image_wrangler/core/remove_background.gd",
+	"res://addons/image_wrangler/core/rename.gd",
 ]
 
 ## Extensions [method Image.load_from_file] can read.
@@ -844,7 +845,14 @@ func _run_preview() -> void:
 	var started := Time.get_ticks_msec()
 	_result_image = _operation.process_image(_source_image)
 	var elapsed := Time.get_ticks_msec() - started
-	_set_status("%s in %d ms" % [_operation.get_operation_name(), elapsed])
+	# An operation whose effect is not visible in the pixels — a rename — reports
+	# what it would do instead, so it is still inspectable before being run.
+	var path := _current_path()
+	var note := _operation.describe_output(path, _suffix_edit.text, maxi(_sources.find(path), 0)) if not path.is_empty() else ""
+	if note.is_empty():
+		_set_status("%s in %d ms" % [_operation.get_operation_name(), elapsed])
+	else:
+		_set_status(note)
 	_update_preview_texture()
 	_update_detail_label()
 
@@ -1037,9 +1045,13 @@ func _on_output_dir_chosen(directory: String) -> void:
 	_overwrite_dialog.popup_centered()
 
 
-## Output file name for a source: its own name, plus the suffix, always PNG.
+## Output file name for a source, which the operation decides: a rename has a
+## whole scheme to apply, where an image operation just keeps the name.
 func _output_name_for(path: String) -> String:
-	return path.get_file().get_basename() + _suffix_edit.text + ".png"
+	if _operation == null:
+		return path.get_file()
+	var index := _sources.find(path)
+	return _operation.get_output_name(path, _suffix_edit.text, maxi(index, 0))
 
 
 ## Runs the operation over every queued source and writes the results.
@@ -1058,24 +1070,36 @@ func _write_pending_outputs() -> void:
 	for source_path: String in jobs:
 		settings_for_job[source_path] = _settings_for(source_path, template)
 
+	var rewrites_pixels := _operation.transforms_pixels()
 	var written := 0
 	var failures := PackedStringArray()
 	for source_path: String in jobs:
 		var destination: String = jobs[source_path]
-		var image := _load_image(source_path)
-		if image == null:
-			failures.append(source_path.get_file())
-			continue
 		var directory := destination.get_base_dir()
 		if not DirAccess.dir_exists_absolute(directory):
 			var make_error := DirAccess.make_dir_recursive_absolute(directory)
 			if make_error != OK:
 				failures.append(source_path.get_file())
 				continue
+
 		# Each image is processed with its own settings, not the selected image's.
 		# The form is left alone and the selection's settings restored below.
 		if settings_for_job.has(source_path):
 			_operation.set_settings(settings_for_job[source_path])
+
+		if not rewrites_pixels:
+			# Copied rather than decoded and re-encoded, so a format this addon
+			# cannot write is not turned into a PNG wearing the wrong extension.
+			if source_path == destination or DirAccess.copy_absolute(source_path, destination) != OK:
+				failures.append(source_path.get_file())
+				continue
+			written += 1
+			continue
+
+		var image := _load_image(source_path)
+		if image == null:
+			failures.append(source_path.get_file())
+			continue
 		var result := _operation.process_image(image)
 		if result.save_png(destination) != OK:
 			failures.append(source_path.get_file())

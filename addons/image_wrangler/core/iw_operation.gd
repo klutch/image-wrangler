@@ -17,6 +17,11 @@ enum SettingType {
 	BOOL,
 	INT,
 	FLOAT,
+	## A line of free text.
+	STRING,
+	## A fixed choice. The entry must carry an [code]options[/code] key listing
+	## the labels; the property holds the chosen index.
+	ENUM,
 	## A list of image positions the user picks off the preview, each standing
 	## for a region to act on. The property must hold an [IslandList].
 	ISLAND_PICKER,
@@ -40,6 +45,35 @@ func get_operation_id() -> StringName:
 ## Appended to the source file name when writing the processed image.
 func get_output_suffix() -> String:
 	return "_out"
+
+
+## Whether processing rewrites the pixels.
+##
+## [code]false[/code] means the source file is copied to the destination
+## byte-for-byte instead of being re-encoded, so an operation that only moves a
+## file around cannot quietly turn a JPEG into a PNG behind the extension.
+func transforms_pixels() -> bool:
+	return true
+
+
+## Name to write [param source_path]'s result under, without any directory.
+##
+## [param suffix] is the dock's Output suffix, and [param index] is the source's
+## position in the list, which is what lets a numbering scheme count. The default
+## keeps the source's own name and takes the extension from
+## [method transforms_pixels], since anything re-encoded is written as PNG.
+func get_output_name(source_path: String, suffix: String, _index: int) -> String:
+	var extension := "png" if transforms_pixels() else source_path.get_extension()
+	return source_path.get_file().get_basename() + suffix + "." + extension
+
+
+## One line describing what processing [param source_path] would produce, for the
+## status bar. Empty when the result speaks for itself.
+##
+## An operation whose whole effect is on the file name has nothing to show in the
+## preview, so this is how it stays inspectable before being run.
+func describe_output(_source_path: String, _suffix: String, _index: int) -> String:
+	return ""
 
 
 ## The Resource holding this operation's tunables.

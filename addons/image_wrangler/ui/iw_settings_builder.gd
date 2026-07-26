@@ -12,6 +12,9 @@ const IslandPicker := preload("res://addons/image_wrangler/ui/iw_island_picker.g
 ## Left indent applied to the contents of a named group.
 const GROUP_INDENT := 8
 
+## Caption width for the controls that need a label of their own.
+const LABEL_WIDTH := 92
+
 ## Marks a control with the setting it edits, so [method refresh_values] can find
 ## it again without the builder having to keep a registry.
 const META_PROPERTY := &"iw_property"
@@ -50,12 +53,17 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 				control = _build_bool(operation, property, label, on_changed)
 			IWOperation.SettingType.INT:
 				control = _build_number(operation, property, label, setting, true, on_changed)
+			IWOperation.SettingType.STRING:
+				control = _build_string(operation, property, label, on_changed)
+			IWOperation.SettingType.ENUM:
+				control = _build_enum(operation, property, label, setting, on_changed)
 			IWOperation.SettingType.ISLAND_PICKER:
 				control = _build_island_picker(operation, property)
 			_:
 				control = _build_number(operation, property, label, setting, false, on_changed)
 
-		control.set_meta(META_PROPERTY, property)
+		if not control.has_meta(META_PROPERTY):
+			control.set_meta(META_PROPERTY, property)
 		control.tooltip_text = tooltip
 		target.add_child(control)
 
@@ -100,6 +108,57 @@ static func _build_island_picker(operation: IWOperation, property: StringName) -
 	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	picker.setup(operation, property)
 	return picker
+
+
+## A labelled row. The numeric controls carry their own label, but a LineEdit or
+## an OptionButton does not, so these get one alongside.
+static func _labelled_row(label: String, editor: Control) -> Control:
+	var row := HBoxContainer.new()
+	var caption := Label.new()
+	caption.text = label
+	caption.custom_minimum_size = Vector2(LABEL_WIDTH, 0)
+	# Ellipsised for the same reason every other label here is: the settings form
+	# cannot scroll sideways, so a long label would set a floor under the column.
+	caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	row.add_child(caption)
+	editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(editor)
+	return row
+
+
+static func _build_string(operation: IWOperation, property: StringName, label: String, on_changed: Callable) -> Control:
+	var field := LineEdit.new()
+	field.text = String(operation.get_settings().get(property))
+	field.set_meta(META_PROPERTY, property)
+	field.text_changed.connect(
+		func(value: String) -> void:
+			var settings := operation.get_settings()
+			if settings == null:
+				return
+			settings.set(property, value)
+			on_changed.call()
+	)
+	return _labelled_row(label, field)
+
+
+static func _build_enum(operation: IWOperation, property: StringName, label: String, setting: Dictionary, on_changed: Callable) -> Control:
+	var choice := OptionButton.new()
+	var options: Array = setting.get("options", [])
+	for option in options:
+		choice.add_item(String(option))
+	var current := int(operation.get_settings().get(property))
+	if current >= 0 and current < choice.item_count:
+		choice.select(current)
+	choice.set_meta(META_PROPERTY, property)
+	choice.item_selected.connect(
+		func(index: int) -> void:
+			var settings := operation.get_settings()
+			if settings == null:
+				return
+			settings.set(property, index)
+			on_changed.call()
+	)
+	return _labelled_row(label, choice)
 
 
 static func _build_bool(operation: IWOperation, property: StringName, label: String, on_changed: Callable) -> Control:
@@ -166,6 +225,13 @@ static func _refresh_into(settings: Resource, node: Node) -> void:
 				# EditorSpinSlider paints its own value, and the no-signal setter
 				# deliberately skips the notification that would repaint it.
 				(child as Control).queue_redraw()
+			elif child is OptionButton:
+				var choice := child as OptionButton
+				var index := int(value)
+				if index >= 0 and index < choice.item_count:
+					choice.select(index)
+			elif child is LineEdit:
+				(child as LineEdit).text = String(value)
 			elif child is IslandPicker:
 				(child as IslandPicker).refresh()
 		_refresh_into(settings, child)

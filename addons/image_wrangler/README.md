@@ -289,6 +289,48 @@ Values outside the range their slider allows — from a hand edit, or a file
 written by a later version — are pulled back inside it on load, so the form and
 the processing can never silently disagree.
 
+## Rename
+
+Writes each source out under a new name, leaving its pixels alone. It is the odd
+one out — every other operation answers "what should this image look like", and
+this one answers "what should this file be called" — but the two questions get
+asked at the same moment, and the answer goes through the same Process buttons.
+
+**Nothing is renamed in place.** Processing writes copies under the new names,
+wherever the Process buttons ask for; the sources are untouched. A rename tool
+that moved the originals would be a far less forgiving thing to point at a folder
+of art.
+
+Because it does not touch pixels, the file is **copied byte-for-byte** rather
+than re-encoded, so a renamed JPEG stays a JPEG instead of becoming a PNG wearing
+a `.jpg` name.
+
+| Setting | What it does |
+| --- | --- |
+| Base Name | Replaces every file's name. Leave it empty and each keeps its own — which is what makes Find and numbering useful across a mixed batch. |
+| Find / Replace With | Substring replacement. An empty **Find** switches it off, so an empty **Replace With** cannot quietly strip something. |
+| Prefix | Goes in front, ahead of any number. |
+| Add Numbers | Numbers each file by its position in the Images list, so **Process All** and **Process Current Only** agree on what any one file is called. |
+| Start At / Step / Digits | Counter start, increment, and zero padding — pad so the names sort correctly in a file browser. |
+| Separator / Number At | The text between name and counter, and which end it goes on. |
+| Letter Case | Unchanged, lowercase, UPPERCASE or Title Case. Never applied to the extension. |
+| Lowercase Extension | So a folder of mixed `.PNG` and `.png` comes out consistent. |
+
+The name is composed in a fixed order, so the result does not depend on which
+fields happen to be filled in:
+
+```
+base name (or the file's own)
+  -> find/replace
+  -> prefix, and the Output suffix
+  -> number, at whichever end
+  -> letter case
+  -> extension
+```
+
+The preview cannot show a rename — the pixels are unchanged — so the status bar
+shows the result instead: `flower_0002.png → tile_003.png`.
+
 ## Adding an operation
 
 Write two classes in `core/`: a `Resource` holding the tunables as `@export`
@@ -296,6 +338,12 @@ properties, and an `IWOperation` subclass pointing at one. Override
 `get_operation_name()`, `get_operation_id()`, `get_settings()`, `set_settings()`,
 `make_settings()`, `get_settings_schema()` and `process_image()`, then add the
 operation's script path to `OPERATION_SCRIPTS` in `ui/iw_panel.gd`.
+
+An operation that does not transform pixels overrides three more:
+`transforms_pixels()` to return `false` (the source is then copied rather than
+re-encoded), `get_output_name()` to name its own output, and `describe_output()`
+to say in the status bar what the preview cannot show. `Rename` is the worked
+example.
 
 That is the whole job. The dock builds the settings form from the schema and the
 sidecar codec reflects over the settings Resource, so neither the UI nor the
@@ -305,7 +353,8 @@ schema, as `key_color` is.
 Ranges belong in the schema, not in `@export_range`, so there is one source of
 truth for them.
 
-Setting types are `BOOL`, `INT`, `FLOAT` and `ISLAND_PICKER`. The last one gives
+Setting types are `BOOL`, `INT`, `FLOAT`, `STRING`, `ENUM` (which needs an
+`options` list) and `ISLAND_PICKER`. The last one gives
 you the pick-off-the-preview list described above for any `Array[Vector2i]`
 property. Give consecutive entries a matching `"group"` and they are boxed under
 a heading of that name.
