@@ -25,6 +25,11 @@ const MARKER_SELECTED_COLOR := Color(1.0, 0.85, 0.2)
 const MIN_ZOOM := 1.0
 const MAX_ZOOM := 1000.0
 
+## Smallest slice of the image, in pixels, that panning will leave on screen.
+## Bounds the free movement of an image that already fits, so it can be nudged
+## around but never dragged out of sight.
+const MIN_VISIBLE := 32.0
+
 ## Button steps are fine up to 100% and coarse beyond it, so the top of the
 ## range is reachable without forty clicks. The wheel always steps finely.
 const FINE_STEP := 25.0
@@ -61,6 +66,11 @@ var _zoom_percent := 100.0
 var _panning := false
 ## Top-left of the viewport in content space, in screen pixels.
 var _scroll := Vector2.ZERO
+## How far the image has been dragged off its resting place, on axes where it
+## fits the viewport and so has nothing to scroll. Kept separate from
+## [member _scroll] so that centring stays the rest position rather than
+## something the pan has to keep re-deriving.
+var _pan_offset := Vector2.ZERO
 ## Drawing area, i.e. this control minus whichever scrollbars are showing.
 var _viewport := Vector2.ZERO
 var _content_size := Vector2.ZERO
@@ -184,7 +194,11 @@ func fit_to_view() -> void:
 		set_zoom(100.0)
 		return
 	var fit := minf(size.x / _image_size.x, size.y / _image_size.y) * 100.0
+	# Fit is also the way back to centre after nudging a small image around.
+	# Deliberately not done in set_image(), so that re-running the operation
+	# leaves the view exactly where it was.
 	_scroll = Vector2.ZERO
+	_pan_offset = Vector2.ZERO
 	_relayout()
 	set_zoom(minf(fit, 100.0))
 	_relayout()
@@ -244,14 +258,19 @@ func _relayout() -> void:
 	_scroll.x = clampf(_scroll.x, 0.0, maxf(_content_size.x - _viewport.x, 0.0))
 	_scroll.y = clampf(_scroll.y, 0.0, maxf(_content_size.y - _viewport.y, 0.0))
 
-	# Centred with margins when it fits, scrolled when it does not. Floored so
-	# the image lands on whole pixels and nearest sampling stays exact.
+	# Centred plus however far it has been dragged when it fits, scrolled when it
+	# does not. Floored so the image lands on whole pixels and nearest sampling
+	# stays exact.
 	if _content_size.x <= _viewport.x:
-		_content_origin.x = floorf((_viewport.x - _content_size.x) * 0.5)
+		var limit_x := _pan_limit(_content_size.x, _viewport.x)
+		_pan_offset.x = clampf(_pan_offset.x, -limit_x, limit_x)
+		_content_origin.x = floorf((_viewport.x - _content_size.x) * 0.5 + _pan_offset.x)
 	else:
 		_content_origin.x = -_scroll.x
 	if _content_size.y <= _viewport.y:
-		_content_origin.y = floorf((_viewport.y - _content_size.y) * 0.5)
+		var limit_y := _pan_limit(_content_size.y, _viewport.y)
+		_pan_offset.y = clampf(_pan_offset.y, -limit_y, limit_y)
+		_content_origin.y = floorf((_viewport.y - _content_size.y) * 0.5 + _pan_offset.y)
 	else:
 		_content_origin.y = -_scroll.y
 
@@ -347,11 +366,28 @@ func _handle_pan(event: InputEvent) -> bool:
 		_set_panning(false)
 		return false
 
-	# The image follows the cursor, so the scroll offset moves against it.
-	_scroll -= motion.relative
+	# The image follows the cursor either way. An axis with something to scroll
+	# moves against the drag; one the image already fits gets dragged directly,
+	# which is what lets a small image be nudged around at all.
+	if _content_size.x > _viewport.x:
+		_scroll.x -= motion.relative.x
+	else:
+		_pan_offset.x += motion.relative.x
+	if _content_size.y > _viewport.y:
+		_scroll.y -= motion.relative.y
+	else:
+		_pan_offset.y += motion.relative.y
 	_relayout()
 	_canvas.accept_event()
 	return true
+
+
+## Half the distance an image that fits may be dragged from centre, being the
+## point at which only [constant MIN_VISIBLE] pixels of it would still be on
+## screen. An image smaller than that is simply never allowed off the edge.
+static func _pan_limit(content: float, viewport: float) -> float:
+	var keep := minf(MIN_VISIBLE, content)
+	return maxf((viewport + content) * 0.5 - keep, 0.0)
 
 
 func _set_panning(active: bool) -> void:
