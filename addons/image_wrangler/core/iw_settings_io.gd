@@ -51,7 +51,7 @@ static func is_sidecar(path: String) -> bool:
 ##
 ## Null covers every failure — no file, unreadable, unparseable, written by
 ## another tool, a newer format version, or simply no block for this operation.
-## The caller treats them all the same way, by carrying over.
+## The caller treats them all the same way, by falling back to defaults.
 static func load_settings(source_path: String, operation: IWOperation) -> Resource:
 	var path := sidecar_path(source_path)
 	if not FileAccess.file_exists(path):

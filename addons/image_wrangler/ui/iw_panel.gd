@@ -42,7 +42,8 @@ var _pending_outputs: Dictionary = {}
 
 ## Settings keyed by source path, then by operation id. An entry appears the
 ## first time an image is selected or processed: loaded from its JSON sidecar
-## when it has one, carried over from whatever is dialled in when it does not.
+## when it has one, and defaults when it does not. Nothing is inherited from the
+## image selected before it.
 ##
 ## While the dock is open this is the source of truth — the sidecar is read once
 ## per path and never re-read, so a half-written file or an external edit landing
@@ -709,12 +710,16 @@ func _current_path() -> String:
 
 ## Settings for one source, created on demand.
 ##
-## [param template] is what the values are carried over from when the image has
-## no sidecar. It is passed in rather than read from the operation because the
-## batch run swaps the operation's settings as it goes — reading them there would
-## make an untouched image inherit whichever image the loop happened to process
-## last, and the result would depend on job order.
-func _settings_for(path: String, template: Resource) -> Resource:
+## An image with no sidecar gets defaults, not whatever the last image was tuned
+## to. Values that arrived by inheritance look identical to values that were
+## chosen, so a form that carries them over cannot say which it is showing — and
+## the answer decides whether the sidecar about to be autosaved is a real record
+## of this image or an accident of what was selected before it.
+##
+## The cost is that a batch has to be tuned per image rather than dialled in once,
+## which is the trade being made deliberately: the form now shows exactly what
+## processing will use, for every image, whether or not it was ever selected.
+func _settings_for(path: String) -> Resource:
 	if path.is_empty() or _operation == null:
 		return null
 
@@ -735,10 +740,6 @@ func _settings_for(path: String, template: Resource) -> Resource:
 		# Clamped here rather than after the swap, so the batch path — which
 		# never goes through _apply_settings_for — gets it too.
 		_operation.clamp_settings_to_schema(settings)
-	elif template != null and template.has_method("duplicate_for_new_image"):
-		# Carries everything but the islands: a coordinate in one image means
-		# nothing in another.
-		settings = template.duplicate_for_new_image()
 	else:
 		settings = _operation.make_settings()
 	per_operation[id] = settings
@@ -749,7 +750,7 @@ func _settings_for(path: String, template: Resource) -> Resource:
 func _apply_settings_for(path: String) -> void:
 	if _operation == null:
 		return
-	var settings := _settings_for(path, _operation.get_settings())
+	var settings := _settings_for(path)
 	if settings == null:
 		return
 
@@ -806,16 +807,20 @@ func _schedule_autosave() -> void:
 	_autosave.start()
 
 
-## Drops the form back to a blank context when no image is selected. The
-## operation keeps whatever is dialled in, so it stays the carry-over template.
+## Drops the form back to a blank context when no image is selected.
+##
+## The dialled-in values stay put. They describe nothing now — the next image
+## selected is resolved from its own sidecar or from defaults, never from these —
+## but blanking a form the moment a row is deselected would throw away work for
+## no gain.
 func _clear_settings_context() -> void:
 	if _operation == null:
 		return
 	_refreshing = true
 	var current := _operation.get_settings()
 	if current != null and current.has_method("duplicate_for_new_image"):
-		# Keeps the dialled-in values as the carry-over template, but drops the
-		# departed image's islands rather than leaving them in the picker.
+		# Islands are the exception: they are coordinates in the image that just
+		# left, so leaving them in the picker would draw markers over nothing.
 		_operation.set_settings(current.duplicate_for_new_image())
 	if _island_picker != null:
 		_island_picker.refresh()
@@ -1330,14 +1335,21 @@ func _write_pending_outputs() -> void:
 	if jobs.is_empty() or _operation == null:
 		return
 
-	# Resolved up front: _settings_for carries over from the template, and the
-	# template has to stay the selected image's settings rather than becoming
-	# whichever image the loop swapped in last.
+	# A sidecar still sitting in the debounce is written now, so the copy carried
+	# alongside a renamed image is the settings as they stand rather than as they
+	# were a tick ago. The run itself reads from memory and would not have noticed.
 	_flush_autosave()
+
+	# Held so the form can be put back afterwards: the loop below swaps the
+	# operation's settings per job, and the selected image's must survive that.
 	var template := _operation.get_settings()
+
+	# Resolved before the loop rather than inside it, because _settings_for reads
+	# the operation's own settings for an operation whose settings are not
+	# per-image — and by then the loop is already swapping them.
 	var settings_for_job := {}
 	for source_path: String in jobs:
-		settings_for_job[source_path] = _settings_for(source_path, template)
+		settings_for_job[source_path] = _settings_for(source_path)
 
 	var rewrites_pixels := _operation.transforms_pixels()
 	# Worked out once for the whole run rather than per file, since it depends on

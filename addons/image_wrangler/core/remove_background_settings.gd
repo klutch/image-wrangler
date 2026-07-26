@@ -57,9 +57,9 @@ extends Resource
 ## and can never disagree with the image. Ignored when [member contiguous] is
 ## off, since every key-coloured pixel already qualifies then.
 ##
-## These describe one particular image. Every other setting here is carried over
-## to the next image that has no saved settings of its own; islands never are,
-## because a coordinate in one image means nothing in another.
+## These describe one particular image harder than anything else here does: every
+## other setting is a number that would at least mean something applied to a
+## different image, where a coordinate simply would not.
 @export var islands: IslandList
 
 ## Un-blend the background out of partially transparent pixels.
@@ -96,12 +96,16 @@ func _init() -> void:
 	islands = IslandList.new()
 
 
-## A copy that belongs to another image: everything carried over except the
-## islands, which start empty.
+## A copy that belongs to no image: every value kept except the islands, which
+## start empty.
+##
+## Used when the selection leaves the list and the form is left describing
+## nothing. The numbers can stay on screen; the picked coordinates cannot, since
+## the image they were picked in is gone.
 ##
 ## [method Resource.duplicate] copies the *reference* held in [member islands],
-## so without the replacement below two images would share one list and picking
-## on either would silently edit both.
+## so without the replacement below the copy would share one list with the
+## original and picking on either would silently edit both.
 func duplicate_for_new_image() -> RemoveBackgroundSettings:
 	var copy: RemoveBackgroundSettings = duplicate()
 	copy.islands = IslandList.new()

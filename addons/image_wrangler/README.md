@@ -263,10 +263,11 @@ commit alongside the art.
 }
 ```
 
-**An image with no file inherits whatever is currently dialled in** — so tuning
-one image and clicking through a sheet of similar ones carries your work forward,
-rather than resetting each time. Islands are the exception: a coordinate in one
-image means nothing in another, so they always start empty.
+**An image with no file gets the defaults.** Nothing is inherited from the image
+you were looking at before it — select one with no `.json` and every control
+snaps back, so what the form shows is always this image's own settings and never
+a leftover. The form and the processing therefore agree for every image, whether
+or not it was ever selected.
 
 Selecting an image never writes anything. Only editing does.
 
@@ -275,9 +276,11 @@ Three things worth knowing:
 - **Files appear beside your art without being asked for.** Everything else this
   addon writes is behind an explicit Process, with a confirmation before
   overwriting. This is not.
-- **Settings are no longer shared across a batch.** Dialling in a tolerance and
-  hitting **Process All** applies it only to images that have none of their own.
-  Anything you previously selected and edited keeps its own values.
+- **A batch has to be tuned image by image.** Dialling in a tolerance and hitting
+  **Process All** applies it only to the images you actually selected and edited;
+  every other image is processed at its defaults. This is the price of the rule
+  above — a value that arrived by inheritance is indistinguishable on screen from
+  one you chose, and it would be autosaved into a sidecar either way.
 - **A `.json` already there and written by something else is left alone.**
   `sprite.json` beside `sprite.png` is exactly what Aseprite names its atlas
   descriptor. The addon reads such a file, sees it is not one of its own, refuses
