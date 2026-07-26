@@ -22,7 +22,8 @@ exactly what happened to the edge pixels.
 | Zoom field | Type any value from 1 to 1000. A trailing `%` is fine. Applied on Enter or when the field loses focus; anything unparseable snaps back. |
 | **Fit** | Zooms so the whole image is visible — but never past 100%, so a small sprite is shown at its true size rather than blown up. |
 | Mouse wheel | Zooms **towards the pixel under the cursor**, so you can drive into a corner of the silhouette without chasing it with the scrollbars. Steps 10% below 50%, where a 25% jump is a large fraction of what you are looking at, and 25% above. |
-| Middle-drag, or Ctrl+left-drag | Pans. The image follows the cursor, as if you had grabbed it. It can be dragged clear of the frame edges — zoomed in or out, fitting or not — stopping only once a sliver of it is left on screen, so an edge you are inspecting can be pulled into the middle. **Fit** re-centres. Ctrl+left is claimed before picking sees it, so it never drops an island by accident. |
+| Drag to pan | Left-drag pans whenever no tool is active. With one active — **Pick**, say — the left button belongs to the tool, and middle-drag or Ctrl+left-drag pans instead. Both are claimed before the tool sees them, so panning never drops an island by accident. |
+| Pan range | The image follows the cursor, as if you had grabbed it, and can be dragged clear of the frame edges — zoomed in or out, fitting or not — stopping only once a sliver of it is left on screen, so an edge you are inspecting can be pulled into the middle. **Fit** re-centres. |
 
 The image is never stretched. Below the frame size it sits centred with
 transparent margins; above it, scrollbars appear and it is drawn at exactly the

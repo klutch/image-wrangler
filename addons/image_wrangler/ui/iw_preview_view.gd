@@ -364,8 +364,9 @@ func _on_canvas_gui_input(event: InputEvent) -> void:
 		_canvas.accept_event()
 
 
-## Grab-and-drag panning on the middle button or Ctrl+left. Returns whether the
-## event was consumed.
+## Grab-and-drag panning. The middle button always pans; the left button pans
+## too unless a tool has claimed it, in which case Ctrl reclaims it. Returns
+## whether the event was consumed.
 func _handle_pan(event: InputEvent) -> bool:
 	var button := event as InputEventMouseButton
 	if button != null:
@@ -377,8 +378,12 @@ func _handle_pan(event: InputEvent) -> bool:
 				_canvas.accept_event()
 				return true
 			return false
-		if button.button_index == MOUSE_BUTTON_MIDDLE \
-				or (button.button_index == MOUSE_BUTTON_LEFT and button.ctrl_pressed):
+		# With no tool active the left button has nothing else to do, so it
+		# drags the view; with one active it belongs to the tool and Ctrl is the
+		# way back to panning.
+		var left_pans := button.button_index == MOUSE_BUTTON_LEFT \
+				and (button.ctrl_pressed or not pick_mode)
+		if button.button_index == MOUSE_BUTTON_MIDDLE or left_pans:
 			_set_panning(true)
 			_canvas.accept_event()
 			return true
