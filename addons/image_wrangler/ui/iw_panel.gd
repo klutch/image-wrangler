@@ -127,7 +127,6 @@ func _build_ui() -> void:
 	right_split.add_child(_build_preview_column())
 	right_split.add_child(_build_operation_column())
 
-	add_child(_build_status_bar())
 	_build_dialogs()
 
 	_debounce = Timer.new()
@@ -217,22 +216,29 @@ func _build_preview_column() -> Control:
 	_preview.zoom_changed.connect(_on_zoom_changed)
 	column.add_child(_preview)
 
-	# Zoom sits under the image, Photoshop-style, which also splits the column's
-	# width demand across two rows instead of one long one.
-	column.add_child(_build_zoom_controls())
+	column.add_child(_build_status_row())
 
 	return column
 
 
-func _build_zoom_controls() -> Control:
+## The bar under the viewport, Photoshop-style: zoom on the left, status text
+## filling the middle, image size hard right. It belongs to the image, so it
+## spans the viewport rather than the whole dock.
+func _build_status_row() -> Control:
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 0)
+
+	# The zoom controls keep a zero separation of their own so the buttons stay
+	# flush against the field, while the outer row still spaces them off the
+	# status text.
+	var zoom := HBoxContainer.new()
+	zoom.add_theme_constant_override("separation", 0)
+	row.add_child(zoom)
 
 	var zoom_out_button := Button.new()
 	zoom_out_button.text = "-"
 	zoom_out_button.tooltip_text = "Zoom out. 25% steps below 100%, 100% steps above."
 	zoom_out_button.pressed.connect(func() -> void: _preview.zoom_out())
-	row.add_child(zoom_out_button)
+	zoom.add_child(zoom_out_button)
 
 	_zoom_field = LineEdit.new()
 	_zoom_field.text = "100%"
@@ -241,23 +247,33 @@ func _build_zoom_controls() -> Control:
 	_zoom_field.tooltip_text = "Zoom level, 1% to 1000%. Type a value and press Enter.\nThe mouse wheel zooms towards the pixel under the cursor, in 10% steps\nbelow 50% and 25% steps above.\nDrag to pan. While a tool is active, pan with the middle button or Ctrl+left."
 	_zoom_field.text_submitted.connect(_on_zoom_submitted)
 	_zoom_field.focus_exited.connect(func() -> void: _on_zoom_submitted(_zoom_field.text))
-	row.add_child(_zoom_field)
+	zoom.add_child(_zoom_field)
 
 	var zoom_in_button := Button.new()
 	zoom_in_button.text = "+"
 	zoom_in_button.tooltip_text = "Zoom in. 25% steps below 100%, 100% steps above."
 	zoom_in_button.pressed.connect(func() -> void: _preview.zoom_in())
-	row.add_child(zoom_in_button)
+	zoom.add_child(zoom_in_button)
 
 	var fit_button := Button.new()
 	fit_button.text = "Fit"
 	fit_button.tooltip_text = "Zoom so the whole image is visible, never past 100%."
 	fit_button.pressed.connect(func() -> void: _preview.fit_to_view())
-	row.add_child(fit_button)
+	zoom.add_child(fit_button)
 
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(spacer)
+	# Messages here name files and can run long. Ellipsising, and letting the
+	# label soak up the free space rather than demand it, stops a status message
+	# from setting a floor under the preview column's width.
+	_status_label = Label.new()
+	_status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_set_status("No image selected.")
+	row.add_child(_status_label)
+
+	_detail_label = Label.new()
+	_detail_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_detail_label.modulate = Color(1, 1, 1, 0.6)
+	row.add_child(_detail_label)
 
 	return row
 
@@ -356,26 +372,6 @@ func _build_output_section() -> Control:
 	section.add_child(_process_all_button)
 
 	return section
-
-
-func _build_status_bar() -> Control:
-	var bar := HBoxContainer.new()
-
-	# Messages here name files and can run long. Ellipsising, and letting the
-	# label soak up the free space rather than demand it, stops a status message
-	# from setting a floor under the whole panel's width.
-	_status_label = Label.new()
-	_status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_set_status("No image selected.")
-	bar.add_child(_status_label)
-
-	_detail_label = Label.new()
-	_detail_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_detail_label.modulate = Color(1, 1, 1, 0.6)
-	bar.add_child(_detail_label)
-
-	return bar
 
 
 func _build_dialogs() -> void:
