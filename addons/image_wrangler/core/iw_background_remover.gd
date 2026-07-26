@@ -70,6 +70,23 @@ var edge_contract: float = 0.0
 ## the subject (eyes, speech bubbles, specular highlights) stay opaque.
 var contiguous: bool = true
 
+## How far from the keying colour the flood may stray to squeeze through a gap
+## too narrow to hold a single clean background pixel. Only has an effect while
+## [member crevice_reach] is above zero. See [method _flood_step].
+var crevice_tolerance: float = 0.5
+
+## How many near-background pixels in a row the flood may cross before it needs
+## solid background again, so it must be at least as long as the constriction it
+## has to squeeze through. Zero disables the whole mechanism, leaving the flood
+## strictly within [member tolerance].
+##
+## Setting it generously is safer than it sounds. Somewhere the flood reaches
+## only by straying is reclassified as edge rather than background, so it is
+## matted by the usual coverage maths instead of being cut out — and genuine
+## subject measures as fully covered there, so it keeps its alpha. Straying too
+## far wastes work rather than eating the subject.
+var crevice_reach: int = 0
+
 ## Extra pixels to start the background flood fill from, on top of the image
 ## border. Lets the user hand-pick enclosed regions that [member contiguous]
 ## deliberately skips.
@@ -158,6 +175,26 @@ func get_settings_schema() -> Array[Dictionary]:
 			"group": "Settings",
 			"type": SettingType.BOOL,
 			"tooltip": "Flood fill inwards from the image border, so regions enclosed by the\nsubject (eyes, highlights, gaps in lettering) stay opaque.",
+		},
+		{
+			"property": &"crevice_reach",
+			"label": "Crevice Reach",
+			"group": "Settings",
+			"type": SettingType.INT,
+			"min": 0,
+			"max": 32,
+			"step": 1,
+			"tooltip": "Lets the flood squeeze into nooks whose opening is nothing but the\nantialiasing of the two walls meeting, which it would otherwise stop at.\nThis is how many such pixels it may cross in a row, so it needs to be at\nleast as long as the constriction it has to get through. 0 switches it off.",
+		},
+		{
+			"property": &"crevice_tolerance",
+			"label": "Crevice Tolerance",
+			"group": "Settings",
+			"type": SettingType.FLOAT,
+			"min": 0.0,
+			"max": 1.0,
+			"step": 0.01,
+			"tooltip": "How far from the background color those squeezed-through pixels may be.\nOnly applies while Crevice Reach is above zero.",
 		},
 		{
 			"property": &"decontaminate",
@@ -368,6 +405,11 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, width: int, 
 	var head := 0
 	var tail := 0
 
+	# How many weak pixels in a row the flood crossed to reach each pixel; zero
+	# on anything solidly background. See [method _flood_step].
+	var weak_steps := PackedInt32Array()
+	weak_steps.resize(pixel_count)
+
 	if contiguous:
 		for x in width:
 			var top := x
@@ -420,37 +462,59 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, width: int, 
 			head += 1
 			var claimed_by := key_of[index]
 			var key: Color = keys[claimed_by]
+			var weak_here := weak_steps[index]
 			var x := index % width
 			@warning_ignore("integer_division")
 			var y := index / width
 			if x > 0:
 				var left := index - 1
-				if mask[left] != MASK_BACKGROUND and _region_distance(data, key_dist, left, claimed_by, key) <= tolerance:
-					mask[left] = MASK_BACKGROUND
-					key_of[left] = claimed_by
-					queue[tail] = left
-					tail += 1
+				if mask[left] != MASK_BACKGROUND:
+					var step := _flood_step(data, key_dist, left, claimed_by, key, weak_here)
+					if step >= 0:
+						mask[left] = MASK_BACKGROUND
+						key_of[left] = claimed_by
+						weak_steps[left] = step
+						queue[tail] = left
+						tail += 1
 			if x < width - 1:
 				var right := index + 1
-				if mask[right] != MASK_BACKGROUND and _region_distance(data, key_dist, right, claimed_by, key) <= tolerance:
-					mask[right] = MASK_BACKGROUND
-					key_of[right] = claimed_by
-					queue[tail] = right
-					tail += 1
+				if mask[right] != MASK_BACKGROUND:
+					var step := _flood_step(data, key_dist, right, claimed_by, key, weak_here)
+					if step >= 0:
+						mask[right] = MASK_BACKGROUND
+						key_of[right] = claimed_by
+						weak_steps[right] = step
+						queue[tail] = right
+						tail += 1
 			if y > 0:
 				var up := index - width
-				if mask[up] != MASK_BACKGROUND and _region_distance(data, key_dist, up, claimed_by, key) <= tolerance:
-					mask[up] = MASK_BACKGROUND
-					key_of[up] = claimed_by
-					queue[tail] = up
-					tail += 1
+				if mask[up] != MASK_BACKGROUND:
+					var step := _flood_step(data, key_dist, up, claimed_by, key, weak_here)
+					if step >= 0:
+						mask[up] = MASK_BACKGROUND
+						key_of[up] = claimed_by
+						weak_steps[up] = step
+						queue[tail] = up
+						tail += 1
 			if y < height - 1:
 				var down := index + width
-				if mask[down] != MASK_BACKGROUND and _region_distance(data, key_dist, down, claimed_by, key) <= tolerance:
-					mask[down] = MASK_BACKGROUND
-					key_of[down] = claimed_by
-					queue[tail] = down
-					tail += 1
+				if mask[down] != MASK_BACKGROUND:
+					var step := _flood_step(data, key_dist, down, claimed_by, key, weak_here)
+					if step >= 0:
+						mask[down] = MASK_BACKGROUND
+						key_of[down] = claimed_by
+						weak_steps[down] = step
+						queue[tail] = down
+						tail += 1
+		# A pixel the flood only squeezed through is not background — it is the
+		# antialiasing of the two walls it passed between, so it is part subject.
+		# Handing it to the band gives it partial alpha from the usual coverage
+		# maths, where calling it background would cut a hard notch out of the
+		# crevice mouth. It stays in the queue, so the band still grows from it.
+		if crevice_reach > 0:
+			for i in pixel_count:
+				if mask[i] == MASK_BACKGROUND and weak_steps[i] > 0:
+					mask[i] = MASK_EDGE
 	else:
 		# Without contiguity there is nothing to flood from, so picked islands have
 		# no meaning: every key-coloured pixel already qualifies.
@@ -520,6 +584,30 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, width: int, 
 ## precomputed map for the operation's own key and measuring the rest on demand.
 func _region_distance(data: PackedByteArray, key_dist: PackedFloat32Array, index: int, key_index: int, key: Color) -> float:
 	return key_dist[index] if key_index == 0 else _distance_at(data, index, key)
+
+
+## Whether the flood may step onto [param index], and at what weak-step count.
+## Returns -1 to refuse, otherwise the count to record there.
+##
+## This is Canny's double threshold applied to region growing rather than edge
+## linking. A pixel within [member tolerance] is solid background and resets the
+## count; one merely within [member crevice_tolerance] may still be crossed, but
+## only [member crevice_reach] of them in a row before solid background is needed
+## again. That is what gets into a crevice whose neck is nothing but the
+## antialiasing of the two walls meeting, while stopping the flood from wandering
+## off across a pale subject, which an unbounded weak threshold would do.
+##
+## First visit wins rather than the lowest count, so a pixel reachable two ways
+## may keep a worse count than it deserves. That only ever makes the flood stop
+## short — it can never reach further than the rule allows — so the failure mode
+## is background left behind, never subject eaten.
+func _flood_step(data: PackedByteArray, key_dist: PackedFloat32Array, index: int, key_index: int, key: Color, from_weak: int) -> int:
+	var distance := _region_distance(data, key_dist, index, key_index, key)
+	if distance <= tolerance:
+		return 0
+	if crevice_reach > 0 and from_weak < crevice_reach and distance <= maxf(crevice_tolerance, tolerance):
+		return from_weak + 1
+	return -1
 
 
 ## For every pixel, the index of the closest opaque subject pixel, or -1 if none

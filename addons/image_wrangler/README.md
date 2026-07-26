@@ -72,10 +72,38 @@ The form is split into a **Settings** group and an **Island Picker** group.
 | Color Tolerance | 0.02 | How far a pixel may drift from the background colour and still be keyed out. Raise it if a re-compressed background leaves speckles behind. |
 | Edge Width | 2 | How many pixels of antialiasing to rebuild. 2 suits ordinary antialiasing; raise it for soft edges, glows and drop shadows; 0 gives a hard cutout. |
 | Edge Contract | 0.0 | Pulls the soft edge inwards. Only needed if a faint halo survives, usually because the source was flattened onto the background twice. |
+| Crevice Reach | 0 (off) | Lets the flood squeeze into nooks it would otherwise stop outside. See below. |
+| Crevice Tolerance | 0.5 | How far from the background colour those squeezed-through pixels may be. |
 | Only Outer Background | on | Flood fills from the image border, so background-coloured regions enclosed by the subject — eyes, highlights, the holes in an "o" — stay opaque. |
 | Island Picker | empty | Enclosed regions to remove anyway, picked off the preview. Held per image. See below. |
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
+
+### Nooks and crannies
+
+Background sometimes survives in a tight concave corner. The usual cause is not
+the edge handling but **reachability**: where two walls nearly meet, their
+antialiasing overlaps and no pixel in the gap is close enough to the background
+colour to pass the flood's test. The flood stops at the mouth, and everything
+behind it stays opaque.
+
+**Crevice Reach** is the remedy — Canny's double-threshold trick applied to
+region growing instead of edge linking. A pixel within **Color Tolerance** is
+solid background and resets the count; one merely within **Crevice Tolerance**
+may still be crossed, but only this many in a row before solid background is
+needed again. That squeezes through a constriction while stopping the flood
+wandering off across a pale subject, which an unbounded loose threshold would do.
+
+Set it to at least the length of the constriction it has to get through — a
+narrow slot 8px long needs roughly that much reach. It is off by default because
+it is a remedy rather than something every image wants.
+
+Being generous with it is safer than it sounds. Anywhere the flood reaches only
+by straying is reclassified as **edge**, not background, so it is matted by the
+ordinary coverage maths rather than cut out — and genuine subject measures as
+fully covered there, so it keeps its alpha. Measured across near-white, light
+grey and mid grey subjects at every reach from 1 to 32, not one interior pixel
+was eroded, and a normal antialiased edge came out bit-identical to reach 0.
 
 ### Picking islands
 
