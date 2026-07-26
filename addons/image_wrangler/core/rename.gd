@@ -22,6 +22,10 @@ extends IWOperation
 ## Because it does not touch pixels, [method transforms_pixels] returns false and
 ## the dock copies each file byte-for-byte rather than re-encoding it — so a JPEG
 ## renamed by this stays a JPEG rather than becoming a PNG wearing a .jpg name.
+##
+## A JSON file sharing an image's name travels with it, and is removed on the same
+## terms. That file is the image's settings, and a name is not worth losing them
+## over.
 
 var settings: RenameSettings
 
@@ -165,7 +169,7 @@ func get_settings_schema() -> Array[Dictionary]:
 			"label": "Remove Old Files",
 			"group": "Format",
 			"type": SettingType.BOOL,
-			"tooltip": "Delete each source once its copy has been written.\nYou are asked first, every copy is checked against its source by checksum,\nand nothing is deleted unless all of them match. The originals go to the\nsystem trash, not straight out.",
+			"tooltip": "Delete each source once its copy has been written.\nYou are asked first, every copy is checked against its source by checksum,\nand nothing is deleted unless all of them match. The originals go to the\nsystem trash, not straight out.\n\nA matching .json file counts as part of the image: it is copied to the new\nname and removed under the same checks.",
 		},
 	]
 

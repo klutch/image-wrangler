@@ -34,6 +34,18 @@ static func sidecar_path(source_path: String) -> String:
 	return source_path.get_basename() + ".json"
 
 
+## Whether the file at [param path] is a sidecar this addon wrote.
+##
+## False for a missing or unreadable file, and false for somebody else's JSON
+## sitting where a sidecar would go. Callers use it before overwriting: the same
+## judgement [method save_settings] makes, exposed for the rename path, which
+## writes sidecars without going through it.
+static func is_sidecar(path: String) -> bool:
+	if not FileAccess.file_exists(path):
+		return false
+	return not _read_envelope(path).is_empty()
+
+
 ## Settings loaded from [param source_path]'s sidecar, or [code]null[/code] when
 ## there is nothing usable there.
 ##

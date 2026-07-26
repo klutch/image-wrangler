@@ -1073,6 +1073,10 @@ func _on_output_dir_chosen(directory: String) -> void:
 	if _operation == null:
 		return
 
+	# Sidecars travel with their image on the copy path, so they can be replaced by
+	# a run too and belong in the warning below.
+	var carries_sidecars := not _operation.transforms_pixels()
+
 	var jobs := {}
 	var existing := PackedStringArray()
 	for path in _sources:
@@ -1080,6 +1084,13 @@ func _on_output_dir_chosen(directory: String) -> void:
 		jobs[path] = destination
 		if FileAccess.file_exists(destination):
 			existing.append(destination.get_file())
+		if not carries_sidecars or not FileAccess.file_exists(SettingsIO.sidecar_path(path)):
+			continue
+		# Only ours is listed: one belonging to something else is refused rather
+		# than replaced, so naming it here would promise a write that never comes.
+		var destination_sidecar := SettingsIO.sidecar_path(destination)
+		if SettingsIO.is_sidecar(destination_sidecar):
+			existing.append(destination_sidecar.get_file())
 
 	_pending_outputs = jobs
 	if existing.is_empty():
@@ -1203,6 +1214,10 @@ func _verify_then_remove_sources() -> void:
 ## entry goes stale — a rename that left its sources alone has nothing to fix.
 ## Left unrepointed, selecting one of those rows would fail to load and a second
 ## run would skip it.
+##
+## [param moved] carries the sidecars that travelled alongside their images as
+## well. They match nothing here — the list and the settings map are both keyed by
+## image path — so they pass through without needing to be filtered out.
 func _repoint_sources(moved: Dictionary) -> void:
 	if moved.is_empty():
 		return
@@ -1219,8 +1234,8 @@ func _repoint_sources(moved: Dictionary) -> void:
 			selected = path
 	_sources = rebuilt
 
-	# Per-image settings describe the image, so they follow it to its new path.
-	# The old sidecar is left where it is, beside a file now in the trash.
+	# Per-image settings describe the image, so they follow it to its new path —
+	# in memory here, and on disk as the sidecar copied during the run.
 	for source: String in moved:
 		if not _settings_by_path.has(source):
 			continue
@@ -1250,6 +1265,64 @@ func _output_name_for(path: String) -> String:
 	return _operation.get_output_name(path, _suffix_edit.text, maxi(index, 0))
 
 
+## Sidecar paths that sources outside [param jobs] still read from.
+##
+## A sidecar is named from the basename alone, so [code]flower.png[/code] and
+## [code]flower.jpg[/code] in one folder share [code]flower.json[/code]. Renaming
+## only one of them must not carry that file away from the other, which would
+## strip settings off an image this run never touched.
+func _sidecars_held_outside(jobs: Dictionary) -> Dictionary:
+	var held := {}
+	for path in _sources:
+		var source := String(path)
+		if not jobs.has(source):
+			held[SettingsIO.sidecar_path(source)] = true
+	return held
+
+
+## Copies a source's JSON counterpart alongside the copy of the image, and queues
+## the original for the same removal check the image gets.
+##
+## The sidecar describes the image, so a rename that left it behind would strand
+## every per-image setting the moment the dock was reopened — and, with Remove Old
+## Files ticked, orphan it beside a file now in the trash. Whatever sits at the
+## sidecar path travels, ours or not: [code]sprite.json[/code] beside
+## [code]sprite.png[/code] is as likely to be an Aseprite atlas descriptor, and
+## that belongs with the image just as much.
+##
+## Returns the empty String when the sidecar was carried or there was none, and
+## the name of the file left behind otherwise. Never fails the image: by the time
+## this runs the image is already written, and reporting a rename as failed
+## because of its sidecar would be a lie about what is on disk.
+func _carry_sidecar(source_path: String, destination: String, held: Dictionary) -> String:
+	var source_sidecar := SettingsIO.sidecar_path(source_path)
+	if not FileAccess.file_exists(source_sidecar):
+		return ""
+
+	# Both sidecars are named from their image's basename, so a rename that only
+	# changed the extension's case leaves them the same file. Copying it onto
+	# itself would truncate it.
+	var destination_sidecar := SettingsIO.sidecar_path(destination)
+	if _is_same_file(source_sidecar, destination_sidecar):
+		return ""
+
+	# The one case where refusing beats writing: a JSON already at the new name
+	# that this addon did not write is somebody else's, and a rename is no licence
+	# to destroy it. Same judgement [method SettingsIO.save_settings] makes.
+	if FileAccess.file_exists(destination_sidecar) and not SettingsIO.is_sidecar(destination_sidecar):
+		return destination_sidecar.get_file()
+	if DirAccess.copy_absolute(source_sidecar, destination_sidecar) != OK:
+		return source_sidecar.get_file()
+
+	# Queued on the same terms as the image — checksummed against its copy, all or
+	# nothing with the rest, and to the trash rather than straight out. Held back
+	# only when a source this run is not processing still reads it; the copy has
+	# been made either way.
+	if _operation.removes_sources() and not held.has(source_sidecar):
+		_pending_removals[source_sidecar] = destination_sidecar
+	return ""
+
+
 ## Runs the operation over every queued source and writes the results.
 func _write_pending_outputs() -> void:
 	var jobs := _pending_outputs
@@ -1267,8 +1340,13 @@ func _write_pending_outputs() -> void:
 		settings_for_job[source_path] = _settings_for(source_path, template)
 
 	var rewrites_pixels := _operation.transforms_pixels()
+	# Worked out once for the whole run rather than per file, since it depends on
+	# which sources the run leaves alone.
+	var held_sidecars := _sidecars_held_outside(jobs)
+
 	var written := 0
 	var failures := PackedStringArray()
+	var sidecar_failures := PackedStringArray()
 	for source_path: String in jobs:
 		var destination: String = jobs[source_path]
 		var directory := destination.get_base_dir()
@@ -1294,6 +1372,11 @@ func _write_pending_outputs() -> void:
 			# of them are actually deleted is decided after the whole run.
 			if _operation.removes_sources() and not _is_same_file(source_path, destination):
 				_pending_removals[source_path] = destination
+			# After the image, so a copy that failed leaves no sidecar stranded
+			# beside a file that was never written.
+			var stalled := _carry_sidecar(source_path, destination, held_sidecars)
+			if not stalled.is_empty():
+				sidecar_failures.append(stalled)
 			continue
 
 		var image := _load_image(source_path)
@@ -1308,11 +1391,16 @@ func _write_pending_outputs() -> void:
 
 	_operation.set_settings(template)
 
-	if failures.is_empty():
-		_set_status("Wrote %d file(s)." % written)
-	else:
-		_set_status("Wrote %d file(s), %d failed: %s" % [written, failures.size(), ", ".join(failures)])
+	var report := "Wrote %d file(s)." % written
+	if not failures.is_empty():
+		report = "Wrote %d file(s), %d failed: %s" % [written, failures.size(), ", ".join(failures)]
 		push_error("Image Wrangler: failed to process %s" % ", ".join(failures))
+	# Appended rather than replacing the line: the image is what the run was for,
+	# and a sidecar left behind must not read as a failed rename.
+	if not sidecar_failures.is_empty():
+		report += " %d settings file(s) stayed put: %s" % [sidecar_failures.size(), ", ".join(sidecar_failures)]
+		push_warning("Image Wrangler: could not carry %s across; the original stays." % ", ".join(sidecar_failures))
+	_set_status(report)
 
 	if Engine.is_editor_hint():
 		EditorInterface.get_resource_filesystem().scan()

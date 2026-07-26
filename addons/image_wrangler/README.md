@@ -310,6 +310,18 @@ Because it does not touch pixels, the file is **copied byte-for-byte** rather
 than re-encoded, so a renamed JPEG stays a JPEG instead of becoming a PNG wearing
 a `.jpg` name.
 
+**A matching `.json` travels with the image.** Rename `flower.png` to
+`tile_003.png` and `flower.json` is copied to `tile_003.json`, so the new file
+arrives with the settings the old one had rather than falling back to defaults
+the next time the dock is opened. Whatever sits at that name goes, ours or not —
+`sprite.json` beside `sprite.png` is as likely to be an Aseprite atlas
+descriptor, and that belongs with the image just as much. Two exceptions: a JSON
+already at the new name that this addon did not write is **never replaced**, and
+a sidecar another image in the list still shares — `flower.png` and `flower.jpg`
+resolve to the same `flower.json` — is copied but never removed. Either way the
+status bar names what stayed put, and the image itself is still reported as
+written, because it was.
+
 | Setting | What it does |
 | --- | --- |
 | Base Name | Replaces every file's name. Leave it empty and each keeps its own — which is what makes Find and numbering useful across a mixed batch. |
@@ -319,7 +331,7 @@ a `.jpg` name.
 | Separator / Number At | The text between name and counter, and which end it goes on. |
 | Letter Case | Unchanged, lowercase, UPPERCASE or Title Case. Never applied to the extension. |
 | Lowercase Extension | So a folder of mixed `.PNG` and `.png` comes out consistent. |
-| Remove Old Files | Off by default. Deletes each source once its copy has been written — see below. |
+| Remove Old Files | Off by default. Deletes each source — and its `.json`, if it has one — once the copy has been written. See below. |
 
 The name is composed in a fixed order, so the result does not depend on which
 fields happen to be filled in:
@@ -359,13 +371,18 @@ deletion:
 A source that failed to copy is never a candidate, and neither is one whose
 destination is itself.
 
+Sidecars go into the same pass rather than a pass of their own, so
+`flower.json` is named in the confirmation alongside `flower.png`, checksummed
+like it, and caught by the same all-or-nothing rule — a sidecar that did not
+verify stops the images being deleted too.
+
 Once the originals are gone, the **Images** list re-points at the files that
 replaced them — keeping its order, its selection, and each image's settings — so
 the rows are not left aiming at files in the trash. Only entries whose original
 actually moved are touched; a rename that left its sources alone changes nothing,
-because nothing went stale. Each image's `.json` sidecar is *not* moved with it:
-the old one stays where it was, and editing a setting writes a fresh one beside
-the new file.
+because nothing went stale. Each image's settings follow it in memory, and its
+`.json` sidecar has already been copied to the new name during the run, so
+reopening the dock later finds them still there.
 
 ## Adding an operation
 
