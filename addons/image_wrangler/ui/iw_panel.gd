@@ -563,18 +563,30 @@ func _on_key_color_changed(color: Color) -> void:
 	_on_setting_changed()
 
 
-## Hooks up the point-list control the settings builder just created, if the
+## Searches the settings form for the picker at any depth.
+##
+## A grouped setting is nested inside its heading box rather than sitting
+## directly in the form, so scanning only the form's own children finds nothing
+## and every picker feature goes quietly dead.
+func _find_island_picker(node: Node) -> IslandPicker:
+	for child in node.get_children():
+		if child is IslandPicker:
+			return child
+		var found := _find_island_picker(child)
+		if found != null:
+			return found
+	return null
+
+
+## Hooks up the island picker the settings builder just created, if the
 ## operation declared one. Operations without one leave picking switched off.
 func _bind_island_picker() -> void:
-	_island_picker = null
-	for child in _settings_box.get_children():
-		if child is IslandPicker:
-			_island_picker = child
-			_island_picker.pick_toggled.connect(_on_pick_toggled)
-			_island_picker.islands_changed.connect(_on_islands_changed)
-			_island_picker.selection_changed.connect(_update_markers)
-			_island_picker.set_color_provider(_sample_source_color)
-			break
+	_island_picker = _find_island_picker(_settings_box)
+	if _island_picker != null:
+		_island_picker.pick_toggled.connect(_on_pick_toggled)
+		_island_picker.islands_changed.connect(_on_islands_changed)
+		_island_picker.selection_changed.connect(_update_markers)
+		_island_picker.set_color_provider(_sample_source_color)
 	# Switching operations always drops out of pick mode, so a fresh settings
 	# form never inherits a crosshair from the one before it.
 	_preview.pick_mode = false
