@@ -31,11 +31,16 @@ const MAX_ZOOM := 1000.0
 const MIN_VISIBLE := 32.0
 
 ## Button steps are fine up to 100% and coarse beyond it, so the top of the
-## range is reachable without forty clicks. The wheel always steps finely.
+## range is reachable without forty clicks.
 const FINE_STEP := 25.0
 const COARSE_STEP := 100.0
 const COARSE_ABOVE := 100.0
+
+## The wheel steps 25% for most of the range, but drops to 10% at the bottom of
+## it, where a 25% jump is a large fraction of what you are looking at.
 const WHEEL_STEP := 25.0
+const WHEEL_FINE_STEP := 10.0
+const WHEEL_FINE_BELOW := 50.0
 
 ## While set, clicks report the pixel under the cursor instead of doing nothing.
 var pick_mode := false:
@@ -213,11 +218,18 @@ static func step_zoom(percent: float, zooming_in: bool) -> float:
 	return clampf(ceilf(percent / down_step) * down_step - down_step, MIN_ZOOM, MAX_ZOOM)
 
 
-## Next zoom on the wheel ladder, which stays at 25% across the whole range.
+## Next zoom on the wheel ladder: 10% steps below 50%, 25% steps from there up.
+##
+## The comparisons differ by a hair on purpose. Stepping up *from* 50% takes the
+## coarse step and stepping down *from* it takes the fine one, so 40 and 50 are
+## neighbours in both directions and the boundary has no rung that can only be
+## reached from one side.
 static func wheel_zoom(percent: float, zooming_in: bool) -> float:
 	if zooming_in:
-		return clampf(floorf(percent / WHEEL_STEP) * WHEEL_STEP + WHEEL_STEP, MIN_ZOOM, MAX_ZOOM)
-	return clampf(ceilf(percent / WHEEL_STEP) * WHEEL_STEP - WHEEL_STEP, MIN_ZOOM, MAX_ZOOM)
+		var up_step := WHEEL_FINE_STEP if percent < WHEEL_FINE_BELOW else WHEEL_STEP
+		return clampf(floorf(percent / up_step) * up_step + up_step, MIN_ZOOM, MAX_ZOOM)
+	var down_step := WHEEL_FINE_STEP if percent <= WHEEL_FINE_BELOW else WHEEL_STEP
+	return clampf(ceilf(percent / down_step) * down_step - down_step, MIN_ZOOM, MAX_ZOOM)
 
 
 # --- Layout -------------------------------------------------------------
