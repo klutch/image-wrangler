@@ -345,15 +345,17 @@ func _build_output_section() -> Control:
 func _build_status_bar() -> Control:
 	var bar := HBoxContainer.new()
 
+	# Messages here name files and can run long. Ellipsising, and letting the
+	# label soak up the free space rather than demand it, stops a status message
+	# from setting a floor under the whole panel's width.
 	_status_label = Label.new()
-	_status_label.text = "No image selected."
+	_status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_set_status("No image selected.")
 	bar.add_child(_status_label)
 
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.add_child(spacer)
-
 	_detail_label = Label.new()
+	_detail_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_detail_label.modulate = Color(1, 1, 1, 0.6)
 	bar.add_child(_detail_label)
 
@@ -425,7 +427,7 @@ func _add_sources(paths: PackedStringArray) -> void:
 		_file_list.select(first_new)
 		_on_file_selected(first_new)
 	elif skipped > 0:
-		_status_label.text = "Skipped %d unsupported file(s)." % skipped
+		_set_status("Skipped %d unsupported file(s)." % skipped)
 	_update_controls()
 
 
@@ -461,7 +463,7 @@ func _on_remove_pressed() -> void:
 	else:
 		_preview.set_image(null)
 		_apply_seeds_for("")
-		_status_label.text = "No image selected."
+		_set_status("No image selected.")
 		_detail_label.text = ""
 	_update_controls()
 
@@ -473,7 +475,7 @@ func _on_file_selected(index: int) -> void:
 	_source_image = _load_image(path)
 	_result_image = null
 	if _source_image == null:
-		_status_label.text = "Could not read %s" % path.get_file()
+		_set_status("Could not read %s" % path.get_file())
 		_detail_label.text = ""
 		_preview.set_image(null)
 		_apply_seeds_for("")
@@ -487,7 +489,7 @@ func _on_file_selected(index: int) -> void:
 	var pixel_count := _source_image.get_width() * _source_image.get_height()
 	if pixel_count > AUTO_PREVIEW_PIXEL_LIMIT and _auto_preview.button_pressed:
 		_auto_preview.button_pressed = false
-		_status_label.text = "Auto preview off: %s is large. Press Refresh to process it." % path.get_file()
+		_set_status("Auto preview off: %s is large. Press Refresh to process it." % path.get_file())
 
 	_update_controls()
 	if _auto_preview.button_pressed:
@@ -618,14 +620,14 @@ func _sample_source_color(pixel: Vector2i) -> Color:
 func _on_pick_toggled(enabled: bool) -> void:
 	_preview.pick_mode = enabled
 	if enabled:
-		_status_label.text = "Click a spot in the preview to add it to the list."
+		_set_status("Click a spot in the preview to add it to the list.")
 
 
 func _on_pixel_picked(pixel: Vector2i) -> void:
 	if _point_editor == null or _source_image == null:
 		return
 	_point_editor.add_point(pixel)
-	_status_label.text = "Picked (%d, %d)." % [pixel.x, pixel.y]
+	_set_status("Picked (%d, %d)." % [pixel.x, pixel.y])
 
 
 func _on_points_changed() -> void:
@@ -646,7 +648,7 @@ func _on_setting_changed() -> void:
 	if _auto_preview.button_pressed:
 		_schedule_preview()
 	else:
-		_status_label.text = "Settings changed. Press Refresh to update the preview."
+		_set_status("Settings changed. Press Refresh to update the preview.")
 
 
 func _on_auto_preview_toggled(pressed: bool) -> void:
@@ -667,7 +669,7 @@ func _run_preview() -> void:
 	var started := Time.get_ticks_msec()
 	_result_image = _operation.process_image(_source_image)
 	var elapsed := Time.get_ticks_msec() - started
-	_status_label.text = "%s in %d ms" % [_operation.get_operation_name(), elapsed]
+	_set_status("%s in %d ms" % [_operation.get_operation_name(), elapsed])
 	_update_preview_texture()
 	_update_detail_label()
 
@@ -701,6 +703,12 @@ func _show_zoom(percent: float) -> void:
 	var shown := "%d%%" % roundi(percent)
 	if _zoom_field.text != shown:
 		_zoom_field.text = shown
+
+
+## The status label ellipsises, so the full message is kept as its tooltip.
+func _set_status(text: String) -> void:
+	_status_label.text = text
+	_status_label.tooltip_text = text
 
 
 func _update_detail_label() -> void:
@@ -742,7 +750,7 @@ func _start_jobs(paths: PackedStringArray) -> void:
 	if paths.is_empty() or _operation == null:
 		return
 	if not _use_source_dir.button_pressed and _output_dir_edit.text.strip_edges().is_empty():
-		_status_label.text = "Choose an output folder first."
+		_set_status("Choose an output folder first.")
 		return
 
 	var jobs := {}
@@ -809,9 +817,9 @@ func _write_pending_outputs() -> void:
 		_point_editor.write_points(_seeds_for(_current_path()))
 
 	if failures.is_empty():
-		_status_label.text = "Wrote %d file(s)." % written
+		_set_status("Wrote %d file(s)." % written)
 	else:
-		_status_label.text = "Wrote %d file(s), %d failed: %s" % [written, failures.size(), ", ".join(failures)]
+		_set_status("Wrote %d file(s), %d failed: %s" % [written, failures.size(), ", ".join(failures)])
 		push_error("Image Wrangler: failed to process %s" % ", ".join(failures))
 
 	if Engine.is_editor_hint():

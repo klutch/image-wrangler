@@ -62,6 +62,11 @@ func setup(operation: IWOperation, property: StringName, label: String) -> void:
 func _build() -> void:
 	_title = Label.new()
 	_title.text = _base_label
+	# This label names the selected image, and the settings form it lives in
+	# cannot scroll horizontally, so its width becomes a floor for the whole tool
+	# column. Ellipsising drops its reported minimum width to nothing, which is
+	# what keeps a long file name from pinning the splitters open.
+	_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	add_child(_title)
 
 	var buttons := HBoxContainer.new()
@@ -165,6 +170,7 @@ func set_color_provider(provider: Callable) -> void:
 ## scoped to one image rather than to the tool.
 func set_context_label(context: String) -> void:
 	_title.text = _base_label if context.is_empty() else "%s: %s" % [_base_label, context]
+	_title.tooltip_text = _title.text
 
 
 ## Replaces the whole list and redraws it. Used when the selection changes.
