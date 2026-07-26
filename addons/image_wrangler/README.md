@@ -19,8 +19,8 @@ exactly what happened to the edge pixels.
 | Control | What it does |
 | --- | --- |
 | `-` / `+` | Steps to the next zoom stop. |
-| Zoom dropdown | The stops: **10, 20, 30, 40, 50, 75, 100, 125, 150, 175, 200, 300 … 1000**. The buttons, the wheel and this list all walk the same array, so they cannot disagree. **Fit** can land between stops, and such a value gets a row of its own until you leave it, so the control always says what the zoom actually is. |
-| **Fit** | Zooms so the whole image is visible — but never past 100%, so a small sprite is shown at its true size rather than blown up. |
+| Zoom dropdown | The stops: **10, 20, 30, 40, 50, 75, 100, 125, 150, 175, 200, 300 … 1000**. The buttons, the wheel and this list all walk the same array, so they cannot disagree. **Right-click it to type an exact value** — Enter accepts, Escape cancels. **Fit** can also land between stops, and such a value gets a row of its own until you leave it, so the control always says what the zoom actually is. |
+| **Fit** | Zooms so the image fills the frame, magnifying a small one rather than leaving it at its true size. Whichever axis runs out of room first decides, so the whole image stays on screen. |
 | Mouse wheel | Steps the same stops, **towards the pixel under the cursor**, so you can drive into a corner of the silhouette without chasing it with the scrollbars. |
 | Drag to pan | Left-drag pans whenever no tool is active. With one active — **Pick**, say — the left button belongs to the tool, and middle-drag or Ctrl+left-drag pans instead. Both are claimed before the tool sees them, so panning never drops an island by accident. |
 | Pan range | The image follows the cursor, as if you had grabbed it, and can be dragged clear of the frame edges — zoomed in or out, fitting or not — stopping only once a sliver of it is left on screen, so an edge you are inspecting can be pulled into the middle. **Fit** re-centres. |
@@ -30,9 +30,10 @@ transparent margins; above it, scrollbars appear and it is drawn at exactly the
 requested zoom with nearest sampling, so at 800% you are looking at real pixel
 boundaries rather than a smoothed guess.
 
-Opening an image fits it, so a large one doesn't appear as a corner crop. Zoom
-and scroll then survive everything else — re-running the operation, toggling **Show
-Original** — so you can sit at 400% on an edge and watch a setting change it.
+Opening an image fits it, so it arrives filling the frame rather than as a
+corner crop or a speck. Zoom and scroll then survive everything else — re-running
+the operation, toggling **Show Original** — so you can sit at 400% on an edge and
+watch a setting change it.
 
 The three columns are split by draggable dividers.
 

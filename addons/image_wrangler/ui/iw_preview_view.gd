@@ -200,8 +200,13 @@ func zoom_out(anchor := Vector2(-1, -1)) -> void:
 	set_zoom(step_zoom(_zoom_percent, false), anchor)
 
 
-## Zoom that makes the whole image visible, never above 100%: a small image is
-## shown at its true size with margins rather than blown up to fill the frame.
+## Zoom that fills the frame with the image, magnifying a small one rather than
+## leaving it at its true size.
+##
+## The smaller of the two ratios wins, so whichever axis runs out of room first
+## decides and the whole image stays on screen. Anything past
+## [constant MAX_ZOOM] is clamped by [method set_zoom], which is the one case
+## where the result does not quite fill.
 func fit_to_view() -> void:
 	if _image_size.x <= 0 or _image_size.y <= 0 or size.x <= 0.0 or size.y <= 0.0:
 		set_zoom(100.0)
@@ -213,7 +218,7 @@ func fit_to_view() -> void:
 	_scroll = Vector2.ZERO
 	_pan_offset = Vector2.ZERO
 	_relayout()
-	set_zoom(minf(fit, 100.0))
+	set_zoom(fit)
 	_relayout()
 
 

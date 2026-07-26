@@ -84,6 +84,7 @@ var _settings_box: VBoxContainer
 var _show_original: CheckButton
 var _auto_preview: CheckButton
 var _zoom_select: OptionButton
+var _zoom_entry: LineEdit
 var _refresh_button: Button
 var _remove_button: Button
 var _suffix_edit: LineEdit
@@ -285,9 +286,24 @@ func _build_status_row() -> Control:
 
 	_zoom_select = OptionButton.new()
 	_zoom_select.custom_minimum_size = Vector2(76, 0)
-	_zoom_select.tooltip_text = "Zoom level. The buttons, the wheel and this list all step through the same\nstops. The wheel zooms towards the pixel under the cursor.\nFit can land between stops; such a value is shown here too, until you\nleave it. Drag to pan — while a tool is active, use middle or Ctrl+left."
+	_zoom_select.tooltip_text = "Zoom level. The buttons, the wheel and this list all step through the same\nstops. The wheel zooms towards the pixel under the cursor.\nRight-click to type an exact value instead.\nFit can land between stops; such a value is shown here too, until you\nleave it. Drag to pan — while a tool is active, use middle or Ctrl+left."
 	_zoom_select.item_selected.connect(_on_zoom_selected)
+	# The signal fires ahead of OptionButton's own handling, so accepting the
+	# event here is what stops a right-click also opening the popup.
+	_zoom_select.gui_input.connect(_on_zoom_select_input)
 	zoom.add_child(_zoom_select)
+
+	# Shares the slot with the dropdown; only ever one of the two is visible.
+	_zoom_entry = LineEdit.new()
+	_zoom_entry.custom_minimum_size = _zoom_select.custom_minimum_size
+	_zoom_entry.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_zoom_entry.tooltip_text = "Type a zoom from 1 to 1000. Enter accepts, Escape cancels."
+	_zoom_entry.hide()
+	_zoom_entry.text_submitted.connect(_commit_zoom_entry)
+	_zoom_entry.focus_exited.connect(func() -> void: _commit_zoom_entry(_zoom_entry.text))
+	_zoom_entry.gui_input.connect(_on_zoom_entry_input)
+	zoom.add_child(_zoom_entry)
+
 	_refresh_zoom_items(100.0)
 
 	var zoom_in_button := Button.new()
@@ -298,7 +314,7 @@ func _build_status_row() -> Control:
 
 	var fit_button := Button.new()
 	fit_button.text = "Fit"
-	fit_button.tooltip_text = "Zoom so the whole image is visible, never past 100%."
+	fit_button.tooltip_text = "Zoom so the image fills the frame, whichever axis runs out first."
 	fit_button.pressed.connect(func() -> void: _preview.fit_to_view())
 	zoom.add_child(fit_button)
 
@@ -556,8 +572,8 @@ func _on_file_selected(index: int) -> void:
 	else:
 		_update_preview_texture()
 		_update_detail_label()
-	# A newly opened image starts fitted, so a large one is not shown as a
-	# corner crop. Fit never magnifies, so a small one still lands at 100%.
+	# A newly opened image starts fitted, so it arrives filling the frame rather
+	# than as a corner crop or a speck in the middle.
 	_preview.fit_to_view()
 
 
@@ -848,6 +864,56 @@ func _update_preview_texture() -> void:
 		_preview.set_image(_source_image)
 	else:
 		_preview.set_image(_result_image)
+
+
+## Right-clicking the dropdown swaps it for a text field, so a zoom that is not
+## on the list can still be asked for by name.
+func _on_zoom_select_input(event: InputEvent) -> void:
+	var button := event as InputEventMouseButton
+	if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_RIGHT:
+		return
+	_zoom_select.accept_event()
+	_begin_zoom_entry()
+
+
+func _begin_zoom_entry() -> void:
+	# Rounded, because it is a starting point to edit rather than a reading. The
+	# exact value is only lost if the user accepts what is shown.
+	_zoom_entry.text = "%d" % roundi(_preview.get_zoom())
+	_zoom_select.hide()
+	_zoom_entry.show()
+	_zoom_entry.grab_focus()
+	_zoom_entry.select_all()
+
+
+## Applies whatever was typed and puts the dropdown back.
+##
+## Reached from Enter and from losing focus, and hiding a focused field raises
+## focus_exited — so this has to be safe to call twice for one edit.
+func _commit_zoom_entry(text: String) -> void:
+	if not _zoom_entry.visible:
+		return
+	_end_zoom_entry()
+	var cleaned := text.strip_edges().trim_suffix("%").strip_edges()
+	if cleaned.is_valid_float():
+		_preview.set_zoom(cleaned.to_float())
+	# set_zoom clamps, and stays quiet when the value has not moved, so the
+	# dropdown is rebuilt from the view rather than from what was typed.
+	_refresh_zoom_items(_preview.get_zoom())
+
+
+func _on_zoom_entry_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.keycode != KEY_ESCAPE:
+		return
+	_zoom_entry.accept_event()
+	_end_zoom_entry()
+	_refresh_zoom_items(_preview.get_zoom())
+
+
+func _end_zoom_entry() -> void:
+	_zoom_entry.hide()
+	_zoom_select.show()
 
 
 func _on_zoom_selected(index: int) -> void:
