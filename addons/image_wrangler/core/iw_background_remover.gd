@@ -69,6 +69,10 @@ var contiguous: bool = true
 ## border. Lets the user hand-pick enclosed regions that [member contiguous]
 ## deliberately skips. Ignored when [member contiguous] is off, since every
 ## background-coloured pixel already qualifies then.
+##
+## These describe one particular image, so the dock swaps them per file rather
+## than treating them as a setting shared across a batch. Points outside the
+## image being processed are skipped, which keeps a stale list harmless.
 var seed_points: Array[Vector2i] = []
 
 ## Un-blend the background out of partially transparent pixels.

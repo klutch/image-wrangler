@@ -42,7 +42,7 @@ The full derivation is in the header comment of
 | Edge Width | 2 | How many pixels of antialiasing to rebuild. 2 suits ordinary antialiasing; raise it for soft edges, glows and drop shadows; 0 gives a hard cutout. |
 | Edge Contract | 0.0 | Pulls the soft edge inwards. Only needed if a faint halo survives, usually because the source was flattened onto white twice. |
 | Only Outer Background | on | Flood fills from the image border, so white enclosed by the subject — eyes, highlights, the holes in an "o" — stays opaque. |
-| Picked Islands | empty | Enclosed regions to remove anyway, picked off the preview. See below. |
+| Picked Islands | empty | Enclosed regions to remove anyway, picked off the preview. Held per image. See below. |
 | Remove White Fringe | on | Un-blends white out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging white back in. |
 
@@ -58,6 +58,14 @@ clicked, marked with a ring on the preview, and removed on the next pass.
 Highlight a row to see which marker it is; **Remove** and **Clear** take entries
 back out.
 
+**The list belongs to the image, not to the tool.** Its header names the image
+it's showing — `Picked Islands: logo.png` — and switching selection swaps the
+list to whatever that image has. Entries stay put until you remove them or
+remove the image from the queue, so you can work through a batch picking each
+image's islands and then process the lot in one go; **Process All** gives every
+image its own seeds. Seeds live for the editor session and are not written to
+disk.
+
 A picked point is not a hole punch — it seeds the same flood fill the image
 border does, so the region's rim gets the identical antialiasing treatment as
 the outer silhouette. On a test island with a known soft rim, the worst fringe
@@ -67,9 +75,6 @@ Notes:
 
 - Clicking a pixel that isn't background-coloured does nothing, and the panel
   says so. Raise **White Tolerance** or click a paler spot.
-- The list is a setting on the tool, not on the image, so **Process All** applies
-  the same coordinates to every queued image. Points outside a given image are
-  skipped.
 - Entries are irrelevant while **Only Outer Background** is off, since every
   background-coloured pixel already qualifies then.
 

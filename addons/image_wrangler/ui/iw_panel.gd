@@ -30,6 +30,12 @@ var _result_image: Image
 var _suffix_is_default := true
 var _pending_outputs: Dictionary = {}
 
+## Picked islands keyed by source path. They describe a place in one particular
+## image, so they live with the image rather than with the tool: they follow the
+## selection, are swapped in per file during a batch run, and are dropped when
+## the image leaves the list.
+var _seeds_by_path: Dictionary = {}
+
 var _file_list: ItemList
 var _preview: PreviewView
 
@@ -371,6 +377,8 @@ func _on_remove_pressed() -> void:
 	var index := _selected_index()
 	if index < 0:
 		return
+	# Islands are scoped to the image, so they go with it.
+	_seeds_by_path.erase(_sources[index])
 	_sources.remove_at(index)
 	_source_image = null
 	_result_image = null
@@ -381,6 +389,7 @@ func _on_remove_pressed() -> void:
 		_on_file_selected(next)
 	else:
 		_preview.set_image(null)
+		_apply_seeds_for("")
 		_status_label.text = "No image selected."
 		_detail_label.text = ""
 	_update_controls()
@@ -396,8 +405,13 @@ func _on_file_selected(index: int) -> void:
 		_status_label.text = "Could not read %s" % path.get_file()
 		_detail_label.text = ""
 		_preview.set_image(null)
+		_apply_seeds_for("")
 		_update_controls()
 		return
+
+	# Islands belong to this image, so they are swapped in before anything is
+	# processed with them.
+	_apply_seeds_for(path)
 
 	var pixel_count := _source_image.get_width() * _source_image.get_height()
 	if pixel_count > AUTO_PREVIEW_PIXEL_LIMIT and _auto_preview.button_pressed:
@@ -451,13 +465,63 @@ func _bind_point_editor() -> void:
 			_point_editor.pick_toggled.connect(_on_pick_toggled)
 			_point_editor.points_changed.connect(_on_points_changed)
 			_point_editor.selection_changed.connect(_update_markers)
+			_point_editor.set_color_provider(_sample_source_color)
 			break
 	# Switching tools always drops out of pick mode, so a fresh settings form
 	# never inherits a crosshair from the tool before it.
 	_preview.pick_mode = false
 	if _point_editor != null:
 		_point_editor.set_pick_active(false)
+	_apply_seeds_for(_current_path())
 	_update_markers()
+
+
+## Path of the highlighted source, or an empty string when nothing is selected.
+func _current_path() -> String:
+	var index := _selected_index()
+	if index < 0 or index >= _sources.size():
+		return ""
+	return _sources[index]
+
+
+func _seeds_for(path: String) -> Array[Vector2i]:
+	var points: Array[Vector2i] = []
+	if not path.is_empty() and _seeds_by_path.has(path):
+		points.assign(_seeds_by_path[path])
+	return points
+
+
+## Loads one image's islands into the tool and the list.
+func _apply_seeds_for(path: String) -> void:
+	if _point_editor == null:
+		return
+	_point_editor.set_points(_seeds_for(path))
+	_point_editor.set_context_label(path.get_file())
+	_update_markers()
+
+
+## Saves the list back against the image it was picked on. An emptied list drops
+## its entry rather than leaving a stale key behind.
+func _store_seeds() -> void:
+	if _point_editor == null:
+		return
+	var path := _current_path()
+	if path.is_empty():
+		return
+	var points := _point_editor.get_points()
+	if points.is_empty():
+		_seeds_by_path.erase(path)
+	else:
+		_seeds_by_path[path] = points.duplicate()
+
+
+## Colour behind a pixel of the image on screen, for swatches and pick warnings.
+func _sample_source_color(pixel: Vector2i) -> Color:
+	if _source_image == null:
+		return Color.MAGENTA
+	if pixel.x < 0 or pixel.y < 0 or pixel.x >= _source_image.get_width() or pixel.y >= _source_image.get_height():
+		return Color.MAGENTA
+	return _source_image.get_pixelv(pixel)
 
 
 func _on_pick_toggled(enabled: bool) -> void:
@@ -469,11 +533,12 @@ func _on_pick_toggled(enabled: bool) -> void:
 func _on_pixel_picked(pixel: Vector2i) -> void:
 	if _point_editor == null or _source_image == null:
 		return
-	_point_editor.add_point(pixel, _source_image.get_pixelv(pixel))
+	_point_editor.add_point(pixel)
 	_status_label.text = "Picked (%d, %d)." % [pixel.x, pixel.y]
 
 
 func _on_points_changed() -> void:
+	_store_seeds()
 	_update_markers()
 	_on_setting_changed()
 
@@ -618,11 +683,18 @@ func _write_pending_outputs() -> void:
 			if make_error != OK:
 				failures.append(source_path.get_file())
 				continue
+		# Each image is processed with its own islands, not the selected
+		# image's. The list UI is left alone and restored below.
+		if _point_editor != null:
+			_point_editor.write_points(_seeds_for(source_path))
 		var result := _operation.process_image(image)
 		if result.save_png(destination) != OK:
 			failures.append(source_path.get_file())
 			continue
 		written += 1
+
+	if _point_editor != null:
+		_point_editor.write_points(_seeds_for(_current_path()))
 
 	if failures.is_empty():
 		_status_label.text = "Wrote %d file(s)." % written

@@ -3,15 +3,19 @@ extends VBoxContainer
 
 ## Settings control for an [code]Array[Vector2i][/code] of picked pixels.
 ##
-## Owns the list and its buttons, but not the picking itself: only the dock can
-## see the preview, so it listens for [signal pick_toggled], routes the click
-## back in through [method add_point], and mirrors the entries as markers.
+## Owns the list and its buttons, but neither the picking nor the storage. Only
+## the dock can see the preview, so it listens for [signal pick_toggled], routes
+## the click back in through [method add_point], and mirrors the entries as
+## markers. The dock also decides what the list is *of* — for the background
+## remover it swaps the contents per image via [method set_points], so picked
+## islands follow the image they were found on.
 
 ## Emitted when the pick button is toggled. The dock puts the preview into
 ## crosshair mode in response.
 signal pick_toggled(enabled: bool)
 
-## Emitted whenever the underlying array changes, so the preview can re-run.
+## Emitted whenever the underlying array changes, so the dock can re-run the
+## preview and write the list back against the current image.
 signal points_changed
 
 ## Emitted when a different row is highlighted, so the matching marker can be.
@@ -24,10 +28,13 @@ var _operation: IWOperation
 var _property: StringName
 var _validate := Callable()
 
-## Colour sampled at each pick, kept purely so the rows have a swatch. Held
-## alongside rather than inside the property, which stays a plain point list.
-var _colors: Array[Color] = []
+## Supplied by the dock: maps a pixel to its colour in the image on screen.
+## Swatches are sampled through this rather than stored, so they can never go
+## stale against whichever image is currently selected.
+var _color_provider := Callable()
 
+var _base_label := ""
+var _title: Label
 var _list: ItemList
 var _pick_button: Button
 var _remove_button: Button
@@ -42,14 +49,15 @@ func setup(operation: IWOperation, property: StringName, label: String, validate
 	_operation = operation
 	_property = property
 	_validate = validate
-	_build(label)
+	_base_label = label
+	_build()
 	_refresh()
 
 
-func _build(label: String) -> void:
-	var title := Label.new()
-	title.text = label
-	add_child(title)
+func _build() -> void:
+	_title = Label.new()
+	_title.text = _base_label
+	add_child(_title)
 
 	var buttons := HBoxContainer.new()
 	add_child(buttons)
@@ -70,7 +78,7 @@ func _build(label: String) -> void:
 
 	_clear_button = Button.new()
 	_clear_button.text = "Clear"
-	_clear_button.tooltip_text = "Remove every entry."
+	_clear_button.tooltip_text = "Remove every entry for this image."
 	_clear_button.pressed.connect(_on_clear_pressed)
 	buttons.add_child(_clear_button)
 
@@ -94,8 +102,35 @@ func _notification(what: int) -> void:
 			_pick_button.icon = get_theme_icon(&"ColorPick", &"EditorIcons")
 
 
-## Adds a picked pixel. [param color] is only used for the row's swatch.
-func add_point(point: Vector2i, color: Color) -> void:
+## Lets the dock supply the colour behind a pixel, for swatches and validation.
+func set_color_provider(provider: Callable) -> void:
+	_color_provider = provider
+	_refresh()
+
+
+## Names what the list currently belongs to, so it is obvious the entries are
+## scoped to one image rather than to the tool.
+func set_context_label(context: String) -> void:
+	_title.text = _base_label if context.is_empty() else "%s: %s" % [_base_label, context]
+
+
+## Replaces the whole list and redraws it. Used when the selection changes.
+func set_points(points: Array[Vector2i]) -> void:
+	write_points(points)
+	_hint.text = ""
+	_refresh()
+
+
+## Writes the property without touching the UI, for batch runs that swap points
+## per image behind the scenes.
+func write_points(points: Array[Vector2i]) -> void:
+	var stored: Array[Vector2i] = []
+	stored.assign(points)
+	_operation.set(_property, stored)
+
+
+## Adds a picked pixel to the list.
+func add_point(point: Vector2i) -> void:
 	var points := _points()
 	if points.has(point):
 		_hint.text = "That pixel is already in the list."
@@ -103,11 +138,10 @@ func add_point(point: Vector2i, color: Color) -> void:
 		return
 
 	points.append(point)
-	_colors.append(color)
 	_operation.set(_property, points)
 	_refresh()
 	_select(points.size() - 1)
-	_hint.text = _validate.call(color) if _validate.is_valid() else ""
+	_hint.text = _warning_for(point)
 	points_changed.emit()
 
 
@@ -131,6 +165,12 @@ func _points() -> Array[Vector2i]:
 	return points
 
 
+func _warning_for(point: Vector2i) -> String:
+	if not _validate.is_valid() or not _color_provider.is_valid():
+		return ""
+	return _validate.call(_color_provider.call(point))
+
+
 func _on_item_selected(_index: int) -> void:
 	_update_buttons()
 	selection_changed.emit()
@@ -142,8 +182,6 @@ func _on_remove_pressed() -> void:
 	if index < 0 or index >= points.size():
 		return
 	points.remove_at(index)
-	if index < _colors.size():
-		_colors.remove_at(index)
 	_operation.set(_property, points)
 	_refresh()
 	if _list.item_count > 0:
@@ -158,7 +196,6 @@ func _on_clear_pressed() -> void:
 	if points.is_empty():
 		return
 	points.clear()
-	_colors.clear()
 	_operation.set(_property, points)
 	_refresh()
 	_hint.text = ""
@@ -175,20 +212,20 @@ func _select(index: int) -> void:
 
 
 func _refresh() -> void:
+	if _list == null:
+		return
 	var points := _points()
 	_list.clear()
-	for i in points.size():
-		var point := points[i]
+	for point in points:
 		var index := _list.add_item("(%d, %d)" % [point.x, point.y])
-		if i < _colors.size():
-			_list.set_item_icon(index, _swatch(_colors[i]))
+		if _color_provider.is_valid():
+			_list.set_item_icon(index, _swatch(_color_provider.call(point)))
 	_update_buttons()
 
 
 func _update_buttons() -> void:
-	var count := _list.item_count
 	_remove_button.disabled = selected_index() < 0
-	_clear_button.disabled = count == 0
+	_clear_button.disabled = _list.item_count == 0
 
 
 ## Small bordered colour chip, so a white pick is still visible on the row.
