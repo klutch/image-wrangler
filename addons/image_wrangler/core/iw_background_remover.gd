@@ -115,6 +115,21 @@ var refine_edges: bool = false
 ## from a real edge and still be pulled onto it.
 var refine_radius: int = 2
 
+## Alpha at or below this is forced clear; [member alpha_ceiling] and above is
+## forced solid; the range between is stretched across the two.
+##
+## The last step before compositing, so it also settles whatever
+## [member refine_edges] left behind. Smoothing pulls a leftover speck of
+## background towards its transparent neighbours rather than removing it, which
+## turns a solid speck into a faint ghost; lifting the floor above where those
+## ghosts land clears them. It costs edge softness in exchange, since genuinely
+## faint edge pixels go with them — the usual clip-black/clip-white trade from
+## keying. At 0 and 1 the whole thing is a no-op.
+var alpha_floor: float = 0.0
+
+## Alpha at or above this is forced solid. See [member alpha_floor].
+var alpha_ceiling: float = 1.0
+
 ## Pixel classes produced by [method _classify].
 const MASK_BACKGROUND := 0
 const MASK_EDGE := 1
@@ -249,6 +264,26 @@ func get_settings_schema() -> Array[Dictionary]:
 			"tooltip": "Window radius for that filter: roughly how far a ragged patch of alpha\nmay sit from a real edge and still be pulled onto it.\nOnly applies while Refine Edges is on.",
 		},
 		{
+			"property": &"alpha_floor",
+			"label": "Alpha Floor",
+			"group": "Settings",
+			"type": SettingType.FLOAT,
+			"min": 0.0,
+			"max": 1.0,
+			"step": 0.01,
+			"tooltip": "Alpha at or below this is forced fully clear.\nApplied last, so it also clears the faint ghosts Refine Edges leaves where\nit smooths leftover background instead of removing it. Around 0.5 does that;\nthe cost is that genuinely faint edge pixels go with them.",
+		},
+		{
+			"property": &"alpha_ceiling",
+			"label": "Alpha Ceiling",
+			"group": "Settings",
+			"type": SettingType.FLOAT,
+			"min": 0.0,
+			"max": 1.0,
+			"step": 0.01,
+			"tooltip": "Alpha at or above this is forced fully solid, with everything between the\nfloor and here stretched across the two. Bring it down towards the floor for\na harder cutoff, leave it at 1 for a soft one.",
+		},
+		{
 			"property": &"island_points",
 			"group": "Island Picker",
 			"type": SettingType.ISLAND_PICKER,
@@ -298,8 +333,24 @@ func process_image(source: Image) -> Image:
 	var coverage := _coverage_map(data, key_dist, mask, key_of, keys, nearest, width, height)
 	if refine_edges:
 		coverage = _guided_refine(coverage, key_dist, width, height)
+	# Last, so it settles the refinement's leftovers rather than being smoothed
+	# back into a haze by it.
+	if alpha_floor > 0.0 or alpha_ceiling < 1.0:
+		_clip_alpha(coverage)
 
 	return _compose(data, coverage, key_of, keys, nearest, width, height)
+
+
+## Stretches alpha so [member alpha_floor] and below lands on clear and
+## [member alpha_ceiling] and above on solid. Edits [param coverage] in place.
+func _clip_alpha(coverage: PackedFloat32Array) -> void:
+	var low := alpha_floor
+	# Letting the ceiling sit at or under the floor is a legitimate request for a
+	# hard cutoff at that value, so it is honoured rather than rejected — just
+	# not by dividing by zero.
+	var span := maxf(alpha_ceiling - low, _EPSILON)
+	for i in coverage.size():
+		coverage[i] = clampf((coverage[i] - low) / span, 0.0, 1.0)
 
 
 ## Alpha for every pixel, before any refinement.

@@ -78,6 +78,8 @@ The form is split into a **Settings** group and an **Island Picker** group.
 | Island Picker | empty | Enclosed regions to remove anyway, picked off the preview. Held per image. See below. |
 | Refine Edges | off | Runs the alpha through a guided filter, snapping it to the edges the image itself has. See below. |
 | Refine Radius | 2 | Window radius for that filter: roughly how far a ragged patch of alpha may sit from a real edge and still be pulled onto it. |
+| Alpha Floor | 0.0 | Alpha at or below this is forced fully clear. Applied last, so it also clears what **Refine Edges** leaves behind. See below. |
+| Alpha Ceiling | 1.0 | Alpha at or above this is forced fully solid, with the range between stretched across the two. |
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
 
@@ -132,6 +134,29 @@ cut mean edge error by 2.6–3.6×:
 
 The cost is a few extra passes over the image, which is why it is off by default.
 A solid interior loses at most two 8-bit levels of alpha and no halo appears.
+
+**One thing it does not do is remove.** Smoothing pulls a leftover speck of
+background *towards* its transparent neighbours, so a solid speck becomes a faint
+ghost rather than disappearing. **Alpha Floor** is the answer: set it above where
+those ghosts land — around 0.5 — and they go. This is the clip-black/clip-white
+pair from keying, applied after refinement so nothing smooths it back into a
+haze.
+
+It is not free. Genuinely faint edge pixels are below the floor too and go with
+the ghosts, so the silhouette hardens. Measured on a soft antialiased edge:
+
+| Floor / ceiling | Mean edge error | Alpha levels left on the edge |
+| --- | --- | --- |
+| off | 0.0028 | smooth |
+| 0.1 / 1.0 | 0.046 | 15 |
+| 0.2 / 0.8 | 0.097 | 11 |
+| 0.5 / 0.6 | 0.183 | 5 |
+| 0.55 / 0.55 | 0.246 | 2 (a hard cutoff) |
+
+So start low. A floor around 0.1–0.2 with the ceiling left at 1.0 clears haze
+while keeping most of the gradient; 0.5 / 0.6 is decisive but close to a binary
+cutout. Setting the ceiling at or below the floor is a hard cutoff at that value,
+and is honoured rather than rejected.
 
 ### Picking islands
 
