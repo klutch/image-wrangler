@@ -5,5 +5,5 @@
 build/
 *.tmp
 .vscode/
-scenes/terrain/*.res
 *.depren
+flower_sheets/
