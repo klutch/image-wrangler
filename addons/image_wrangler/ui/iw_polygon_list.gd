@@ -27,7 +27,10 @@ signal polygons_changed
 signal selection_changed
 
 const SWATCH_SIZE := 14
-const LIST_MIN_HEIGHT := 84
+
+## Floor for the rows box, which [member ItemList.auto_height] otherwise lets
+## collapse to nothing while the list is empty.
+const LIST_EMPTY_HEIGHT := 24
 
 ## Editor icon for the draw button. Every Node class has one, so this is always
 ## present, and editor icons already answer to the theme — none of the inversion
@@ -87,7 +90,10 @@ func _build() -> void:
 	buttons.add_child(_clear_button)
 
 	_list = ItemList.new()
-	_list.custom_minimum_size = Vector2(0, LIST_MIN_HEIGHT)
+	# Grows with its contents rather than reserving a block of the dock whether
+	# or not anything is in it.
+	_list.auto_height = true
+	_list.custom_minimum_size = Vector2(0, LIST_EMPTY_HEIGHT)
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.item_selected.connect(_on_item_selected)
 	add_child(_list)
@@ -103,7 +109,44 @@ func _notification(what: int) -> void:
 	# icon comes out of it, so it is resolved here rather than at construction.
 	if what == NOTIFICATION_THEME_CHANGED and _draw_button != null:
 		if has_theme_icon(DRAW_ICON, &"EditorIcons"):
-			_draw_button.icon = get_theme_icon(DRAW_ICON, &"EditorIcons")
+			_draw_button.icon = _drained(get_theme_icon(DRAW_ICON, &"EditorIcons"))
+
+
+## [param source] with its colour taken out, leaving grey at the same lightness.
+##
+## Godot's node icons are colour-coded by category, so the Polygon2D artwork
+## arrives blue and reads as permanently switched on. Tinting cannot fix that:
+## modulation multiplies, so it can deepen a blue but never drain it. The pixels
+## have to be rewritten.
+##
+## Draining rather than flattening to a silhouette, so the shape keeps its
+## interior lines. What is left is neutral enough for the theme to colour: the
+## button's own pressed tint is the editor accent, so an armed picker still goes
+## blue, and now that means something.
+static func _drained(source: Texture2D) -> Texture2D:
+	if source == null:
+		return null
+	var image := source.get_image()
+	if image == null:
+		return null
+
+	image = image.duplicate()
+	if image.is_compressed():
+		image.decompress()
+	if image.get_format() != Image.FORMAT_RGBA8:
+		image.convert(Image.FORMAT_RGBA8)
+
+	# Rec. 709 luma, so a saturated blue lands as dark as it looks rather than as
+	# the mid grey a flat channel average would give.
+	var data := image.get_data()
+	for i in range(0, data.size(), 4):
+		var luma := roundi(0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2])
+		data[i] = luma
+		data[i + 1] = luma
+		data[i + 2] = luma
+	# Alpha is left alone, so the silhouette is unchanged.
+	return ImageTexture.create_from_image(
+			Image.create_from_data(image.get_width(), image.get_height(), false, Image.FORMAT_RGBA8, data))
 
 
 # --- Public API ---------------------------------------------------------

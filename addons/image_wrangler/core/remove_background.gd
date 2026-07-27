@@ -231,6 +231,7 @@ func get_settings_schema() -> Array[Dictionary]:
 		{
 			"property": &"remove_colors",
 			"group": "Remove Colors",
+			"collapsed": true,
 			"type": SettingType.COLOR_LIST,
 			"tooltip": "The background colors to key out, each with its own tolerance.\nPick them off the preview, or add one and set it by hand. An image with\ntwo flat backgrounds needs two entries: one tolerance loose enough for a\nspeckled one would eat into the subject beside the clean one.\n\nThe flood spreads through every listed color, so entries work together —\na white plate around a green stem needs both listed, and taking white out\nstops green working too, because nothing reaches it from the border.\n\nBackground walled off by opaque subject is never reached, whatever you\nlist. Pick that with the Island Picker instead.\n\nWhere two entries could both claim a pixel, the higher one wins.",
 		},
@@ -238,6 +239,7 @@ func get_settings_schema() -> Array[Dictionary]:
 			"property": &"edge_width",
 			"label": "Edge Width",
 			"group": "Settings",
+			"collapsed": true,
 			"type": SettingType.INT,
 			"min": 0,
 			"max": 16,
@@ -334,6 +336,7 @@ func get_settings_schema() -> Array[Dictionary]:
 		{
 			"property": &"blackout",
 			"group": "Blackout",
+			"collapsed": true,
 			"type": SettingType.POLYGON_LIST,
 			"tooltip": "Regions to erase outright, drawn over the preview. Everything inside a\npolygon is made fully transparent whatever color it is.\n\nThis is the one thing here that does not work by color, so it is the way\nto remove something that has no color in common with itself — a watermark,\na scan edge, a stray element in a corner. Shapes may be concave.\n\nThe cut is hard: no antialiasing is rebuilt along a polygon edge, since\nthere is no background there to have blended with.",
 		},

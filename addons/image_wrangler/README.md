@@ -67,7 +67,9 @@ The full derivation is in the header comment of
 ### Settings
 
 The form is split into a **Remove Colors** group, a **Settings** group, an
-**Island Picker** group and a **Blackout** group.
+**Island Picker** group and a **Blackout** group. Each folds away by clicking its
+heading, and only **Island Picker** starts open — all four expanded is taller
+than the dock.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
@@ -534,7 +536,9 @@ Setting types are `BOOL`, `INT`, `FLOAT`, `STRING`, `ENUM` (which needs an
 `options` list), `ISLAND_PICKER`, `COLOR_LIST` and `POLYGON_LIST`. The last three
 give you the preview-driven lists described above, for an `IslandList`, a
 `RemoveColorList` and a `BlackoutList` property respectively. Give consecutive
-entries a matching `"group"` and they are boxed under a heading of that name.
+entries a matching `"group"` and they are boxed under a heading of that name;
+every named group folds, and `"collapsed": true` on the entry that opens one
+starts it folded away.
 
 Override `get_key_color_property()` to return the name of a `Color` property and
 the dock gives it a swatch under the operation dropdown instead of a row in the

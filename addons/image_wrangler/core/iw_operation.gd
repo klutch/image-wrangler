@@ -148,6 +148,10 @@ func get_key_color_property() -> StringName:
 ## Consecutive entries sharing a [code]group[/code] are boxed under a heading of
 ## that name; entries without one sit at the top level. Since grouping follows
 ## the order given here, an operation lists its settings grouped together.
+##
+## Every named group folds. Put [code]collapsed[/code] on the entry that opens
+## one and it starts folded away — worth doing for anything but the group the
+## user reaches for first, since a form of open groups is taller than the dock.
 func get_settings_schema() -> Array[Dictionary]:
 	return []
 

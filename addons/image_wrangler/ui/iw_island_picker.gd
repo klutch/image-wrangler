@@ -27,7 +27,11 @@ signal selection_changed
 const PickIcon := preload("res://addons/image_wrangler/ui/iw_pick_icon.gd")
 
 const SWATCH_SIZE := 14
-const LIST_MIN_HEIGHT := 96
+
+## Floor for the rows box, which [member ItemList.auto_height] otherwise lets
+## collapse to nothing while the list is empty. About one row: enough to read as
+## a field waiting for entries rather than as a gap in the form.
+const LIST_EMPTY_HEIGHT := 24
 
 var _operation: IWOperation
 var _property: StringName
@@ -80,7 +84,10 @@ func _build() -> void:
 	buttons.add_child(_clear_button)
 
 	_list = ItemList.new()
-	_list.custom_minimum_size = Vector2(0, LIST_MIN_HEIGHT)
+	# Grows with its contents rather than reserving a block of the dock whether
+	# or not anything is in it.
+	_list.auto_height = true
+	_list.custom_minimum_size = Vector2(0, LIST_EMPTY_HEIGHT)
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.item_selected.connect(_on_item_selected)
 	add_child(_list)

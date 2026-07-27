@@ -43,7 +43,9 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 		var group: String = setting.get("group", "")
 		if group != open_group:
 			open_group = group
-			target = _begin_group(container, group)
+			# Read off the entry that opens the group, since that is the only one
+			# the heading exists for.
+			target = _begin_group(container, group, bool(setting.get("collapsed", false)))
 
 		var label: String = setting.get("label", String(property).capitalize())
 		var tooltip: String = setting.get("tooltip", "")
@@ -76,7 +78,16 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 
 ## Opens a heading in [param container] and returns the box its members go into,
 ## or [param container] itself for the unnamed top-level group.
-static func _begin_group(container: Container, title: String) -> Container:
+##
+## The heading folds its group away. An operation with several list controls would
+## otherwise be taller than the dock, and scrolling past three collapsed things to
+## reach the one being used is the worst of both. [param collapsed] is the state
+## it starts in; the schema entry that opens the group decides.
+##
+## Fold state is deliberately not remembered across a form rebuild. The form is
+## only rebuilt when the operation changes, and carrying one operation's folds
+## onto another's differently-named groups would mean guessing.
+static func _begin_group(container: Container, title: String, collapsed: bool) -> Container:
 	if title.is_empty():
 		return container
 
@@ -90,20 +101,51 @@ static func _begin_group(container: Container, title: String) -> Container:
 	group.add_theme_constant_override("separation", 0)
 	container.add_child(group)
 
-	var heading := Label.new()
-	heading.text = title
-	heading.modulate = Color(1, 1, 1, 0.7)
-	heading.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	group.add_child(heading)
-
 	var indent := MarginContainer.new()
 	indent.add_theme_constant_override("margin_left", GROUP_INDENT)
+
+	# A flat toggle rather than a Label: it reads as a heading, but the whole
+	# width of it is the hit target, which a disclosure arrow on its own is not.
+	var heading := Button.new()
+	heading.text = title
+	heading.toggle_mode = true
+	heading.button_pressed = not collapsed
+	heading.flat = true
+	heading.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	# Never focused: the settings form is tabbed through to reach the controls,
+	# and a heading in that path is a stop nobody wants.
+	heading.focus_mode = Control.FOCUS_NONE
+	heading.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	heading.tooltip_text = "Show or hide %s." % title
+	group.add_child(heading)
+
 	group.add_child(indent)
+	indent.visible = not collapsed
+
+	heading.toggled.connect(
+		func(pressed: bool) -> void:
+			indent.visible = pressed
+			_apply_fold_arrow(heading)
+	)
+	# Re-resolved on a theme switch, since the arrow comes out of the theme and
+	# the icon already handed over would be the old theme's.
+	heading.theme_changed.connect(_apply_fold_arrow.bind(heading))
+	_apply_fold_arrow(heading)
 
 	var body := VBoxContainer.new()
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	indent.add_child(body)
 	return body
+
+
+## Points the heading's disclosure arrow at its current fold state.
+##
+## Guarded rather than assumed: outside the editor there is no [code]EditorIcons[/code]
+## theme type, and a heading with no arrow is still perfectly usable.
+static func _apply_fold_arrow(heading: Button) -> void:
+	var icon_name := &"GuiTreeArrowDown" if heading.button_pressed else &"GuiTreeArrowRight"
+	if heading.has_theme_icon(icon_name, &"EditorIcons"):
+		heading.icon = heading.get_theme_icon(icon_name, &"EditorIcons")
 
 
 ## Island pickers are deliberately not wired to [param on_changed] here. Picking
