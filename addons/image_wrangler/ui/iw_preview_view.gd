@@ -57,6 +57,16 @@ const POLYGON_WIDTH := 1.5
 const BUSY_SCRIM_ALPHA := 0.3
 const BUSY_BAR_WIDTH := 220.0
 const BUSY_BAR_HEIGHT := 6.0
+
+## The second bar, under the first: how far through the stage that is running, where
+## the one above is how far through the whole stack.
+##
+## Thinner and dimmer, because it is the subordinate reading. Two bars of equal weight
+## would leave the user working out which is which every time they looked.
+const BUSY_STAGE_BAR_HEIGHT := 3.0
+const BUSY_STAGE_BAR_GAP := 3.0
+
+## Shown while nothing has said which stage is running.
 const BUSY_CAPTION := "Processing…"
 
 ## The panel the whole overlay sits in, so that a spinner and a caption over busy
@@ -166,6 +176,15 @@ var original_fade := 0.0:
 ## which defers, so nothing here is touched from two threads at once.
 var _busy := false
 var _progress := 0.0
+
+## How far through the stage that is running, and which one it is.
+##
+## Separate from [member _progress] because the two answer different questions: how
+## far through the whole stack, and how far through the thing currently doing the
+## work. A single fraction cannot say both, and without the second a stack that spends
+## four seconds in one stage looks identical to one that has hung.
+var _stage_progress := 0.0
+var _stage_label := ""
 
 ## Seconds the current run has been on screen, which is all the spinner needs to
 ## know. Reset per run so every one starts from the same place.
@@ -350,6 +369,8 @@ func set_busy(active: bool) -> void:
 		# starts from nothing and showing it inheriting the abandoned one's place
 		# would be a lie about how far along it is.
 		_progress = 0.0
+		_stage_progress = 0.0
+		_stage_label = ""
 		if not _busy:
 			# The spinner does not, though. It is saying work is happening, and one
 			# run giving way to another has not stopped it happening — restarting it
@@ -381,6 +402,26 @@ func set_progress(fraction: float) -> void:
 	if is_equal_approx(_progress, clamped):
 		return
 	_progress = clamped
+	_canvas.queue_redraw()
+
+
+## How far along the stage named [param label] says it is, 0 to 1.
+##
+## Ratcheted within a stage for the same reason the bar above is, but deliberately not
+## across them: this one is meant to reset every time the run moves on, and that reset
+## is most of what it is saying. The label changing is what a new stage looks like from
+## here, so it is what clears the ratchet.
+func set_stage_progress(fraction: float, label: String) -> void:
+	if not _busy:
+		return
+	var changed := label != _stage_label
+	if changed:
+		_stage_label = label
+		_stage_progress = 0.0
+	var clamped := maxf(_stage_progress, clampf(fraction, 0.0, 1.0))
+	if not changed and is_equal_approx(_stage_progress, clamped):
+		return
+	_stage_progress = clamped
 	_canvas.queue_redraw()
 
 
@@ -959,9 +1000,12 @@ func _draw_busy() -> void:
 
 	var font := get_theme_default_font()
 	var font_size := get_theme_default_font_size()
+	# The running stage's name rather than a fixed word, so a slow stack says which
+	# part of it is slow instead of only that it is.
+	var caption_text := _stage_label if not _stage_label.is_empty() else BUSY_CAPTION
 	var caption := Vector2.ZERO
 	if font != null:
-		caption = font.get_string_size(BUSY_CAPTION, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size)
+		caption = font.get_string_size(caption_text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size)
 
 	# Everything has to fit between the panel's padding and the view's edges, so
 	# the room left for the contents is what is worked out first and everything
@@ -982,7 +1026,7 @@ func _draw_busy() -> void:
 	if caption.y > 0.0:
 		stack += BUSY_SPINNER_GAP + caption.y
 	if bar_width > 0.0:
-		stack += BUSY_SPINNER_GAP + BUSY_BAR_HEIGHT
+		stack += BUSY_SPINNER_GAP + BUSY_BAR_HEIGHT + BUSY_STAGE_BAR_GAP + BUSY_STAGE_BAR_HEIGHT
 	var content := Vector2(maxf(maxf(spinner.x, caption.x), bar_width), stack)
 
 	# The panel first, since everything else is drawn on top of it.
@@ -1006,7 +1050,7 @@ func _draw_busy() -> void:
 			font,
 			# draw_string takes the baseline, not the top of the line.
 			Vector2(floorf((_viewport.x - caption.x) * 0.5), top + font.get_ascent(font_size)),
-			BUSY_CAPTION,
+			caption_text,
 			HORIZONTAL_ALIGNMENT_LEFT,
 			-1.0,
 			font_size,
@@ -1019,14 +1063,28 @@ func _draw_busy() -> void:
 	top += BUSY_SPINNER_GAP
 	var origin := Vector2(floorf((_viewport.x - bar_width) * 0.5), floorf(top))
 
-	# Track first, then the fill over it, so a fraction of zero still reads as a
-	# bar waiting rather than as nothing at all.
-	_canvas.draw_rect(Rect2(origin, Vector2(bar_width, BUSY_BAR_HEIGHT)), Color(0, 0, 0, 0.55), true)
-	if _progress > 0.0:
-		_canvas.draw_rect(
-			Rect2(origin, Vector2(floorf(bar_width * _progress), BUSY_BAR_HEIGHT)), accent, true)
-	_canvas.draw_rect(
-		Rect2(origin, Vector2(bar_width, BUSY_BAR_HEIGHT)), Color(1, 1, 1, 0.25), false, 1.0)
+	_draw_bar(origin, bar_width, BUSY_BAR_HEIGHT, _progress, accent, true)
+	_draw_bar(
+		origin + Vector2(0.0, BUSY_BAR_HEIGHT + BUSY_STAGE_BAR_GAP),
+		bar_width,
+		BUSY_STAGE_BAR_HEIGHT,
+		_stage_progress,
+		accent.darkened(0.35),
+		false,
+	)
+
+
+## One progress bar. Track first, then the fill over it, so a fraction of zero still
+## reads as a bar waiting rather than as nothing at all.
+##
+## [param outlined] is for the upper bar only: an outline around the thin one would be
+## most of its height.
+func _draw_bar(origin: Vector2, width: float, height: float, fraction: float, fill: Color, outlined: bool) -> void:
+	_canvas.draw_rect(Rect2(origin, Vector2(width, height)), Color(0, 0, 0, 0.55), true)
+	if fraction > 0.0:
+		_canvas.draw_rect(Rect2(origin, Vector2(floorf(width * fraction), height)), fill, true)
+	if outlined:
+		_canvas.draw_rect(Rect2(origin, Vector2(width, height)), Color(1, 1, 1, 0.25), false, 1.0)
 
 
 ## The spinner at [param center], turned to wherever the run has got to in time.

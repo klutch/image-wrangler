@@ -34,7 +34,10 @@ const META_HIDDEN_WHEN := &"iw_hidden_when"
 ## clicked, so the caller holding it decides how long a fold survives — the dock
 ## keeps one for the session, so switching operations and coming back finds the
 ## form as it was left.
-static func build(operation: IWOperation, container: Container, on_changed: Callable, fold_state: Dictionary) -> void:
+## [param key_prefix] scopes the fold keys to one form. The dock passes a stack
+## entry's uid, because the same operation may appear in the stack twice and folding
+## one of them must not fold the other — which keying by operation id would do.
+static func build(operation: IWOperation, container: Container, on_changed: Callable, fold_state: Dictionary, key_prefix: String = "") -> void:
 	for child in container.get_children():
 		container.remove_child(child)
 		child.queue_free()
@@ -53,9 +56,10 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 		var group: String = setting.get("group", "")
 		if group != open_group:
 			open_group = group
-			# Keyed by operation as well as group name, so two operations that
-			# happen to name a group the same thing do not fold each other.
-			var key := "%s/%s" % [operation.get_operation_id(), group]
+			# Keyed by the caller's scope as well as the group name, so two forms
+			# that happen to name a group the same thing do not fold each other.
+			var scope := key_prefix if not key_prefix.is_empty() else String(operation.get_operation_id())
+			var key := "%s/%s" % [scope, group]
 			# What the user last left it at, falling back to what the schema asks
 			# for. The schema key is read off the entry that opens the group, since
 			# that is the only one the heading exists for.

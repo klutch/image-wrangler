@@ -9,12 +9,38 @@ const IslandPicker := preload("res://addons/image_wrangler/ui/iw_island_picker.g
 const ColorList := preload("res://addons/image_wrangler/ui/iw_color_list.gd")
 const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd")
 const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
+const StackView := preload("res://addons/image_wrangler/ui/iw_stack_view.gd")
 
-## Every operation the dock offers. Add new [IWOperation] subclasses here.
+## Every [IWStackOperation] the stack can hold, in the order the Create dropdown
+## offers them. Add new stack operations here.
 const OPERATION_SCRIPTS := [
 	"res://addons/image_wrangler/core/remove_background.gd",
-	"res://addons/image_wrangler/core/rename.gd",
+	"res://addons/image_wrangler/core/remove_crevice.gd",
+	"res://addons/image_wrangler/core/refine_edges.gd",
+	"res://addons/image_wrangler/core/island_picker_op.gd",
+	"res://addons/image_wrangler/core/polygon_edit_op.gd",
+	"res://addons/image_wrangler/core/edge_cleanup.gd",
 ]
+
+## What a fresh image's stack starts as.
+##
+## The order that reproduces what the single fused operation used to do, and a
+## sensible default rather than a rule: a cut has to be declared before the keying so
+## it can steer where the colour bleed takes its replacements from, the alpha stages
+## want a classification to exist, and the stroke has to come last because it follows
+## whatever silhouette everything else settled on.
+const DEFAULT_STACK := [
+	"res://addons/image_wrangler/core/polygon_edit_op.gd",
+	"res://addons/image_wrangler/core/remove_background.gd",
+	"res://addons/image_wrangler/core/island_picker_op.gd",
+	"res://addons/image_wrangler/core/remove_crevice.gd",
+	"res://addons/image_wrangler/core/refine_edges.gd",
+	"res://addons/image_wrangler/core/edge_cleanup.gd",
+]
+
+## The file operation, which is not a stack operation and never will be: it does not
+## touch pixels, and its settings describe the batch rather than any one image.
+const RENAME_SCRIPT := "res://addons/image_wrangler/core/rename.gd"
 
 ## Extensions [method Image.load_from_file] can read.
 const SUPPORTED_EXTENSIONS := ["png", "jpg", "jpeg", "bmp", "tga", "webp"]
@@ -72,8 +98,17 @@ the images you are processing. There is no undo.
 Anything that rewrites pixels is saved as PNG. Rename copies the
 file untouched, so it keeps whatever format it already had."""
 
-var _operations: Array[IWOperation] = []
-var _operation: IWOperation
+## What the Process buttons will run: the stack, or the file operation.
+##
+## Rename is not a stage and cannot be one — it does not touch pixels, and its
+## settings describe the batch rather than any one image — so it lives beside the
+## stack rather than in it, and the two are switched between.
+enum Mode { IMAGE, RENAME }
+
+var _mode := Mode.IMAGE
+
+## The file operation, held for the session. One set of settings, no sidecar.
+var _rename: IWOperation
 var _sources: PackedStringArray = PackedStringArray()
 var _source_image: Image
 var _result_image: Image
@@ -98,22 +133,24 @@ var _preview_worker_op: IWOperation
 var _suffix_is_default := true
 var _pending_outputs: Dictionary = {}
 
-## Settings keyed by source path, then by operation id. An entry appears the
-## first time an image is selected or processed: loaded from its JSON sidecar
-## when it has one, and defaults when it does not. Nothing is inherited from the
-## image selected before it.
+## The stack saved for each source path, as the ordered list
+## [code][{id, enabled, settings}][/code] the sidecar stores.
 ##
-## While the dock is open this is the source of truth — the sidecar is read once
-## per path and never re-read, so a half-written file or an external edit landing
-## mid-drag cannot clobber live state.
-var _settings_by_path: Dictionary = {}
+## An entry appears the first time an image is selected or processed: loaded from its
+## JSON sidecar when it has one, and the default stack when it does not. Nothing is
+## inherited from the image selected before it.
+##
+## While the dock is open this is the source of truth — the sidecar is read once per
+## path and never re-read, so a half-written file or an external edit landing mid-drag
+## cannot clobber live state.
+var _stacks_by_path: Dictionary = {}
 
-## Which settings groups are folded, keyed by operation and group name.
+## Which stack entries are folded, keyed by the entry's uid.
 ##
-## Held here rather than in the settings builder because the builder is static and
-## throws its form away on every operation switch. Kept for the session and not
-## written to a sidecar: a fold is about what you are working on this afternoon,
-## not about the image.
+## Keyed by uid rather than by operation id, because the same operation may appear
+## twice and folding one must not fold the other. Kept for the session and not written
+## to a sidecar: a fold is about what you are working on this afternoon, not about the
+## image.
 var _fold_state: Dictionary = {}
 
 ## Set while the form is being repointed at another image's settings. Every
@@ -137,30 +174,35 @@ var _autosave_failures := {}
 var _file_list: ItemList
 var _preview: PreviewView
 
-## The current operation's island picker, when it has one.
-var _island_picker: IslandPicker
-
-## The current operation's Remove Colors list, when it has one.
-var _color_list: ColorList
-
-## The current operation's Polygon Edit list, when it has one.
-var _polygon_list: PolygonList
-
-## Whichever list control currently owns the preview crosshair, or null.
+## Every picker or drawing control the stack's forms built, in stack order.
 ##
-## Both list controls have a Pick button and there is only one preview, so a click
-## would otherwise be ambiguous. Turning one on turns the other off, and this is
-## what the click is then delivered to.
+## Flat and rebuilt whenever the stack changes, because there is no longer one of
+## each: two Island Pickers in the stack are two independent lists, and both have a
+## Pick button.
+var _pick_controls: Array[Control] = []
+
+## Whichever control currently owns the preview crosshair, or null.
+##
+## There is one preview and any number of controls that would like to be told about a
+## click on it, so a click would otherwise be ambiguous. Arming one disarms the rest,
+## and this is what the click is then delivered to.
 var _pick_target: Control
+
+## The control whose selection the overlay highlights, or null.
+##
+## The preview takes one flat list of markers and one of regions, so the selections of
+## several controls have to be merged into a single index. Only one control's
+## selection is shown — the last one touched — and it is offset by everything drawn
+## before it.
+var _overlay_owner: Control
 var _status_label: Label
 var _detail_label: Label
-var _operation_selector: OptionButton
-var _key_color_row: HBoxContainer
-var _key_color_button: ColorPickerButton
+var _stack_view: Control
+var _mode_image: Button
+var _mode_rename: Button
 
-## Property the key-colour swatch writes to, or empty when the operation has none.
-var _key_color_property := &""
-var _settings_box: VBoxContainer
+## Rename's form, built into its own box and hidden while the stack is showing.
+var _rename_box: VBoxContainer
 ## How much of the source image is faded over the result, 0 to 100.
 var _original_fade: HSlider
 var _zoom_select: OptionButton
@@ -192,9 +234,11 @@ var _pending_removals: Dictionary = {}
 func _ready() -> void:
 	# Only a floor, so the splitters between the columns stay freely draggable.
 	custom_minimum_size = Vector2(0, 240)
-	_build_operations()
+	# The forms are built into containers the layout owns, so the layout goes first.
 	_build_ui()
-	_select_operation(0)
+	_build_rename()
+	_apply_stack_for("")
+	_select_mode(Mode.IMAGE)
 	_refresh_file_list()
 	_update_controls()
 
@@ -228,13 +272,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		accept_event()
 		return
 
-	if _polygon_list == null or _polygon_list.draft_index() < 0:
+	var drawing := _drawing_list()
+	if drawing == null or drawing.draft_index() < 0:
 		return
 	if key.keycode == KEY_ESCAPE:
 		_finish_polygon()
 		accept_event()
 	elif key.keycode == KEY_BACKSPACE:
-		_polygon_list.undo_vertex()
+		drawing.undo_vertex()
 		_update_overlays()
 		accept_event()
 
@@ -260,13 +305,15 @@ func _exit_tree() -> void:
 	_preview_worker_op = null
 
 
-func _build_operations() -> void:
-	for path: String in OPERATION_SCRIPTS:
-		var script: GDScript = load(path)
-		if script == null:
-			push_error("Image Wrangler: could not load operation script at %s" % path)
-			continue
-		_operations.append(script.new())
+## Builds the file operation and its form. One instance for the session, since a
+## rename scheme describes the batch rather than any one image.
+func _build_rename() -> void:
+	var script: GDScript = load(RENAME_SCRIPT)
+	if script == null:
+		push_error("Image Wrangler: could not load operation script at %s" % RENAME_SCRIPT)
+		return
+	_rename = script.new()
+	SettingsBuilder.build(_rename, _rename_box, _on_setting_changed, _fold_state, "rename")
 
 
 # --- Layout -------------------------------------------------------------
@@ -479,46 +526,92 @@ func _build_operation_column() -> Control:
 	var column := VBoxContainer.new()
 	column.custom_minimum_size = Vector2(220, 0)
 
-	var title := Label.new()
-	title.text = "Operation"
-	column.add_child(title)
+	# Two toggles rather than a dropdown: there are exactly two answers and they are
+	# not variations on a theme — one rewrites pixels and the other rewrites names.
+	var modes := HBoxContainer.new()
+	modes.add_theme_constant_override("separation", 0)
+	column.add_child(modes)
 
-	_operation_selector = OptionButton.new()
-	for operation in _operations:
-		_operation_selector.add_item(operation.get_operation_name())
-	_operation_selector.item_selected.connect(_select_operation)
-	column.add_child(_operation_selector)
+	_mode_image = Button.new()
+	_mode_image.text = "Image"
+	_mode_image.toggle_mode = true
+	_mode_image.button_pressed = true
+	_mode_image.focus_mode = Control.FOCUS_NONE
+	_mode_image.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_mode_image.tooltip_text = "Build a stack of operations that rewrite the pixels."
+	_mode_image.pressed.connect(_select_mode.bind(Mode.IMAGE))
+	modes.add_child(_mode_image)
 
-	# The colour an operation keys out sits right under the operation itself: it
-	# is what the operation is about, not a knob controlling how it works.
-	_key_color_row = HBoxContainer.new()
-	column.add_child(_key_color_row)
-
-	var key_color_label := Label.new()
-	key_color_label.text = "Remove Color"
-	_key_color_row.add_child(key_color_label)
-
-	_key_color_button = ColorPickerButton.new()
-	_key_color_button.edit_alpha = false
-	_key_color_button.custom_minimum_size = Vector2(0, 24)
-	_key_color_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_key_color_button.tooltip_text = "The background color to key out.\nThe picker's eyedropper can sample it off the screen."
-	_key_color_button.color_changed.connect(_on_key_color_changed)
-	_key_color_row.add_child(_key_color_button)
+	_mode_rename = Button.new()
+	_mode_rename.text = "Rename"
+	_mode_rename.toggle_mode = true
+	_mode_rename.focus_mode = Control.FOCUS_NONE
+	_mode_rename.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_mode_rename.tooltip_text = "Write the files out under new names, pixels untouched.\nDescribes the whole batch rather than one image, so it is not part of the stack."
+	_mode_rename.pressed.connect(_select_mode.bind(Mode.RENAME))
+	modes.add_child(_mode_rename)
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	column.add_child(scroll)
 
-	_settings_box = VBoxContainer.new()
-	_settings_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_settings_box)
+	var scrolled := VBoxContainer.new()
+	scrolled.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(scrolled)
+
+	_stack_view = StackView.new()
+	_stack_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_stack_view.operation_scripts = OPERATION_SCRIPTS
+	_stack_view.fold_state = _fold_state
+	_stack_view.form_builder = _build_entry_form
+	_stack_view.stack_changed.connect(_on_stack_changed)
+	_stack_view.setting_changed.connect(_on_setting_changed)
+	_stack_view.entries_rebuilt.connect(_on_entries_rebuilt)
+	scrolled.add_child(_stack_view)
+
+	_rename_box = VBoxContainer.new()
+	_rename_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rename_box.visible = false
+	scrolled.add_child(_rename_box)
 
 	column.add_child(HSeparator.new())
 	column.add_child(_build_output_section())
 
 	return column
+
+
+## Fills one stack entry's form. Handed to the stack view so it does not have to know
+## about the settings builder.
+func _build_entry_form(stage: IWStackOperation, box: VBoxContainer, entry: Control, uid: int) -> void:
+	SettingsBuilder.build(stage, box, func() -> void: entry.setting_changed.emit(entry),
+			_fold_state, str(uid))
+
+
+## Switches between the stack and the file operation.
+func _select_mode(mode: int) -> void:
+	# Any pending write belongs to whatever was showing, and the flush resolves it
+	# against the current mode — so it has to go first.
+	_flush_autosave()
+	_mode = mode
+	_mode_image.button_pressed = mode == Mode.IMAGE
+	_mode_rename.button_pressed = mode == Mode.RENAME
+	_stack_view.visible = mode == Mode.IMAGE
+	_rename_box.visible = mode == Mode.RENAME
+
+	# Rename has nothing to pick off the preview, and leaving a crosshair armed over a
+	# form that is no longer showing would be a click nobody could explain.
+	_release_pick()
+	_update_overlays()
+	_refresh_suffix()
+
+	# The other mode's result no longer describes anything, so it must not be left on
+	# screen — under a fade it would be presented as this one's.
+	_result_image = null
+	_update_preview_texture()
+	_update_detail_label()
+	if mode == Mode.IMAGE and _auto_preview_allowed():
+		_schedule_preview()
 
 
 func _build_output_section() -> Control:
@@ -668,7 +761,7 @@ func _on_remove_pressed() -> void:
 	# promises the file is not touched, and a settings file beside the art is a
 	# file. Re-adding the image loads it back.
 	_flush_autosave()
-	_settings_by_path.erase(_sources[index])
+	_stacks_by_path.erase(_sources[index])
 	_sources.remove_at(index)
 	_source_image = null
 	_result_image = null
@@ -694,7 +787,7 @@ func _on_clear_pressed() -> void:
 	# A pending write goes out before the entry it belongs to disappears.
 	_flush_autosave()
 	_sources = PackedStringArray()
-	_settings_by_path.clear()
+	_stacks_by_path.clear()
 	_autosave_failures.clear()
 	_source_image = null
 	_result_image = null
@@ -725,7 +818,7 @@ func _on_file_selected(index: int) -> void:
 
 	# The settings belong to this image, and the form must agree with them before
 	# anything is processed, so both happen before the preview below.
-	_apply_settings_for(path)
+	_apply_stack_for(path)
 
 	_update_controls()
 	# The new source goes up first, whatever happens next. Processing is off on a
@@ -751,115 +844,154 @@ static func _load_image(path: String) -> Image:
 	return image
 
 
-# --- Operations and preview ---------------------------------------------
+# --- The stack and preview ----------------------------------------------
 
-func _select_operation(index: int) -> void:
-	if index < 0 or index >= _operations.size():
+## Rebuilds the stack view from [param path]'s saved stack.
+##
+## With no image selected there is no saved stack, and the default one is shown
+## instead — an empty column with nothing but a Create button reads as broken, and the
+## first thing anyone does with a fresh dock is add an image anyway.
+func _apply_stack_for(path: String) -> void:
+	_refreshing = true
+	var stages: Array[IWStackOperation] = []
+	if path.is_empty():
+		stages = _default_stages()
+	else:
+		for record: Dictionary in _stack_for(path):
+			var stage: IWStackOperation = record["operation"]
+			stage.set_settings(record["settings"])
+			stage.enabled = bool(record["enabled"])
+			stages.append(stage)
+	_stack_view.set_stages(stages)
+	_refreshing = false
+
+
+## A fresh instance of each operation in [constant DEFAULT_STACK], in order.
+func _default_stages() -> Array[IWStackOperation]:
+	var stages: Array[IWStackOperation] = []
+	for script_path: String in DEFAULT_STACK:
+		var script: Script = load(script_path)
+		if script == null:
+			push_error("Image Wrangler: could not load operation script at %s" % script_path)
+			continue
+		stages.append(script.new())
+	return stages
+
+
+## Rewires everything that cached what the entries built.
+##
+## Called after any rebuild, because a rebuild throws every control away — the
+## settings Resources survive it, the [Control]s do not.
+func _on_entries_rebuilt() -> void:
+	_pick_controls.clear()
+	for entry: Control in _stack_view.entries():
+		for control: Control in entry.pick_controls():
+			_pick_controls.append(control)
+			_bind_pick_control(control)
+		entry.set_note(entry.stage.prerequisite_note(null))
+	# A fresh set of forms never inherits a crosshair from the set before it.
+	_release_pick()
+	_update_overlays()
+	_refresh_suffix()
+
+
+## Connects one picker or drawing control to the dock.
+##
+## Bound per instance rather than looked up by type, because the stack may hold any
+## number of each and a click has to reach the one that is actually armed.
+func _bind_pick_control(control: Control) -> void:
+	if control is IslandPicker:
+		var picker := control as IslandPicker
+		picker.pick_toggled.connect(_on_pick_toggled.bind(picker))
+		picker.islands_changed.connect(_on_islands_changed)
+		picker.selection_changed.connect(_on_selection_changed.bind(picker))
+		picker.set_color_provider(_sample_source_color)
+	elif control is ColorList:
+		var colors := control as ColorList
+		colors.pick_toggled.connect(_on_pick_toggled.bind(colors))
+		colors.colors_changed.connect(_on_setting_changed)
+	elif control is PolygonList:
+		var polygons := control as PolygonList
+		# Drawing is a pick mode like any other, so it joins the same arbitration:
+		# arming it disarms whichever control held the crosshair.
+		polygons.draw_toggled.connect(_on_pick_toggled.bind(polygons))
+		polygons.polygons_changed.connect(_on_setting_changed)
+		polygons.selection_changed.connect(_on_selection_changed.bind(polygons))
+
+
+## The stack gained, lost or reordered an entry.
+func _on_stack_changed() -> void:
+	if _refreshing:
 		return
-	# Any pending write belongs to the operation on its way out, and the flush
-	# resolves it by the *current* operation's id — so it has to go first.
-	_flush_autosave()
-	var previous_suffix := _operation.get_output_suffix() if _operation != null else ""
-	_operation = _operations[index]
-	_operation_selector.selected = index
-	_bind_key_color()
-	SettingsBuilder.build(_operation, _settings_box, _on_setting_changed, _fold_state)
-	_bind_settings_controls()
-	# _bind_settings_controls already applied this image's settings for the
-	# operation just selected, so the form and the operation agree before the
-	# first run.
-
-	# Only reset the suffix while the user has not claimed it as their own.
-	if _suffix_is_default or _suffix_edit.text == previous_suffix:
-		_suffix_edit.text = _operation.get_output_suffix()
-		_suffix_is_default = true
-
-	# The old operation's result no longer describes anything, so it must not be
-	# left on screen — under a fade it would be presented as this one's, and the
-	# new result is now a worker away rather than immediate.
-	_result_image = null
-	_update_preview_texture()
+	_store_stack(_current_path())
+	_refresh_notes()
+	_schedule_autosave()
+	_refresh_suffix()
 	if _auto_preview_allowed():
 		_schedule_preview()
+	else:
+		_set_status("Stack changed. Press Refresh to update the preview.")
 
 
-## Points the swatch at the current operation's key colour, hiding it for
-## operations that do not key one out.
-func _bind_key_color() -> void:
-	_key_color_property = _operation.get_key_color_property()
-	_key_color_row.visible = _key_color_property != &""
-	_refresh_key_color()
-
-
-func _on_key_color_changed(color: Color) -> void:
-	if _refreshing or _operation == null or _key_color_property == &"":
+## Writes what the stack view now holds back into this image's saved stack.
+func _store_stack(path: String) -> void:
+	if path.is_empty():
 		return
-	var settings := _operation.get_settings()
-	if settings == null:
-		return
-	settings.set(_key_color_property, color)
-	_on_setting_changed()
+	var records := []
+	for stage: IWStackOperation in _stack_view.stages():
+		records.append({
+			"id": stage.get_operation_id(),
+			"enabled": stage.enabled,
+			"settings": stage.get_settings(),
+			"operation": stage,
+		})
+	_stacks_by_path[path] = records
 
 
-## Finds the list controls in the settings form, at any depth.
+## Refreshes every entry's "waiting for" line against what the stack now looks like.
 ##
-## A grouped setting is nested inside its heading box rather than sitting
-## directly in the form, so scanning only the form's own children finds nothing
-## and every picker feature goes quietly dead.
-func _scan_settings_controls(node: Node) -> void:
-	for child in node.get_children():
-		if child is IslandPicker and _island_picker == null:
-			_island_picker = child
-		elif child is ColorList and _color_list == null:
-			_color_list = child
-		elif child is PolygonList and _polygon_list == null:
-			_polygon_list = child
-		_scan_settings_controls(child)
+## Answered without a run, so it can only speak about the stack rather than about the
+## image: whether something above establishes keys, and whether a classification will
+## exist by the time each stage is reached.
+func _refresh_notes() -> void:
+	var keying := false
+	for entry: Control in _stack_view.entries():
+		var stage: IWStackOperation = entry.stage
+		entry.set_note("" if keying or not stage.needs_keying() else stage.prerequisite_note(null))
+		if stage.enabled and not stage.needs_keying():
+			keying = true
 
 
-## Hooks up the list controls the settings builder just created, for whichever of
-## them the operation declared. An operation with none leaves picking off.
-func _bind_settings_controls() -> void:
-	_island_picker = null
-	_color_list = null
-	_polygon_list = null
-	_scan_settings_controls(_settings_box)
-
-	if _island_picker != null:
-		_island_picker.pick_toggled.connect(_on_pick_toggled.bind(_island_picker))
-		_island_picker.islands_changed.connect(_on_islands_changed)
-		_island_picker.selection_changed.connect(_update_overlays)
-		_island_picker.set_color_provider(_sample_source_color)
-	if _color_list != null:
-		_color_list.pick_toggled.connect(_on_pick_toggled.bind(_color_list))
-		_color_list.colors_changed.connect(_on_setting_changed)
-	if _polygon_list != null:
-		# Drawing is a pick mode like any other, so it joins the same arbitration:
-		# arming it disarms whichever picker held the crosshair.
-		_polygon_list.draw_toggled.connect(_on_pick_toggled.bind(_polygon_list))
-		_polygon_list.polygons_changed.connect(_on_setting_changed)
-		_polygon_list.selection_changed.connect(_update_overlays)
-
-	# Switching operations always drops out of pick mode, so a fresh settings
-	# form never inherits a crosshair from the one before it.
-	_release_pick()
-	_apply_settings_for(_current_path())
-	_update_overlays()
+## Puts the output suffix back to what the current mode suggests.
+##
+## Only while the user has not claimed the field as their own — once it has been
+## typed in, changing the stack must not take it away again.
+func _refresh_suffix() -> void:
+	if not _suffix_is_default:
+		return
+	_suffix_edit.text = _active_operation().get_output_suffix() if _active_operation() != null else "_out"
 
 
-## Drops out of pick mode, leaving every picker's button unpressed.
+## The operation the Process buttons would run, built fresh from what is on screen.
+func _active_operation() -> IWOperation:
+	if _mode == Mode.RENAME:
+		return _rename
+	var pipeline := IWPipeline.new()
+	for stage: IWStackOperation in _stack_view.stages():
+		pipeline.stages.append(stage)
+	return pipeline
+
+
+## Drops out of pick mode, leaving every control's button unpressed.
 func _release_pick() -> void:
 	_pick_target = null
 	_preview.pick_mode = false
-	if _island_picker != null:
-		_island_picker.set_pick_active(false)
-	if _color_list != null:
-		_color_list.set_pick_active(false)
-	if _polygon_list != null:
-		# Committed rather than abandoned: leaving a half-drawn shape open would
-		# strand it on the list with no way back into the session that owns it.
-		_polygon_list.finish_polygon()
-		_polygon_list.set_pick_active(false)
+	for control: Control in _pick_controls:
+		if control is PolygonList:
+			# Committed rather than abandoned: leaving a half-drawn shape open would
+			# strand it on the list with no way back into the session that owns it.
+			(control as PolygonList).finish_polygon()
+		control.set_pick_active(false)
 
 
 ## Path of the highlighted source, or an empty string when nothing is selected.
@@ -870,60 +1002,70 @@ func _current_path() -> String:
 	return _sources[index]
 
 
-## Settings for one source, created on demand.
+## The stack for one source, created on demand.
 ##
-## An image with no sidecar gets defaults, not whatever the last image was tuned
-## to. Values that arrived by inheritance look identical to values that were
-## chosen, so a form that carries them over cannot say which it is showing — and
-## the answer decides whether the sidecar about to be autosaved is a real record
-## of this image or an accident of what was selected before it.
+## An image with no sidecar gets the default stack, not whatever the last image was
+## tuned to. Values that arrived by inheritance look identical to values that were
+## chosen, so a form that carries them over cannot say which it is showing — and the
+## answer decides whether the sidecar about to be autosaved is a real record of this
+## image or an accident of what was selected before it.
 ##
 ## The cost is that a batch has to be tuned per image rather than dialled in once,
-## which is the trade being made deliberately: the form now shows exactly what
-## processing will use, for every image, whether or not it was ever selected.
-func _settings_for(path: String) -> Resource:
-	if path.is_empty() or _operation == null:
-		return null
+## which is the trade being made deliberately: the form shows exactly what processing
+## will use, for every image, whether or not it was ever selected.
+##
+## Each record is [code]{id, enabled, settings, operation}[/code]. The operation is the
+## live instance the form is pointed at; the rest is what the sidecar stores.
+func _stack_for(path: String) -> Array:
+	if path.is_empty():
+		return []
+	if _stacks_by_path.has(path):
+		return _stacks_by_path[path]
 
-	# An operation whose settings describe the batch keeps one set for the whole
-	# session: no per-path entry, no sidecar, nothing to swap.
-	if not _operation.settings_are_per_image():
-		return _operation.get_settings()
-
-	var id := _operation.get_operation_id()
-	if not _settings_by_path.has(path):
-		_settings_by_path[path] = {}
-	var per_operation: Dictionary = _settings_by_path[path]
-	if per_operation.has(id):
-		return per_operation[id]
-
-	var settings := SettingsIO.load_settings(path, _operation)
-	if settings != null:
-		# Clamped here rather than after the swap, so the batch path — which
-		# never goes through _apply_settings_for — gets it too.
-		_operation.clamp_settings_to_schema(settings)
+	var loaded := SettingsIO.load_stack(path, _operation_registry())
+	var records := []
+	if loaded.is_empty():
+		for stage in _default_stages():
+			records.append({
+				"id": stage.get_operation_id(),
+				"enabled": true,
+				"settings": stage.get_settings(),
+				"operation": stage,
+			})
 	else:
-		settings = _operation.make_settings()
-	per_operation[id] = settings
-	return settings
+		var registry := _operation_registry()
+		for entry: Dictionary in loaded:
+			var script: Variant = registry.get(entry["id"])
+			if not (script is Script):
+				continue
+			var stage: IWStackOperation = (script as Script).new()
+			var settings: Resource = entry["settings"]
+			# Clamped here rather than after the swap, so the batch path — which never
+			# goes through _apply_stack_for — gets it too.
+			stage.clamp_settings_to_schema(settings)
+			stage.set_settings(settings)
+			stage.enabled = bool(entry["enabled"])
+			records.append({
+				"id": entry["id"],
+				"enabled": stage.enabled,
+				"settings": settings,
+				"operation": stage,
+			})
+
+	_stacks_by_path[path] = records
+	return records
 
 
-## Points the operation and the form at [param path]'s settings.
-func _apply_settings_for(path: String) -> void:
-	if _operation == null:
-		return
-	var settings := _settings_for(path)
-	if settings == null:
-		return
-
-	_refreshing = true
-	_operation.set_settings(settings)
-	SettingsBuilder.refresh_values(_operation, _settings_box)
-	_refresh_key_color()
-	if _island_picker != null:
-		_island_picker.refresh()
-	_update_overlays()
-	_refreshing = false
+## Operation id to script, for the sidecar codec and the stack loader.
+func _operation_registry() -> Dictionary:
+	var registry := {}
+	for script_path: String in OPERATION_SCRIPTS:
+		var script: Script = load(script_path)
+		if script == null:
+			continue
+		var probe: IWOperation = script.new()
+		registry[probe.get_operation_id()] = script
+	return registry
 
 
 ## Writes the sidecar for whichever image the pending save belongs to.
@@ -932,16 +1074,14 @@ func _flush_autosave() -> void:
 		_autosave.stop()
 	var path := _autosave_path
 	_autosave_path = ""
-	if path.is_empty() or _operation == null:
+	if path.is_empty():
 		return
 
-	# Read rather than resolve: resolving would create and cache an entry, so a
-	# stale pending path could write a sidecar for an image never touched.
-	var per_operation: Dictionary = _settings_by_path.get(path, {})
-	var settings: Resource = per_operation.get(_operation.get_operation_id())
-	if settings == null:
+	# Read rather than resolve: resolving would create and cache an entry, so a stale
+	# pending path could write a sidecar for an image never touched.
+	if not _stacks_by_path.has(path):
 		return
-	var error := SettingsIO.save_settings(path, _operation, settings)
+	var error := SettingsIO.save_stack(path, _stacks_by_path[path])
 	if error == OK:
 		_autosave_failures.erase(path)
 		return
@@ -956,8 +1096,9 @@ func _flush_autosave() -> void:
 
 
 func _schedule_autosave() -> void:
-	if _operation != null and not _operation.settings_are_per_image():
-		# Nothing to save: these settings do not belong to any one file.
+	if _mode == Mode.RENAME:
+		# Nothing to save: a rename scheme describes the batch rather than any one
+		# file, so it is held for the session and never written to a sidecar.
 		return
 	var path := _current_path()
 	if path.is_empty() or _autosave == null:
@@ -969,41 +1110,26 @@ func _schedule_autosave() -> void:
 	_autosave.start()
 
 
-## Drops the form back to a blank context when no image is selected.
+## Drops the forms back to a blank context when no image is selected.
 ##
-## The dialled-in values stay put. They describe nothing now — the next image
-## selected is resolved from its own sidecar or from defaults, never from these —
-## but blanking a form the moment a row is deselected would throw away work for
-## no gain.
+## The dialled-in values stay put. They describe nothing now — the next image selected
+## is resolved from its own sidecar or from the default stack, never from these — but
+## blanking a form the moment a row is deselected would throw away work for no gain.
 func _clear_settings_context() -> void:
-	if _operation == null:
-		return
 	_refreshing = true
-	var current := _operation.get_settings()
-	if current != null and current.has_method("duplicate_for_new_image"):
-		# Islands and drawn regions are the exception: they are coordinates in
-		# the image that just left, so leaving them on screen would draw markers
-		# and outlines over nothing.
-		_operation.set_settings(current.duplicate_for_new_image())
-	if _island_picker != null:
-		_island_picker.refresh()
-	# The colours survived the duplicate, but they are a fresh list now and the
-	# control is still holding rows from the one that was swapped out.
-	if _color_list != null:
-		_color_list.refresh()
-	if _polygon_list != null:
-		_polygon_list.refresh()
+	for stage: IWStackOperation in _stack_view.stages():
+		var current := stage.get_settings()
+		if current != null and current.has_method("duplicate_for_new_image"):
+			# Islands and drawn regions are the exception: they are coordinates in the
+			# image that just left, so leaving them on screen would draw markers and
+			# outlines over nothing.
+			stage.set_settings(current.duplicate_for_new_image())
+	# The controls are still holding rows from the lists that were swapped out.
+	for control: Control in _pick_controls:
+		if control.has_method("refresh"):
+			control.call("refresh")
 	_update_overlays()
 	_refreshing = false
-
-
-## Pushes the current settings' key colour into the swatch.
-func _refresh_key_color() -> void:
-	if _key_color_property == &"" or _operation == null:
-		return
-	var settings := _operation.get_settings()
-	if settings != null:
-		_key_color_button.color = settings.get(_key_color_property)
 
 
 ## Colour behind a pixel of the image on screen, for the island row swatches.
@@ -1017,134 +1143,198 @@ func _sample_source_color(pixel: Vector2i) -> Color:
 
 ## Hands the crosshair to [param source], taking it off whoever had it.
 ##
-## Only one control can own the preview, so the other's button is released rather
-## than left pressed over a picker that no longer receives anything.
+## Only one control can own the preview, so every other one is released rather than
+## left pressed over a picker that no longer receives anything. A loop rather than a
+## fixed set, because the stack may hold any number of each.
 func _on_pick_toggled(enabled: bool, source: Control) -> void:
 	if not enabled:
-		# Only when it still holds the crosshair. Otherwise this is the echo of the
-		# other picker having taken it, not the user switching picking off.
+		# Only when it still holds the crosshair. Otherwise this is the echo of another
+		# picker having taken it, not the user switching picking off.
 		if _pick_target == source:
 			_pick_target = null
 			_preview.pick_mode = false
-			if source == _polygon_list:
-				_polygon_list.finish_polygon()
+			if source is PolygonList:
+				(source as PolygonList).finish_polygon()
 				_update_overlays()
 		return
 
-	# The ones that did not just get pressed are released, rather than left
-	# looking pressed over a picker no click will reach. The source's own button
-	# is already down, which is what raised this signal.
-	if _island_picker != null and source != _island_picker:
-		_island_picker.set_pick_active(false)
-	if _color_list != null and source != _color_list:
-		_color_list.set_pick_active(false)
-	if _polygon_list != null and source != _polygon_list:
-		_polygon_list.finish_polygon()
-		_polygon_list.set_pick_active(false)
+	# The ones that did not just get pressed are released, rather than left looking
+	# pressed over a picker no click will reach. The source's own button is already
+	# down, which is what raised this signal.
+	for control: Control in _pick_controls:
+		if control == source:
+			continue
+		if control is PolygonList:
+			(control as PolygonList).finish_polygon()
+		control.set_pick_active(false)
 
 	_pick_target = source
+	_overlay_owner = source
 	_preview.pick_mode = true
-	if source == _color_list:
+	if source is ColorList:
 		_set_status("Click the preview to add that color to the list.")
-	elif source == _polygon_list:
+	elif source is PolygonList:
 		_set_status("Click to place corners. Right-click or Escape closes the region.")
 	else:
 		_set_status("Click a spot in the preview to add it to the list.")
+	_update_overlays()
 
 
 func _on_pixel_picked(pixel: Vector2i) -> void:
 	if _source_image == null or _pick_target == null:
 		return
-	if _pick_target == _color_list:
+	if _pick_target is ColorList:
 		var color := _sample_source_color(pixel)
-		_color_list.add_color(color)
+		(_pick_target as ColorList).add_color(color)
 		_set_status("Picked #%s." % color.to_html(false))
-	elif _pick_target == _polygon_list:
-		# add_vertex reports a click on the first corner, which is a request to
-		# close rather than a corner of its own.
-		if _polygon_list.add_vertex(pixel):
+	elif _pick_target is PolygonList:
+		# add_vertex reports a click on the first corner, which is a request to close
+		# rather than a corner of its own.
+		if (_pick_target as PolygonList).add_vertex(pixel):
 			_finish_polygon()
 		else:
 			_update_overlays()
-	elif _pick_target == _island_picker:
-		_island_picker.add_island(pixel)
+	elif _pick_target is IslandPicker:
+		(_pick_target as IslandPicker).add_island(pixel)
 		_set_status("Picked (%d, %d)." % [pixel.x, pixel.y])
 
 
-## Closes the region being drawn and drops out of drawing, so the Draw button
-## does not sit armed over a session that has ended.
+## Whichever polygon list currently owns the crosshair, or null.
+##
+## Unambiguous in a way "the one polygon list" never was: with several in the stack,
+## Escape and Backspace address the shape actually being drawn.
+func _drawing_list() -> PolygonList:
+	return _pick_target as PolygonList
+
+
+## Closes the region being drawn and drops out of drawing, so the Draw button does not
+## sit armed over a session that has ended.
 func _finish_polygon() -> void:
-	if _polygon_list == null:
+	var drawing := _drawing_list()
+	if drawing == null:
 		return
-	_polygon_list.finish_polygon()
-	_polygon_list.set_pick_active(false)
-	if _pick_target == _polygon_list:
-		_pick_target = null
-		_preview.pick_mode = false
+	drawing.finish_polygon()
+	drawing.set_pick_active(false)
+	_pick_target = null
+	_preview.pick_mode = false
 	_update_overlays()
 
 
 ## Right-click on the preview. Only the polygon tool makes anything of it.
 func _on_pick_cancelled() -> void:
-	if _pick_target == _polygon_list and _polygon_list != null:
+	if _drawing_list() != null:
 		_finish_polygon()
 
 
 func _on_vertex_dragged(polygon: int, vertex: int, to: Vector2i) -> void:
-	if _polygon_list == null:
+	# The drag is reported against the merged overlay, so it has to be resolved back
+	# to whichever list owns that region and to its own index within it.
+	var owner := _region_owner(polygon)
+	if owner == null:
 		return
-	# Overlay only. Re-running the operation on every motion event would be
-	# unusable on any real image, so the result waits for the drag to end.
-	_polygon_list.move_vertex(polygon, vertex, to)
+	# Overlay only. Re-running the stack on every motion event would be unusable on any
+	# real image, so the result waits for the drag to end.
+	owner[0].move_vertex(polygon - int(owner[1]), vertex, to)
+	_overlay_owner = owner[0]
 	_update_overlays()
 
 
 func _on_vertex_drag_ended() -> void:
-	if _polygon_list != null:
-		_on_setting_changed()
+	_on_setting_changed()
 
 
 func _on_islands_changed() -> void:
-	# Nothing to store: the picker edited the IslandList inside this image's
-	# settings directly, so it is already where it belongs.
+	# Nothing to store: the picker edited the IslandList inside this image's settings
+	# directly, so it is already where it belongs.
 	_update_overlays()
 	_on_setting_changed()
 
 
+## Remembers whose selection the overlay should highlight.
+##
+## The preview draws one merged list, so only one control's selection can be shown.
+## The last one touched is the right answer: it is the one the user is working in.
+func _on_selection_changed(source: Control) -> void:
+	_overlay_owner = source
+	_update_overlays()
+
+
+## The polygon list owning merged region [param index], and the offset its own
+## indices start at — or null when nothing does.
+func _region_owner(index: int) -> Array:
+	var offset := 0
+	for control: Control in _pick_controls:
+		if not (control is PolygonList):
+			continue
+		var list := control as PolygonList
+		var count := list.get_polygons().size()
+		if index < offset + count:
+			return [list, offset]
+		offset += count
+	return []
+
+
 ## Pushes both overlays — island markers and drawn regions — at the preview.
 ##
-## One function rather than two because they are drawn together, hidden together
-## by H, and every change to either has to leave both correct on screen.
+## One function rather than two because they are drawn together, hidden together by H,
+## and every change to either has to leave both correct on screen.
+##
+## Everything in the stack contributes, concatenated in stack order, because the
+## preview takes one flat list of each. Only the selection cannot be merged: an index
+## into the joined list means nothing unless it is offset by whatever was drawn before
+## its owner, and only one control's selection is shown at a time. See
+## [member _overlay_owner].
 func _update_overlays() -> void:
-	if _island_picker == null:
-		var empty: Array[Vector2i] = []
-		_preview.set_markers(empty, -1)
-	else:
-		_preview.set_markers(
-			_island_picker.get_islands(),
-			_island_picker.selected_index(),
-			_island_picker.get_enabled_flags(),
-		)
+	var points: Array[Vector2i] = []
+	var point_flags := PackedByteArray()
+	var selected_point := -1
 
-	if _polygon_list == null:
-		_preview.set_polygons([], PackedColorArray(), -1, -1)
-	else:
-		_preview.set_polygons(
-			_polygon_list.get_polygons(),
-			_polygon_list.get_colors(),
-			_polygon_list.selected_index(),
-			_polygon_list.draft_index(),
-			_polygon_list.get_enabled_flags(),
-		)
+	var regions := []
+	var region_colors := PackedColorArray()
+	var region_flags := PackedByteArray()
+	var selected_region := -1
+	var draft_region := -1
+
+	if _mode == Mode.IMAGE:
+		for control: Control in _pick_controls:
+			if control is IslandPicker:
+				var picker := control as IslandPicker
+				var own := picker.get_islands()
+				if picker == _overlay_owner and picker.selected_index() >= 0:
+					selected_point = points.size() + picker.selected_index()
+				points.append_array(own)
+				point_flags.append_array(picker.get_enabled_flags())
+			elif control is PolygonList:
+				var list := control as PolygonList
+				var own_regions := list.get_polygons()
+				var offset := regions.size()
+				if list == _overlay_owner and list.selected_index() >= 0:
+					selected_region = offset + list.selected_index()
+				# At most one list has a draft, because drawing is arbitrated.
+				if list.draft_index() >= 0:
+					draft_region = offset + list.draft_index()
+				regions.append_array(own_regions)
+				region_colors.append_array(list.get_colors())
+				region_flags.append_array(list.get_enabled_flags())
+
+	_preview.set_markers(points, selected_point, point_flags)
+	_preview.set_polygons(regions, region_colors, selected_region, draft_region, region_flags)
 
 
 func _on_setting_changed() -> void:
 	if _refreshing:
 		return
-	# A setting can be the switch that hides another one, and nothing but this
-	# would notice it had been thrown.
-	SettingsBuilder.refresh_visibility(_operation, _settings_box)
+	# A setting can be the switch that hides another one, and nothing but this would
+	# notice it had been thrown.
+	if _mode == Mode.RENAME:
+		SettingsBuilder.refresh_visibility(_rename, _rename_box)
+	else:
+		for entry: Control in _stack_view.entries():
+			SettingsBuilder.refresh_visibility(entry.stage, entry.settings_box())
 	_schedule_autosave()
+	if _mode == Mode.RENAME:
+		_update_detail_label()
+		return
 	if _auto_preview_allowed():
 		_schedule_preview()
 	else:
@@ -1183,7 +1373,7 @@ func _on_original_fade_changed(value: float) -> void:
 ## collects it starts the replacement.
 func _run_preview() -> void:
 	_debounce.stop()
-	if _source_image == null or _operation == null:
+	if _source_image == null or _mode == Mode.RENAME:
 		return
 	if _preview_thread != null:
 		_preview_pending = true
@@ -1209,6 +1399,9 @@ func _start_preview() -> void:
 		# Called from the worker. Nothing on this side of it may touch a control,
 		# so it hands the number to the main thread and returns.
 		_on_preview_progress.call_deferred(fraction)
+	if worker is IWPipeline:
+		(worker as IWPipeline).stage_progress_reporter = 			func(index: int, count: int, fraction: float, stage_name: String) -> void:
+				_on_preview_stage_progress.call_deferred(index, count, fraction, stage_name)
 
 	# set_busy resets the bar even when it is already up, so a restart begins from
 	# nothing rather than from wherever the abandoned run had got to.
@@ -1233,6 +1426,14 @@ func _on_preview_progress(fraction: float) -> void:
 	_preview.set_progress(fraction)
 
 
+## The second bar, and the caption naming what is running.
+##
+## The position is in the label rather than only the name, because a stack may hold
+## the same operation twice and "Polygon Edit" on its own would not say which.
+func _on_preview_stage_progress(index: int, count: int, fraction: float, stage_name: String) -> void:
+	_preview.set_stage_progress(fraction, "%s  (%d/%d)" % [stage_name, index + 1, count])
+
+
 ## Takes delivery of a finished run, back on the main thread.
 func _on_preview_done(source: Image, result: Image, elapsed: int) -> void:
 	if _preview_thread != null:
@@ -1251,9 +1452,10 @@ func _on_preview_done(source: Image, result: Image, elapsed: int) -> void:
 		# reports what it would do instead, so it is still inspectable before being
 		# run.
 		var path := _current_path()
-		var note := _operation.describe_output(path, _suffix_edit.text, maxi(_sources.find(path), 0)) if not path.is_empty() else ""
+		var active := _active_operation()
+		var note := active.describe_output(path, _suffix_edit.text, maxi(_sources.find(path), 0)) if not path.is_empty() else ""
 		if note.is_empty():
-			_set_status("%s in %d ms" % [_operation.get_operation_name(), elapsed])
+			_set_status("%s in %d ms" % [_stack_summary(), elapsed])
 		else:
 			_set_status(note)
 		_update_preview_texture()
@@ -1261,32 +1463,49 @@ func _on_preview_done(source: Image, result: Image, elapsed: int) -> void:
 
 	# Straight into the next run rather than clearing the overlay first, so a held
 	# slider does not strobe it off and on between every pass.
-	if _preview_pending and _source_image != null and _operation != null:
+	if _preview_pending and _source_image != null and _mode == Mode.IMAGE:
 		_start_preview()
 	else:
 		_preview_pending = false
 		_preview.set_busy(false)
 
 
-## A private copy of the operation for the worker to use.
+## What the status line calls the run: how many stages actually did anything.
+func _stack_summary() -> String:
+	var count := 0
+	for stage: IWStackOperation in _stack_view.stages():
+		if stage.enabled:
+			count += 1
+	return "1 operation" if count == 1 else "%d operations" % count
+
+
+## A private pipeline for the worker to use.
 ##
-## The dock goes on editing its own settings while the thread runs — that is the
-## point of the thread — and an operation reading them mid-run would see a value
-## change underneath it. So the worker gets its own instance and its own settings,
-## deep-copied through the sidecar codec, which already knows how to walk every
-## nested resource these have.
+## The dock goes on editing its own settings while the thread runs — that is the point
+## of the thread — and a stage reading them mid-run would see a value change underneath
+## it. So the worker gets its own instances and its own settings, deep-copied through
+## the sidecar codec, which already knows how to walk every nested resource these have.
 func _snapshot_operation() -> IWOperation:
-	var source_script := _operation.get_script()
-	if source_script == null:
-		return null
-	var worker: IWOperation = source_script.new()
-	var live := _operation.get_settings()
-	if live != null:
-		var copy := worker.make_settings()
-		if copy != null:
-			SettingsIO.apply_dict(copy, SettingsIO.to_dict(live))
-			worker.set_settings(copy)
-	return worker
+	return _snapshot_pipeline(_stack_view.stages())
+
+
+## A pipeline of fresh stages carrying deep copies of [param stages]' settings.
+func _snapshot_pipeline(stages: Array) -> IWPipeline:
+	var pipeline := IWPipeline.new()
+	for stage: IWStackOperation in stages:
+		var script := stage.get_script()
+		if script == null:
+			continue
+		var worker: IWStackOperation = script.new()
+		worker.enabled = stage.enabled
+		var live := stage.get_settings()
+		if live != null:
+			var copy := worker.make_settings()
+			if copy != null:
+				SettingsIO.apply_dict(copy, SettingsIO.to_dict(live))
+				worker.set_settings(copy)
+		pipeline.stages.append(worker)
+	return pipeline
 
 
 ## Hands the preview both images, so the fade slider can move between them
@@ -1425,7 +1644,7 @@ func _update_controls() -> void:
 ## whole decision — no destination is remembered between runs.
 func _on_process_selected() -> void:
 	var index := _selected_index()
-	if index < 0 or _operation == null:
+	if index < 0:
 		return
 	var path := _sources[index]
 	_save_source = path
@@ -1448,19 +1667,16 @@ func _on_save_file_chosen(destination: String) -> void:
 ## Processing the whole list asks for a folder instead: one dialog cannot name
 ## every output, so the suffix does the naming and this only picks where.
 func _on_process_all() -> void:
-	if _sources.is_empty() or _operation == null:
+	if _sources.is_empty():
 		return
 	_output_dialog.current_dir = _sources[0].get_base_dir()
 	_output_dialog.popup_centered_ratio(0.6)
 
 
 func _on_output_dir_chosen(directory: String) -> void:
-	if _operation == null:
-		return
-
 	# Sidecars travel with their image on the copy path, so they can be replaced by
 	# a run too and belong in the warning below.
-	var carries_sidecars := not _operation.transforms_pixels()
+	var carries_sidecars := _mode == Mode.RENAME
 
 	var jobs := {}
 	var existing := PackedStringArray()
@@ -1622,10 +1838,10 @@ func _repoint_sources(moved: Dictionary) -> void:
 	# Per-image settings describe the image, so they follow it to its new path —
 	# in memory here, and on disk as the sidecar copied during the run.
 	for source: String in moved:
-		if not _settings_by_path.has(source):
+		if not _stacks_by_path.has(source):
 			continue
-		_settings_by_path[moved[source]] = _settings_by_path[source]
-		_settings_by_path.erase(source)
+		_stacks_by_path[moved[source]] = _stacks_by_path[source]
+		_stacks_by_path.erase(source)
 
 	# A pending write against the old path would resolve to nothing now.
 	if moved.has(_autosave_path):
@@ -1644,10 +1860,11 @@ func _repoint_sources(moved: Dictionary) -> void:
 ## Output file name for a source, which the operation decides: a rename has a
 ## whole scheme to apply, where an image operation just keeps the name.
 func _output_name_for(path: String) -> String:
-	if _operation == null:
+	var active := _active_operation()
+	if active == null:
 		return path.get_file()
 	var index := _sources.find(path)
-	return _operation.get_output_name(path, _suffix_edit.text, maxi(index, 0))
+	return active.get_output_name(path, _suffix_edit.text, maxi(index, 0))
 
 
 ## Sidecar paths that sources outside [param jobs] still read from.
@@ -1703,37 +1920,37 @@ func _carry_sidecar(source_path: String, destination: String, held: Dictionary) 
 	# nothing with the rest, and to the trash rather than straight out. Held back
 	# only when a source this run is not processing still reads it; the copy has
 	# been made either way.
-	if _operation.removes_sources() and not held.has(source_sidecar):
+	if _removes_sources() and not held.has(source_sidecar):
 		_pending_removals[source_sidecar] = destination_sidecar
 	return ""
 
 
-## Runs the operation over every queued source and writes the results.
+## Whether a source should be offered for deletion once its output is written.
+##
+## Only ever true for the file operation: anything that rewrites pixels has no
+## business offering it, since its output is not a copy of anything.
+func _removes_sources() -> bool:
+	return _mode == Mode.RENAME and _rename != null and _rename.removes_sources()
+
+
+## Runs the stack over every queued source and writes the results.
 func _write_pending_outputs() -> void:
 	var jobs := _pending_outputs
 	_pending_outputs = {}
-	if jobs.is_empty() or _operation == null:
+	if jobs.is_empty():
 		return
 
 	# A sidecar still sitting in the debounce is written now, so the copy carried
-	# alongside a renamed image is the settings as they stand rather than as they
-	# were a tick ago. The run itself reads from memory and would not have noticed.
+	# alongside a renamed image is the settings as they stand rather than as they were
+	# a tick ago. The run itself reads from memory and would not have noticed.
 	_flush_autosave()
 
-	# Held so the form can be put back afterwards: the loop below swaps the
-	# operation's settings per job, and the selected image's must survive that.
-	var template := _operation.get_settings()
-
-	# Resolved before the loop rather than inside it, because _settings_for reads
-	# the operation's own settings for an operation whose settings are not
-	# per-image — and by then the loop is already swapping them.
-	var settings_for_job := {}
-	for source_path: String in jobs:
-		settings_for_job[source_path] = _settings_for(source_path)
-
-	var rewrites_pixels := _operation.transforms_pixels()
-	# Worked out once for the whole run rather than per file, since it depends on
-	# which sources the run leaves alone.
+	# Rename copies the file byte for byte rather than decoding and re-encoding it, so
+	# a format this addon cannot write is not turned into a PNG wearing the wrong
+	# extension.
+	var rewrites_pixels := _mode == Mode.IMAGE
+	# Worked out once for the whole run rather than per file, since it depends on which
+	# sources the run leaves alone.
 	var held_sidecars := _sidecars_held_outside(jobs)
 
 	var written := 0
@@ -1748,24 +1965,17 @@ func _write_pending_outputs() -> void:
 				failures.append(source_path.get_file())
 				continue
 
-		# Each image is processed with its own settings, not the selected image's.
-		# The form is left alone and the selection's settings restored below.
-		if settings_for_job.has(source_path):
-			_operation.set_settings(settings_for_job[source_path])
-
 		if not rewrites_pixels:
-			# Copied rather than decoded and re-encoded, so a format this addon
-			# cannot write is not turned into a PNG wearing the wrong extension.
 			if source_path == destination or DirAccess.copy_absolute(source_path, destination) != OK:
 				failures.append(source_path.get_file())
 				continue
 			written += 1
-			# Only a candidate, and only because this one copy landed. Whether any
-			# of them are actually deleted is decided after the whole run.
-			if _operation.removes_sources() and not _is_same_file(source_path, destination):
+			# Only a candidate, and only because this one copy landed. Whether any of
+			# them are actually deleted is decided after the whole run.
+			if _removes_sources() and not _is_same_file(source_path, destination):
 				_pending_removals[source_path] = destination
-			# After the image, so a copy that failed leaves no sidecar stranded
-			# beside a file that was never written.
+			# After the image, so a copy that failed leaves no sidecar stranded beside a
+			# file that was never written.
 			var stalled := _carry_sidecar(source_path, destination, held_sidecars)
 			if not stalled.is_empty():
 				sidecar_failures.append(stalled)
@@ -1775,13 +1985,22 @@ func _write_pending_outputs() -> void:
 		if image == null:
 			failures.append(source_path.get_file())
 			continue
-		var result := _operation.process_image(image)
+		# A fresh pipeline per job, built from that image's own saved stack. Nothing
+		# the dock is showing is touched, which is what lets the form go on being
+		# edited during a run and what stops one image's settings leaking into the
+		# next — the old arrangement swapped them on the live operation and put them
+		# back afterwards.
+		var stages := []
+		for record: Dictionary in _stack_for(source_path):
+			var stage: IWStackOperation = record["operation"]
+			stage.set_settings(record["settings"])
+			stage.enabled = bool(record["enabled"])
+			stages.append(stage)
+		var result := _snapshot_pipeline(stages).process_image(image)
 		if result.save_png(destination) != OK:
 			failures.append(source_path.get_file())
 			continue
 		written += 1
-
-	_operation.set_settings(template)
 
 	var report := "Wrote %d file(s)." % written
 	if not failures.is_empty():

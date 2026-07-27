@@ -24,8 +24,8 @@ var _panel: Control
 
 
 func _enter_tree() -> void:
-	if RUN_SELF_TEST and SettingsIO.self_test(RemoveBackground.new()):
-		print("Image Wrangler: settings codec self-test passed.")
+	if RUN_SELF_TEST:
+		_run_self_test()
 
 	_panel = PanelScript.new()
 	_panel.name = "ImageWrangler"
@@ -40,6 +40,29 @@ func _enter_tree() -> void:
 	# The editor drives visibility through _make_visible, and the screen it is
 	# already showing wins on startup.
 	_panel.hide()
+
+
+## Round-trips every operation the dock offers, not just the first one.
+##
+## One operation proving the codec proves it for one shape of settings. Each
+## operation brings its own — a list of colours, a list of polygons, a handful of
+## numbers — and it is the shapes the reflective encoder can get wrong.
+func _run_self_test() -> void:
+	var passed := true
+	for path: String in PanelScript.OPERATION_SCRIPTS:
+		var script: Script = load(path)
+		if script == null:
+			push_error("Image Wrangler self-test: could not load %s." % path)
+			passed = false
+			continue
+		var operation: IWOperation = script.new()
+		if operation.make_settings() == null:
+			# Legitimate: an operation may hold no settings at all.
+			continue
+		if not SettingsIO.self_test(operation):
+			passed = false
+	if passed:
+		print("Image Wrangler: settings codec self-test passed.")
 
 
 func _exit_tree() -> void:

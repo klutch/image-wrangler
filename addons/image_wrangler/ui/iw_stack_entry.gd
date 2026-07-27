@@ -1,0 +1,258 @@
+@tool
+extends PanelContainer
+
+## One operation's row in the stack: a header to grab, tick and close, and the
+## operation's own settings form underneath.
+##
+## The header replaces what used to be a folding group heading inside one long form.
+## That is why an operation's schema no longer names a group for its own settings —
+## the entry [i]is[/i] the group now, and a heading inside it would be a heading
+## inside a heading.
+##
+## [b]Dragging starts on the handle only.[/b] The whole entry implements the drag, so
+## the preview and the drop indicator cover all of it and the gesture works across the
+## scroll container. But an entry full of sliders and list rows would be impossible to
+## use if a drag could start anywhere in it, so [method _get_drag_data] refuses unless
+## the press began inside the handle. The handle passes the mouse through rather than
+## taking it, which is why it is a [Label] and not a [Button].
+
+## Emitted when the close button is pressed.
+signal remove_requested(entry: Control)
+
+## Emitted when the tick changes. The stack is what reads it; the entry only reports.
+signal enabled_toggled(entry: Control, enabled: bool)
+
+## Emitted when a drop lands on this entry: move [param from_uid] to just above or
+## just below this one.
+signal reorder_requested(from_uid: int, to_uid: int, above: bool)
+
+## Emitted when anything in the settings form changes.
+signal setting_changed(entry: Control)
+
+## Indent of the settings form under its header, matching what a folded group used.
+const INDENT := 8
+
+## Thickness of the line drawn where a dragged entry would land.
+const DROP_LINE := 2.0
+
+## The operation this entry stands for. Its settings are the live ones.
+var stage: IWStackOperation
+
+## Identity for this entry, unique for the session.
+##
+## Needed because the same operation may appear more than once, so neither the
+## operation id nor the position in the stack identifies a row: the id is shared and
+## the position is exactly what a reorder changes.
+var uid := 0
+
+var _handle: Label
+var _tick: CheckBox
+var _title: Button
+var _note: Label
+var _body: MarginContainer
+var _settings_box: VBoxContainer
+
+## Where a drop would land, while one is hovering: 1 above, -1 below, 0 not hovering.
+var _drop_side := 0
+
+
+func setup(operation: IWStackOperation, entry_uid: int, folded: bool) -> void:
+	stage = operation
+	uid = entry_uid
+	_build()
+	_title.button_pressed = not folded
+	_body.visible = not folded
+	_tick.button_pressed = operation.enabled
+	_apply_fold_arrow()
+
+
+## The form's container, for the settings builder to fill.
+func settings_box() -> VBoxContainer:
+	return _settings_box
+
+
+## Shows or clears the line about what this stage is waiting for.
+func set_note(text: String) -> void:
+	_note.text = text
+	_note.visible = not text.is_empty()
+
+
+func is_folded() -> bool:
+	return not _title.button_pressed
+
+
+## Every picker or drawing control this entry's form built, at any depth.
+##
+## A grouped setting is nested inside its heading box rather than sitting directly in
+## the form, so scanning only the form's own children would find nothing and every
+## picker feature would go quietly dead.
+func pick_controls() -> Array[Control]:
+	var found: Array[Control] = []
+	_collect(_settings_box, found)
+	return found
+
+
+func _collect(node: Node, into: Array[Control]) -> void:
+	for child in node.get_children():
+		if child.has_method("set_pick_active"):
+			into.append(child)
+		_collect(child, into)
+
+
+func _build() -> void:
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 0)
+	add_child(column)
+
+	var header := HBoxContainer.new()
+	column.add_child(header)
+
+	# Passes the mouse through rather than taking it, so the press reaches the entry
+	# and _get_drag_data can see where it started.
+	_handle = Label.new()
+	_handle.text = "≡"
+	_handle.mouse_filter = Control.MOUSE_FILTER_PASS
+	_handle.mouse_default_cursor_shape = Control.CURSOR_MOVE
+	_handle.custom_minimum_size = Vector2(16, 0)
+	_handle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_handle.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_handle.modulate = Color(1, 1, 1, 0.55)
+	_handle.tooltip_text = "Drag to reorder. Order matters: each operation works on what the ones above it left."
+	header.add_child(_handle)
+
+	_tick = CheckBox.new()
+	_tick.focus_mode = Control.FOCUS_NONE
+	_tick.tooltip_text = "Run this operation.\nUnticking it keeps everything dialled into it, which removing the entry would not."
+	_tick.toggled.connect(func(pressed: bool) -> void:
+		stage.enabled = pressed
+		_refresh_dimming()
+		enabled_toggled.emit(self, pressed))
+	header.add_child(_tick)
+
+	# A flat toggle rather than a Label: it reads as a heading, but the whole width of
+	# it is the hit target, which a disclosure arrow on its own is not.
+	_title = Button.new()
+	_title.text = stage.get_operation_name()
+	_title.toggle_mode = true
+	_title.flat = true
+	_title.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Never focused: the form is tabbed through to reach the controls, and a heading
+	# in that path is a stop nobody wants.
+	_title.focus_mode = Control.FOCUS_NONE
+	_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_title.tooltip_text = "Show or hide these settings."
+	_title.toggled.connect(func(pressed: bool) -> void:
+		_body.visible = pressed
+		_apply_fold_arrow())
+	_title.theme_changed.connect(_apply_fold_arrow)
+	header.add_child(_title)
+
+	# Text rather than the editor's Remove icon: that one is colour-coded by the
+	# theme, and this has to read as red whatever the theme thinks.
+	var close := Button.new()
+	close.flat = true
+	close.focus_mode = Control.FOCUS_NONE
+	close.text = "✕"
+	close.add_theme_color_override(&"font_color", Color(0.95, 0.35, 0.35))
+	close.add_theme_color_override(&"font_hover_color", Color(1.0, 0.55, 0.55))
+	close.tooltip_text = "Remove this operation from the stack.\nIts settings go with it."
+	close.pressed.connect(func() -> void: remove_requested.emit(self))
+	header.add_child(close)
+
+	_note = Label.new()
+	_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_note.modulate = Color(1.0, 0.85, 0.4)
+	_note.visible = false
+	_note.add_theme_font_size_override("font_size", 10)
+	column.add_child(_note)
+
+	_body = MarginContainer.new()
+	_body.add_theme_constant_override("margin_left", INDENT)
+	column.add_child(_body)
+
+	_settings_box = VBoxContainer.new()
+	_settings_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_body.add_child(_settings_box)
+
+
+## Fades a switched-off entry, so the stack reads at a glance.
+##
+## Guarded because the theme fires at the header while the body is still being built:
+## adding the title to the tree raises [code]theme_changed[/code], and the arrow that
+## hangs off it comes through here.
+func _refresh_dimming() -> void:
+	if _title == null or _body == null:
+		return
+	var shade := Color(1, 1, 1, 1.0 if stage.enabled else 0.5)
+	_title.modulate = shade
+	_body.modulate = shade
+
+
+## Guarded rather than assumed: outside the editor there is no [code]EditorIcons[/code]
+## theme to take an arrow from, and a heading with no arrow is better than an error.
+func _apply_fold_arrow() -> void:
+	if _title == null:
+		return
+	var open := _title.button_pressed
+	var name := &"GuiTreeArrowDown" if open else &"GuiTreeArrowRight"
+	if has_theme_icon(name, &"EditorIcons"):
+		_title.icon = get_theme_icon(name, &"EditorIcons")
+	_refresh_dimming()
+
+
+# --- Reordering ---------------------------------------------------------
+
+func _get_drag_data(_at_position: Vector2) -> Variant:
+	# Only from the handle. Without this, dragging any spin slider or list row inside
+	# the entry would start a reorder instead of doing what it looks like it does.
+	if _handle == null or not _handle.get_global_rect().has_point(get_global_mouse_position()):
+		return null
+
+	var preview := Label.new()
+	preview.text = stage.get_operation_name()
+	preview.add_theme_constant_override("outline_size", 2)
+	set_drag_preview(preview)
+	return {"type": "iw_stack_entry", "uid": uid}
+
+
+func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
+	if not (data is Dictionary):
+		return false
+	var payload: Dictionary = data
+	if String(payload.get("type", "")) != "iw_stack_entry":
+		return false
+	if int(payload.get("uid", -1)) == uid:
+		return false
+	var side := 1 if at_position.y < size.y * 0.5 else -1
+	if side != _drop_side:
+		_drop_side = side
+		queue_redraw()
+	return true
+
+
+func _drop_data(at_position: Vector2, data: Variant) -> void:
+	_drop_side = 0
+	queue_redraw()
+	var payload: Dictionary = data
+	reorder_requested.emit(int(payload.get("uid", -1)), uid, at_position.y < size.y * 0.5)
+
+
+func _notification(what: int) -> void:
+	# The indicator has to come down when the drag leaves or ends anywhere, not only
+	# when it is dropped here — _can_drop_data stops being called and nothing else
+	# would clear it.
+	if what == NOTIFICATION_DRAG_END or what == NOTIFICATION_MOUSE_EXIT:
+		if _drop_side != 0:
+			_drop_side = 0
+			queue_redraw()
+
+
+func _draw() -> void:
+	if _drop_side == 0:
+		return
+	var accent := Color(0.4, 0.7, 1.0)
+	if has_theme_color(&"accent_color", &"Editor"):
+		accent = get_theme_color(&"accent_color", &"Editor")
+	var y := 0.0 if _drop_side > 0 else size.y - DROP_LINE
+	draw_rect(Rect2(0, y, size.x, DROP_LINE), accent)

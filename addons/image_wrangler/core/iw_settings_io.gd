@@ -27,7 +27,27 @@ extends RefCounted
 ## added and silently not saved.
 
 const FORMAT := "image_wrangler"
-const VERSION := 1
+
+## Bumped to 2 when the single operation became a stack. A version 1 file holds one
+## block per operation keyed by id, which cannot express an order or the same
+## operation twice; a version 2 file holds an ordered list. See [method load_stack].
+const VERSION := 2
+
+## Ids of the stages a version 1 [code]remove_background[/code] block splits into,
+## in the order that reproduces what it used to do.
+##
+## Islands above the crevice, because in version 1 island seeds joined the same
+## flood the crevice rule then extended. Polygons above the keying, because a cut
+## has to be declared before the alpha is estimated so it can steer where the
+## colour bleed takes its replacements from.
+const _V1_ORDER := [
+	&"polygon_edit",
+	&"remove_background",
+	&"island_picker",
+	&"remove_crevice",
+	&"refine_edges",
+	&"edge_cleanup",
+]
 
 
 ## Sidecar path for a source image: the same path with its extension replaced.
@@ -114,6 +134,200 @@ static func save_settings(source_path: String, operation: IWOperation, settings:
 	file.store_string(JSON.stringify(envelope, "\t"))
 	file.close()
 	return OK
+
+
+# --- The stack ----------------------------------------------------------
+
+## The stack saved for [param source_path], or an empty Array when there is nothing
+## usable there.
+##
+## Each element is [code]{"id": StringName, "enabled": bool, "settings": Resource}[/code].
+## [param registry] maps an operation id to its script, so this can build the right
+## settings object for each entry; the dock supplies it, since the list of stack
+## operations belongs to the dock rather than to the codec.
+##
+## An id the registry does not know is skipped with a warning rather than failing the
+## whole file — a sidecar written by a build with an extra operation should still open
+## with everything else intact.
+##
+## A version 1 file is translated on the way in; see [method _stack_from_v1]. Nothing
+## is written back until the user edits something, so opening an old file and closing
+## it again leaves it alone.
+static func load_stack(source_path: String, registry: Dictionary) -> Array:
+	var path := sidecar_path(source_path)
+	if not FileAccess.file_exists(path):
+		return []
+
+	var envelope := _read_envelope(path)
+	if envelope.is_empty():
+		return []
+	var version := int(envelope.get("version", 0))
+	if version > VERSION:
+		push_warning("Image Wrangler: %s was written by a newer version; ignoring it." % path.get_file())
+		return []
+	if version < 2:
+		return _stack_from_v1(envelope, registry)
+
+	var stack := []
+	for element: Variant in envelope.get("stack", []):
+		if not (element is Dictionary):
+			continue
+		var entry: Dictionary = element
+		var id := StringName(entry.get("id", ""))
+		if not registry.has(id):
+			push_warning("Image Wrangler: %s names an unknown operation \"%s\"; skipping it."
+					% [path.get_file(), id])
+			continue
+		var settings := _settings_for_id(id, registry)
+		if settings == null:
+			continue
+		var stored: Variant = entry.get("settings", {})
+		if stored is Dictionary:
+			apply_dict(settings, stored)
+		if settings.has_method("migrate_loaded"):
+			settings.call("migrate_loaded")
+		stack.append({
+			"id": id,
+			"enabled": bool(entry.get("enabled", true)),
+			"settings": settings,
+		})
+	return stack
+
+
+## Writes [param stack] into [param source_path]'s sidecar, leaving anything else in
+## the file alone.
+##
+## Returns [code]OK[/code], or a failure code. Refuses [code]ERR_FILE_CORRUPT[/code]
+## when a file of that name already exists and was written by something else —
+## [code]sprite.json[/code] beside [code]sprite.png[/code] is exactly what Aseprite
+## names its atlas descriptor, and this addon works in precisely those folders.
+static func save_stack(source_path: String, stack: Array) -> Error:
+	var path := sidecar_path(source_path)
+	var envelope := {}
+
+	if FileAccess.file_exists(path):
+		envelope = _read_envelope(path)
+		if envelope.is_empty():
+			# Present but not ours, or not parseable. Either way it is somebody
+			# else's file and overwriting it would destroy their data.
+			return ERR_FILE_CORRUPT
+
+	var encoded := []
+	for entry: Dictionary in stack:
+		var settings: Resource = entry.get("settings")
+		encoded.append({
+			"id": String(entry.get("id", &"")),
+			"enabled": bool(entry.get("enabled", true)),
+			"settings": to_dict(settings),
+		})
+
+	envelope["format"] = FORMAT
+	envelope["version"] = VERSION
+	envelope["stack"] = encoded
+	# The version 1 blocks are dropped rather than kept in step. Two records of the
+	# same settings would only ever disagree, and the file has already been read.
+	envelope.erase("operations")
+
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		return FileAccess.get_open_error()
+	file.store_string(JSON.stringify(envelope, "\t"))
+	file.close()
+	return OK
+
+
+## Builds the equivalent stack from a version 1 envelope.
+##
+## Version 1 knew one fused operation with thirteen tunables. Each stage takes the
+## ones that became its own, and a stage whose settings say it was doing nothing is
+## left out entirely rather than added switched off — an entry that does nothing is
+## still an entry to read past.
+static func _stack_from_v1(envelope: Dictionary, registry: Dictionary) -> Array:
+	var operations: Variant = envelope.get("operations", {})
+	if not (operations is Dictionary):
+		return []
+	var block: Variant = (operations as Dictionary).get("remove_background", {})
+	if not (block is Dictionary):
+		return []
+	var old: Dictionary = block
+
+	# Decoded into the pre-split shape first, so the values arrive typed and the
+	# island migration inside it still gets its chance to run.
+	var legacy := _LegacyV1Settings.new()
+	apply_dict(legacy, old)
+	legacy.migrate_loaded()
+
+	var stack := []
+	for id: StringName in _V1_ORDER:
+		if not registry.has(id):
+			continue
+		if not _v1_wants(id, legacy):
+			continue
+		var settings := _settings_for_id(id, registry)
+		if settings == null:
+			continue
+		_v1_fill(id, legacy, settings)
+		stack.append({"id": id, "enabled": true, "settings": settings})
+	return stack
+
+
+## Whether a version 1 file was actually using the stage [param id] stands for.
+static func _v1_wants(id: StringName, old: _LegacyV1Settings) -> bool:
+	match id:
+		&"remove_background":
+			return true
+		&"polygon_edit":
+			return old.polygons != null and not old.polygons.regions.is_empty()
+		&"island_picker":
+			return old.islands != null and not old.islands.entries.is_empty()
+		&"remove_crevice":
+			# Its own off switch in version 1.
+			return old.crevice_reach > 0
+		&"refine_edges":
+			# The clip was usable without the filter, so either one counts.
+			return old.refine_edges or old.alpha_floor > 0.0 or old.alpha_ceiling < 1.0
+		&"edge_cleanup":
+			return old.edge_cleanup
+	return false
+
+
+## Copies the version 1 values a stage inherited into its own settings.
+static func _v1_fill(id: StringName, old: _LegacyV1Settings, into: Resource) -> void:
+	match id:
+		&"remove_background":
+			into.remove_colors = old.remove_colors
+			into.edge_width = old.edge_width
+			into.contiguous = old.contiguous
+			into.decontaminate = old.decontaminate
+			into.bleed_radius = old.bleed_radius
+		&"polygon_edit":
+			into.polygons = old.polygons
+		&"island_picker":
+			into.islands = old.islands
+		&"remove_crevice":
+			into.crevice_reach = old.crevice_reach
+			into.crevice_tolerance = old.crevice_tolerance
+		&"refine_edges":
+			# A radius of zero is what "the filter was off" became, so a file that
+			# only wanted the clip keeps only the clip.
+			into.refine_radius = old.refine_radius if old.refine_edges else 0
+			into.alpha_floor = old.alpha_floor
+			into.alpha_ceiling = old.alpha_ceiling
+		&"edge_cleanup":
+			into.inner_stroke_width = old.inner_stroke_width
+			into.outer_stroke_width = old.outer_stroke_width
+			into.stroke_softness = old.stroke_softness
+			into.auto_stroke_color = old.auto_stroke_color
+			into.stroke_color = old.stroke_color
+
+
+## A blank settings Resource for [param id], via the registry's script.
+static func _settings_for_id(id: StringName, registry: Dictionary) -> Resource:
+	var script: Variant = registry.get(id)
+	if not (script is Script):
+		return null
+	var operation: IWOperation = (script as Script).new()
+	return operation.make_settings()
 
 
 ## Parsed envelope, or an empty Dictionary when the file is missing, unreadable,

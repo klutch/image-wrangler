@@ -7,7 +7,7 @@ main screen tabs at the top, alongside **2D**, **3D** and **Script**.
 ## Using it
 
 1. Add images with the **Add** button, or drag them in from the FileSystem dock.
-2. Pick an operation and tune its settings. The preview updates as you drag.
+2. Build a stack of operations and tune them. The preview updates as you drag.
 3. **Process Current Only** saves the selected image, asking where to put it.
    **Process All** processes the whole list into a folder you pick, naming each
    output after its source plus the **Suffix**. Results are always PNG, and you
@@ -15,6 +15,42 @@ main screen tabs at the top, alongside **2D**, **3D** and **Script**.
 
 The preview sits on a checkerboard and is drawn unfiltered, so you can see
 exactly what happened to the edge pixels.
+
+## The operation stack
+
+The right-hand column is a **stack**: a list of operations run top to bottom, each
+working on what the ones above it left. Pick one from the dropdown and press
+**Create** to add it to the bottom; grab the **≡** handle on the left of any entry
+to drag it somewhere else; press the red **✕** to remove it.
+
+Every entry also has a tick. Unticking it stops that operation running while
+keeping everything dialled into it, which removing the entry would not.
+
+A fresh image starts with the six that between them do what the old single
+operation did:
+
+| Operation | What it does |
+| --- | --- |
+| **Polygon Edit** | Shapes drawn by hand, forced transparent or opaque |
+| **Remove Background** | Keys out flat background colours and mattes the edge |
+| **Island Picker** | Regions picked off the preview, removed or protected |
+| **Remove Crevice** | Reaches into nooks too narrow for the flood |
+| **Refine Edges** | Tidies the alpha, then clips its extremes |
+| **Edge Cleanup** | Restores hard edges and draws an outline |
+
+**Order matters, and duplicates are allowed.** Two Polygon Edits are two
+independent sets of shapes. A second Remove Background adds its colours to the
+keys the first registered rather than starting again. Refine Edges above Edge
+Cleanup smooths before the outline is measured; below it, after.
+
+Several of them only mean something downstream of a Remove Background — there is
+no coverage to refine and no key to measure against until something has keyed. An
+entry in that position says so on its own face rather than failing, so a
+half-built stack is a normal state to be in.
+
+Rename is deliberately **not** in the stack. It does not touch pixels, and its
+settings describe the whole batch rather than any one image, so it sits behind the
+**Image** / **Rename** switch above the stack instead.
 
 ### Preview and zoom
 
@@ -51,12 +87,18 @@ the only reason to want automatic preview off is that it has become too slow, an
 the dock can see that for itself.
 
 **Processing runs on a worker thread**, so the editor stays usable while it
-works — you can keep panning, zooming and dragging sliders. A spinner and a
-progress bar sit over the preview while a run is in flight, dimming the image
+works — you can keep panning, zooming and dragging sliders. A spinner and two
+progress bars sit over the preview while a run is in flight, dimming the image
 rather than covering it, since what you are looking at is one revision out of date
 rather than gone.
 
-The two answer different questions. The bar says how far along the work is, and
+The upper bar is the whole stack; the thin one under it is the operation currently
+running, named in the caption above them. That second bar resets every time the run
+moves on to the next operation, and the reset is most of what it is telling you —
+without it, a stack that spends four seconds inside one operation looks the same as
+one that has stopped.
+
+The bars and the spinner answer different questions. A bar says how far along the work is, and
 advances unevenly on purpose — the passes report where they have actually got to,
 and they are nothing like equally expensive. The spinner says the work is still
 happening, which a bar cannot: one that has not moved for four seconds looks
@@ -114,35 +156,54 @@ The full derivation is in the header comment of
 
 ### Settings
 
-The form is split into a **Remove Colors** group, a **Settings** group, an
-**Island Picker** group, a **Polygon Edit** group and an **Edge Cleanup** group.
-Each folds away by clicking its heading; **Remove Colors** and **Settings** start
-open, since all five expanded is taller than the dock. Folds are remembered for as
-long as the editor is open, so switching to another operation and back finds the
-form as you left it — they are not saved to a sidecar, being about what you are
-working on rather than about the image.
+Each operation's own settings sit under its entry in the stack, and fold away by
+clicking its title. Folds are remembered for as long as the editor is open — they
+are not saved to a sidecar, being about what you are working on rather than about
+the image — and two entries of the same operation fold independently.
+
+**Remove Background**
 
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Remove Colors | one white entry at 0.02 | The background colours to key out, each with a tolerance of its own. Only takes where the colour reaches the image border. See below. |
-| Edge Width | 2 | How many pixels of antialiasing to rebuild. 2 suits ordinary antialiasing; raise it for soft edges, glows and drop shadows; 0 gives a hard cutout. |
-| Crevice Reach | 0 (off) | Lets the flood squeeze into nooks it would otherwise stop outside. See below. |
-| Crevice Tolerance | 0.5 | How far from the background colour those squeezed-through pixels may be. |
+| Edge Width | 2 | How many pixels of antialiasing to rebuild. 2 suits ordinary antialiasing; raise it for soft edges, glows and drop shadows; 0 gives a hard cutout. Remove Crevice and Island Picker take their band width from here too, so every edge is matted to the same depth. |
 | Only Outer Background | on | Flood fills from the image border, so background-coloured regions enclosed by the subject — eyes, highlights, the holes in an "o" — stay opaque. Also what confines **Remove Colors** to the border. |
-| Island Picker | empty | Enclosed regions to remove anyway, picked off the preview. Held per image. See below. |
-| Polygon Edit | empty | Regions drawn over the preview by hand, cut away or forced opaque. The only setting here that does not work by colour. Held per image. See below. |
-| Refine Edges | off | Runs the alpha through a guided filter, snapping it to the edges the image itself has. See below. |
-| Refine Radius | 2 | Window radius for that filter: roughly how far a ragged patch of alpha may sit from a real edge and still be pulled onto it. |
-| Alpha Floor | 0.0 | Alpha at or below this is forced fully clear. Applied last, so it also clears what **Refine Edges** leaves behind. See below. |
-| Alpha Ceiling | 1.0 | Alpha at or above this is forced fully solid, with the range between stretched across the two. |
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
-| Edge Cleanup → Enabled | on | Restores the antialiasing on edges that ended up hard, and switches the stroke on. See below. |
-| Edge Cleanup → Inner Stroke Width | 0.5 | Width of the stroke drawn inside the silhouette, in pixels. Colour only. See below. |
-| Edge Cleanup → Outer Stroke Width | 0.5 | Width of the stroke drawn outside it. Adds alpha, so the subject grows. See below. |
-| Edge Cleanup → Stroke Softness | 0.75 | How soft the stroke's inner edge is. 0 is a hard step, 0.5 a one-pixel falloff, 1 the softest. |
-| Edge Cleanup → Auto Stroke Color | off | Takes the stroke colour from the image instead of picking one. Hides the picker. See below. |
-| Edge Cleanup → Stroke Color | opaque black | Colour of the inside stroke. Its alpha is blend strength, not result transparency. |
+
+**Remove Crevice**
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Crevice Reach | 2 | How many near-background pixels may be crossed in a row before solid background is needed again. 0 does nothing at all. See below. |
+| Crevice Tolerance | 0.5 | How far from the background colour those squeezed-through pixels may be. |
+
+**Refine Edges**
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Refine Radius | 2 | Window radius for the guided filter: roughly how far a ragged patch of alpha may sit from a real edge and still be pulled onto it. **0 switches the filter off and leaves the two clips below**, which is worth having on its own. |
+| Alpha Floor | 0.0 | Alpha at or below this is forced fully clear. Applied after the filter, so it also clears what the filter leaves behind. See below. |
+| Alpha Ceiling | 1.0 | Alpha at or above this is forced fully solid, with the range between stretched across the two. |
+
+**Island Picker** and **Polygon Edit** hold one list each and nothing else — regions
+picked off the preview, and shapes drawn over it. Both are coordinates, so both are
+held per image. See below.
+
+**Edge Cleanup**
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Inner Stroke Width | 0.5 | Width of the stroke drawn inside the silhouette, in pixels. Colour only. See below. |
+| Outer Stroke Width | 0.5 | Width of the stroke drawn outside it. Adds alpha, so the subject grows. See below. |
+| Stroke Softness | 0.75 | How soft the stroke's inner edge is. 0 is a hard step, 0.5 a one-pixel falloff, 1 the softest. |
+| Auto Stroke Color | off | Takes the stroke colour from the image instead of picking one. Hides the picker. See below. |
+| Stroke Color | opaque black | Colour of the stroke. Its alpha is blend strength, not result transparency. |
+
+The antialiasing restoration has no settings and never will: it only touches a solid
+pixel sitting straight against a clear one, so a properly matted edge is invisible to
+it. Having the operation in the stack at all is what switches it on — which is what
+the old **Edge Cleanup → Enabled** tick did.
 
 ### Remove Colors
 
@@ -542,25 +603,36 @@ every case; the error above is entirely in the soft edge.
 
 ## Per-image settings
 
-Every setting belongs to the image on screen, not to the operation. Selecting an
-image loads its settings; changing one saves them again a moment later.
+The whole stack belongs to the image on screen — which operations it holds, in what
+order, switched on or off, and every value in them. Selecting an image loads its
+stack; changing anything saves it again a moment later.
 
-They live in a **JSON file beside the image**, named by replacing the extension:
+It lives in a **JSON file beside the image**, named by replacing the extension:
 `flower_0002.png` → `flower_0002.json`. It is plain text and safe to hand-edit or
 commit alongside the art.
 
 ```json
 {
 	"format": "image_wrangler",
-	"version": 1,
-	"operations": {
-		"remove_background": {
-			"tolerance": 0.02,
-			"islands": { "points": [[128, 64]] }
-		}
-	}
+	"version": 2,
+	"stack": [
+		{ "id": "remove_background", "enabled": true, "settings": { "edge_width": 2 } },
+		{ "id": "polygon_edit", "enabled": true, "settings": { "polygons": { "regions": [] } } },
+		{ "id": "polygon_edit", "enabled": false, "settings": { "polygons": { "regions": [] } } }
+	]
 }
 ```
+
+An ordered list rather than a block per operation, because the order is part of the
+answer and the same operation may appear more than once — neither of which a
+dictionary keyed by name can say.
+
+**Version 1 files still open.** One of those held a single fused operation with
+thirteen tunables; it is translated into the equivalent stack on the way in, and an
+operation whose settings say it was doing nothing is left out rather than added
+switched off. Nothing is written back until you edit something, so opening an old
+file and closing it again leaves it exactly as it was. The first edit writes version
+2 and drops the old block.
 
 **An image with no file gets the defaults.** Nothing is inherited from the image
 you were looking at before it — select one with no `.json` and every control
@@ -717,72 +789,36 @@ reopening the dock later finds them still there.
 
 ## Adding an operation
 
-Write two classes in `core/`: a `Resource` holding the tunables as `@export`
-properties, and an `IWOperation` subclass pointing at one. Override
-`get_operation_name()`, `get_operation_id()`, `get_settings()`, `set_settings()`,
-`make_settings()`, `get_settings_schema()` and `process_image()`, then add the
-operation's script path to `OPERATION_SCRIPTS` in `ui/iw_panel.gd`.
+There are two kinds, and which one you are writing decides what you subclass.
 
-An operation that does not transform pixels overrides three more:
-`transforms_pixels()` to return `false` (the source is then copied rather than
-re-encoded), `get_output_name()` to name its own output, and `describe_output()`
-to say in the status bar what the preview cannot show. `Rename` is the worked
-example.
+**A stack operation** — something that changes the pixels. Subclass
+`IWStackOperation`, implement `process_context(ctx)`, and add the script's path to
+`OPERATION_SCRIPTS` in `ui/iw_panel.gd`. That is the whole of the plumbing: the
+dock builds its form from `get_settings_schema()`, the sidecar codec saves its
+settings by reflection, and the stack view offers it in the Create dropdown.
 
-`process_image()` may be called on a worker thread, and for anything but a tiny
-image it will be. It must touch nothing but its own settings and the image it was
-handed — no dock state, no shared resources, nothing the editor might be reading
-at the same moment. Call `report_progress()` with a fraction as it goes and the
-preview's bar follows; an operation that reports nothing simply finishes without
-the bar having moved, which is the right answer for one that is instant.
+It is handed an `IWPipelineContext` rather than an `Image`. That holds the source
+pixels, the classification, the keys and the alpha the operations above it produced,
+and the pixels are written out once at the end by `IWCompose` — so an operation
+never sees a half-finished image, only the original colours plus what has been
+decided about them. Anything measuring against a background should return `true`
+from `needs_keying()` and a line from `prerequisite_note()`, so an entry with
+nothing above it says so instead of failing.
 
-That is the whole job. The dock builds the settings form from the schema and the
-sidecar codec reflects over the settings Resource, so neither the UI nor the
-persistence needs touching — including for a value no schema entry ever names,
-such as the tolerance on a `RemoveColorEntry`, which sits a level below the
-property the schema declares.
+Three things worth knowing about the context:
 
-Ranges belong in the schema, not in `@export_range`, so there is one source of
-truth for them. A range on something the schema cannot name is the one case
-needing work: override `clamp_settings_to_schema()`, call `super()`, and clamp
-the rest yourself, or a hand-edited file will disagree with its own slider.
+- **`ctx.data` is immutable.** Everything an operation decides goes into
+  `ctx.coverage`, `ctx.mask` or `ctx.key_of`.
+- **Invalidate what you disturb.** Moving a pixel out of subject makes
+  `ctx.nearest` stale; call `ctx.rebuild_nearest()` and then
+  `ctx.compute_coverage(...)` over what could have changed.
+- **Bind before you loop.** Reaching through `ctx.` inside a per-pixel loop is an
+  object property lookup a few million times over. Copy what you need into locals
+  at the top, the way the existing operations do.
 
-Setting types are `BOOL`, `INT`, `FLOAT`, `STRING`, `ENUM` (which needs an
-`options` list), `COLOR`, `ISLAND_PICKER`, `COLOR_LIST` and `POLYGON_LIST`.
-`COLOR` gives a swatch with alpha for a single `Color` property; the last three
-give the preview-driven lists described above, for an `IslandList`, a
-`RemoveColorList` and a `PolygonRegionList` property respectively. Give
-consecutive entries a matching `"group"` and they are boxed under a heading of
-that name; every named group folds, and `"collapsed": true` on the entry that
-opens one starts it folded away.
+**A file operation** — something that changes where the pixels go, not what they
+are. Subclass `IWOperation` directly, return `false` from `transforms_pixels()`,
+and expect to be wired into the dock by hand: `Rename` is the only one, and it sits
+behind the **Image** / **Rename** switch rather than in the stack, because its
+settings describe the batch rather than any one image.
 
-`"hidden_when": &"some_bool_property"` takes an entry out of the form while that
-property is true — for a setting another one replaces outright, where showing
-both would mean showing one that does nothing.
-
-Override `get_key_color_property()` to return the name of a `Color` property and
-the dock gives it a swatch under the operation dropdown instead of a row in the
-settings form. No operation currently does — `RemoveBackground` used to, before
-its single colour became a list.
-
-```gdscript
-@tool
-class_name IWMyOperation
-extends IWOperation
-
-var amount: float = 0.5
-
-func get_operation_name() -> String:
-	return "My Operation"
-
-func get_settings_schema() -> Array[Dictionary]:
-	return [{
-		"property": &"amount",
-		"label": "Amount",
-		"type": SettingType.FLOAT,
-		"min": 0.0, "max": 1.0, "step": 0.01,
-	}]
-
-func process_image(source: Image) -> Image:
-	...
-```
