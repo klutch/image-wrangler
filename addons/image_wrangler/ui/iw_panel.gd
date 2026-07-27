@@ -7,6 +7,7 @@ const SettingsBuilder := preload("res://addons/image_wrangler/ui/iw_settings_bui
 const PreviewView := preload("res://addons/image_wrangler/ui/iw_preview_view.gd")
 const IslandPicker := preload("res://addons/image_wrangler/ui/iw_island_picker.gd")
 const ColorList := preload("res://addons/image_wrangler/ui/iw_color_list.gd")
+const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd")
 const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
 
 ## Every operation the dock offers. Add new [IWOperation] subclasses here.
@@ -78,6 +79,9 @@ var _island_picker: IslandPicker
 ## The current operation's Remove Colors list, when it has one.
 var _color_list: ColorList
 
+## The current operation's Blackout list, when it has one.
+var _polygon_list: PolygonList
+
 ## Whichever list control currently owns the preview crosshair, or null.
 ##
 ## Both list controls have a Pick button and there is only one preview, so a click
@@ -131,26 +135,44 @@ func _ready() -> void:
 	_update_controls()
 
 
-## H toggles the island markers, which otherwise sit right on top of the edges
-## you are trying to judge.
+## The dock's keyboard shortcuts: H toggles the overlays, which otherwise sit
+## right on top of the edges you are trying to judge, and Escape and Backspace
+## close and unwind a blackout region being drawn.
 ##
-## Scoped to the dock rather than bound globally: it only fires while the panel
-## is on screen and the pointer is inside it, so H stays free everywhere else in
-## the editor. Being unhandled input, it also never steals a keystroke from a
-## focused text field.
+## Scoped to the dock rather than bound globally: they only fire while the panel
+## is on screen and the pointer is inside it, so these keys stay free everywhere
+## else in the editor. Being unhandled input, they also never steal a keystroke
+## from a focused text field.
+##
+## Escape and Backspace are further gated on a region actually being drawn, so
+## they do nothing at all the rest of the time — Backspace especially, which has
+## an obvious meaning elsewhere and must not be swallowed here.
 func _unhandled_key_input(event: InputEvent) -> void:
 	if _preview == null or not is_visible_in_tree():
 		return
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
-	if key.keycode != KEY_H or key.ctrl_pressed or key.alt_pressed or key.shift_pressed or key.meta_pressed:
+	if key.ctrl_pressed or key.alt_pressed or key.shift_pressed or key.meta_pressed:
 		return
 	if not get_global_rect().has_point(get_global_mouse_position()):
 		return
-	var shown := _preview.toggle_markers()
-	_set_status("Island markers %s." % ("shown" if shown else "hidden"))
-	accept_event()
+
+	if key.keycode == KEY_H:
+		var shown := _preview.toggle_markers()
+		_set_status("Overlays %s." % ("shown" if shown else "hidden"))
+		accept_event()
+		return
+
+	if _polygon_list == null or _polygon_list.draft_index() < 0:
+		return
+	if key.keycode == KEY_ESCAPE:
+		_finish_polygon()
+		accept_event()
+	elif key.keycode == KEY_BACKSPACE:
+		_polygon_list.undo_vertex()
+		_update_overlays()
+		accept_event()
 
 
 ## A pending write must not die with the dock: this runs on plugin disable and on
@@ -284,6 +306,9 @@ func _build_preview_column() -> Control:
 	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_preview.pixel_picked.connect(_on_pixel_picked)
+	_preview.pick_cancelled.connect(_on_pick_cancelled)
+	_preview.vertex_dragged.connect(_on_vertex_dragged)
+	_preview.vertex_drag_ended.connect(_on_vertex_drag_ended)
 	_preview.zoom_changed.connect(_on_zoom_changed)
 	column.add_child(_preview)
 
@@ -689,30 +714,39 @@ func _scan_settings_controls(node: Node) -> void:
 			_island_picker = child
 		elif child is ColorList and _color_list == null:
 			_color_list = child
+		elif child is PolygonList and _polygon_list == null:
+			_polygon_list = child
 		_scan_settings_controls(child)
 
 
 ## Hooks up the list controls the settings builder just created, for whichever of
-## them the operation declared. An operation with neither leaves picking off.
+## them the operation declared. An operation with none leaves picking off.
 func _bind_settings_controls() -> void:
 	_island_picker = null
 	_color_list = null
+	_polygon_list = null
 	_scan_settings_controls(_settings_box)
 
 	if _island_picker != null:
 		_island_picker.pick_toggled.connect(_on_pick_toggled.bind(_island_picker))
 		_island_picker.islands_changed.connect(_on_islands_changed)
-		_island_picker.selection_changed.connect(_update_markers)
+		_island_picker.selection_changed.connect(_update_overlays)
 		_island_picker.set_color_provider(_sample_source_color)
 	if _color_list != null:
 		_color_list.pick_toggled.connect(_on_pick_toggled.bind(_color_list))
 		_color_list.colors_changed.connect(_on_setting_changed)
+	if _polygon_list != null:
+		# Drawing is a pick mode like any other, so it joins the same arbitration:
+		# arming it disarms whichever picker held the crosshair.
+		_polygon_list.draw_toggled.connect(_on_pick_toggled.bind(_polygon_list))
+		_polygon_list.polygons_changed.connect(_on_setting_changed)
+		_polygon_list.selection_changed.connect(_update_overlays)
 
 	# Switching operations always drops out of pick mode, so a fresh settings
 	# form never inherits a crosshair from the one before it.
 	_release_pick()
 	_apply_settings_for(_current_path())
-	_update_markers()
+	_update_overlays()
 
 
 ## Drops out of pick mode, leaving every picker's button unpressed.
@@ -723,6 +757,11 @@ func _release_pick() -> void:
 		_island_picker.set_pick_active(false)
 	if _color_list != null:
 		_color_list.set_pick_active(false)
+	if _polygon_list != null:
+		# Committed rather than abandoned: leaving a half-drawn shape open would
+		# strand it on the list with no way back into the session that owns it.
+		_polygon_list.finish_polygon()
+		_polygon_list.set_pick_active(false)
 
 
 ## Path of the highlighted source, or an empty string when nothing is selected.
@@ -785,7 +824,7 @@ func _apply_settings_for(path: String) -> void:
 	_refresh_key_color()
 	if _island_picker != null:
 		_island_picker.refresh()
-	_update_markers()
+	_update_overlays()
 	_refreshing = false
 
 
@@ -844,8 +883,9 @@ func _clear_settings_context() -> void:
 	_refreshing = true
 	var current := _operation.get_settings()
 	if current != null and current.has_method("duplicate_for_new_image"):
-		# Islands are the exception: they are coordinates in the image that just
-		# left, so leaving them in the picker would draw markers over nothing.
+		# Islands and blackout regions are the exception: they are coordinates in
+		# the image that just left, so leaving them on screen would draw markers
+		# and outlines over nothing.
 		_operation.set_settings(current.duplicate_for_new_image())
 	if _island_picker != null:
 		_island_picker.refresh()
@@ -853,7 +893,9 @@ func _clear_settings_context() -> void:
 	# control is still holding rows from the one that was swapped out.
 	if _color_list != null:
 		_color_list.refresh()
-	_update_markers()
+	if _polygon_list != null:
+		_polygon_list.refresh()
+	_update_overlays()
 	_refreshing = false
 
 
@@ -886,20 +928,28 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
 		if _pick_target == source:
 			_pick_target = null
 			_preview.pick_mode = false
+			if source == _polygon_list:
+				_polygon_list.finish_polygon()
+				_update_overlays()
 		return
 
-	# The one that did not just get pressed is released, rather than left looking
-	# pressed over a picker no click will reach. Its own button is already down,
-	# which is what raised this signal.
+	# The ones that did not just get pressed are released, rather than left
+	# looking pressed over a picker no click will reach. The source's own button
+	# is already down, which is what raised this signal.
 	if _island_picker != null and source != _island_picker:
 		_island_picker.set_pick_active(false)
 	if _color_list != null and source != _color_list:
 		_color_list.set_pick_active(false)
+	if _polygon_list != null and source != _polygon_list:
+		_polygon_list.finish_polygon()
+		_polygon_list.set_pick_active(false)
 
 	_pick_target = source
 	_preview.pick_mode = true
 	if source == _color_list:
 		_set_status("Click the preview to add that color to the list.")
+	elif source == _polygon_list:
+		_set_status("Click to place corners. Right-click or Escape closes the region.")
 	else:
 		_set_status("Click a spot in the preview to add it to the list.")
 
@@ -911,24 +961,78 @@ func _on_pixel_picked(pixel: Vector2i) -> void:
 		var color := _sample_source_color(pixel)
 		_color_list.add_color(color)
 		_set_status("Picked #%s." % color.to_html(false))
+	elif _pick_target == _polygon_list:
+		# add_vertex reports a click on the first corner, which is a request to
+		# close rather than a corner of its own.
+		if _polygon_list.add_vertex(pixel):
+			_finish_polygon()
+		else:
+			_update_overlays()
 	elif _pick_target == _island_picker:
 		_island_picker.add_island(pixel)
 		_set_status("Picked (%d, %d)." % [pixel.x, pixel.y])
 
 
+## Closes the region being drawn and drops out of drawing, so the Draw button
+## does not sit armed over a session that has ended.
+func _finish_polygon() -> void:
+	if _polygon_list == null:
+		return
+	_polygon_list.finish_polygon()
+	_polygon_list.set_pick_active(false)
+	if _pick_target == _polygon_list:
+		_pick_target = null
+		_preview.pick_mode = false
+	_update_overlays()
+
+
+## Right-click on the preview. Only the polygon tool makes anything of it.
+func _on_pick_cancelled() -> void:
+	if _pick_target == _polygon_list and _polygon_list != null:
+		_finish_polygon()
+
+
+func _on_vertex_dragged(polygon: int, vertex: int, to: Vector2i) -> void:
+	if _polygon_list == null:
+		return
+	# Overlay only. Re-running the operation on every motion event would be
+	# unusable on any real image, so the result waits for the drag to end.
+	_polygon_list.move_vertex(polygon, vertex, to)
+	_update_overlays()
+
+
+func _on_vertex_drag_ended() -> void:
+	if _polygon_list != null:
+		_on_setting_changed()
+
+
 func _on_islands_changed() -> void:
 	# Nothing to store: the picker edited the IslandList inside this image's
 	# settings directly, so it is already where it belongs.
-	_update_markers()
+	_update_overlays()
 	_on_setting_changed()
 
 
-func _update_markers() -> void:
+## Pushes both overlays — island markers and blackout regions — at the preview.
+##
+## One function rather than two because they are drawn together, hidden together
+## by H, and every change to either has to leave both correct on screen.
+func _update_overlays() -> void:
 	if _island_picker == null:
 		var empty: Array[Vector2i] = []
 		_preview.set_markers(empty, -1)
-		return
-	_preview.set_markers(_island_picker.get_islands(), _island_picker.selected_index())
+	else:
+		_preview.set_markers(_island_picker.get_islands(), _island_picker.selected_index())
+
+	if _polygon_list == null:
+		_preview.set_polygons([], PackedColorArray(), -1, -1)
+	else:
+		_preview.set_polygons(
+			_polygon_list.get_polygons(),
+			_polygon_list.get_colors(),
+			_polygon_list.selected_index(),
+			_polygon_list.draft_index(),
+		)
 
 
 func _on_setting_changed() -> void:

@@ -28,6 +28,9 @@ enum SettingType {
 	## A list of colours, each with a tolerance of its own, sampled off the
 	## preview or set by hand. The property must hold a [RemoveColorList].
 	COLOR_LIST,
+	## A list of polygons the user draws over the preview, each standing for a
+	## region to act on. The property must hold a [BlackoutList].
+	POLYGON_LIST,
 }
 
 

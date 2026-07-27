@@ -12,6 +12,20 @@ extends Control
 ## Emitted when the user clicks the image while [member pick_mode] is on.
 signal pixel_picked(pixel: Vector2i)
 
+## Emitted when the user right-clicks while [member pick_mode] is on.
+##
+## What that means is the dock's business — for the polygon tool it closes the
+## shape being drawn. Right-click is free here: panning takes the middle button
+## and the left one.
+signal pick_cancelled
+
+## Emitted while a polygon vertex is being dragged, once per motion.
+signal vertex_dragged(polygon: int, vertex: int, to: Vector2i)
+
+## Emitted when the drag ends, so the dock can re-run the operation once rather
+## than on every motion event above.
+signal vertex_drag_ended
+
 ## Emitted whenever the zoom level changes, from any source.
 signal zoom_changed(percent: float)
 
@@ -21,6 +35,18 @@ const CHECKER_LIGHT := Color(0.24, 0.24, 0.27)
 const MARKER_RADIUS := 5.0
 const MARKER_COLOR := Color(1, 1, 1)
 const MARKER_SELECTED_COLOR := Color(1.0, 0.85, 0.2)
+
+## Half-width of a polygon's draggable corner handle, in screen pixels, and how
+## near the pointer has to be to grab one. Generous on purpose: at low zoom a
+## whole image pixel is a fraction of a screen pixel and an exact hit would be
+## impossible.
+const HANDLE_SIZE := 3.5
+const HANDLE_GRAB := 7.0
+
+## Opacity of the shading inside a finished polygon. Enough to read as filled,
+## little enough to judge the art underneath.
+const POLYGON_FILL_ALPHA := 0.22
+const POLYGON_WIDTH := 1.5
 
 const MIN_ZOOM := 1.0
 const MAX_ZOOM := 1000.0
@@ -58,8 +84,9 @@ var pick_mode := false:
 		pick_mode = value
 		_update_cursor()
 
-## Whether the island markers are drawn. They sit right on top of the edges
-## being judged, so being able to blink them away matters.
+## Whether the overlays — island markers and blackout polygons — are drawn. They
+## sit right on top of the edges being judged, so being able to blink them away
+## matters.
 var markers_visible := true:
 	set(value):
 		if markers_visible == value:
@@ -73,6 +100,22 @@ var _checker: Texture2D
 var _image_size := Vector2i.ZERO
 var _markers: Array[Vector2i] = []
 var _selected_marker := -1
+
+## Blackout regions, as an Array of PackedVector2Array in image coordinates.
+var _polygons: Array = []
+var _polygon_colors := PackedColorArray()
+## Row highlighted in the list. Its corners get grab handles.
+var _selected_polygon := -1
+## Row being drawn, or -1. Drawn as an open path with a rubber band rather than
+## as a closed shape, since it is not one yet.
+var _draft_polygon := -1
+
+## Image pixel under the pointer, for the rubber band. Only tracked while a draft
+## is open, so ordinary hovering does not queue a redraw per motion event.
+var _hover_pixel := Vector2i(-1, -1)
+
+## Corner being dragged, as (polygon, vertex), or (-1, -1).
+var _drag_handle := Vector2i(-1, -1)
 
 var _zoom_percent := 100.0
 ## True between grabbing the image and letting go of it.
@@ -155,7 +198,29 @@ func set_markers(markers: Array[Vector2i], selected: int) -> void:
 	_canvas.queue_redraw()
 
 
-## Flips marker visibility and reports the new state.
+## Shows [param polygons] over the image, in image coordinates.
+##
+## [param selected] gets grab handles on its corners, [param draft] is drawn as an
+## open path still being placed. Pass -1 for either when there is none.
+func set_polygons(polygons: Array, colors: PackedColorArray, selected: int, draft: int) -> void:
+	# Converted to float points once here rather than per redraw, and copied for
+	# the same reason the markers are: the caller's arrays belong to the operation
+	# and can change underneath us without a redraw being asked for.
+	_polygons = []
+	for points in polygons:
+		var converted := PackedVector2Array()
+		for point: Vector2i in points:
+			converted.append(Vector2(point))
+		_polygons.append(converted)
+	_polygon_colors = colors.duplicate()
+	_selected_polygon = selected
+	_draft_polygon = draft
+	if draft < 0:
+		_hover_pixel = Vector2i(-1, -1)
+	_canvas.queue_redraw()
+
+
+## Flips overlay visibility and reports the new state.
 func toggle_markers() -> bool:
 	markers_visible = not markers_visible
 	return markers_visible
@@ -361,8 +426,21 @@ func _on_v_scroll_changed(value: float) -> void:
 # --- Input --------------------------------------------------------------
 
 func _on_canvas_gui_input(event: InputEvent) -> void:
+	# Before panning, so grabbing a corner beats starting a drag of the view. Ctrl
+	# still reaches the pan below, since a modified click never grabs a handle.
+	if _handle_vertex_drag(event):
+		return
 	# Panning claims Ctrl+left before picking can see it, so the two never fight.
 	if _handle_pan(event):
+		return
+
+	# Tracked only while a shape is open, so ordinary hovering over the image does
+	# not queue a redraw for every motion event.
+	if _draft_polygon >= 0 and event is InputEventMouseMotion:
+		var hovered := _pixel_at_clamped(event.position)
+		if hovered != _hover_pixel:
+			_hover_pixel = hovered
+			_canvas.queue_redraw()
 		return
 
 	if not (event is InputEventMouseButton) or not event.pressed:
@@ -379,6 +457,66 @@ func _on_canvas_gui_input(event: InputEvent) -> void:
 		if pixel.x >= 0:
 			pixel_picked.emit(pixel)
 		_canvas.accept_event()
+	elif pick_mode and event.button_index == MOUSE_BUTTON_RIGHT:
+		pick_cancelled.emit()
+		_canvas.accept_event()
+
+
+## Grab-and-drag of a polygon corner. Returns whether the event was consumed.
+##
+## Live only for the highlighted polygon, and never for the one being drawn — its
+## corners are still being placed, and a click there means "another corner", not
+## "move that one".
+func _handle_vertex_drag(event: InputEvent) -> bool:
+	var button := event as InputEventMouseButton
+	if button != null and button.button_index == MOUSE_BUTTON_LEFT:
+		if button.pressed:
+			if button.ctrl_pressed or _selected_polygon < 0 or _selected_polygon == _draft_polygon:
+				return false
+			var vertex := _vertex_at(button.position, _selected_polygon)
+			if vertex < 0:
+				return false
+			_drag_handle = Vector2i(_selected_polygon, vertex)
+			_canvas.accept_event()
+			return true
+		if _drag_handle.x >= 0:
+			_drag_handle = Vector2i(-1, -1)
+			vertex_drag_ended.emit()
+			_canvas.accept_event()
+			return true
+		return false
+
+	if _drag_handle.x < 0 or not (event is InputEventMouseMotion):
+		return false
+
+	# A release swallowed elsewhere — an alt-tab mid-drag — would otherwise leave
+	# the corner stuck to the cursor.
+	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		_drag_handle = Vector2i(-1, -1)
+		vertex_drag_ended.emit()
+		return false
+
+	# Clamped rather than dropped: a corner dragged past the edge should stop at
+	# it, not vanish because the pointer left the image.
+	vertex_dragged.emit(_drag_handle.x, _drag_handle.y, _pixel_at_clamped(event.position))
+	_canvas.accept_event()
+	return true
+
+
+## Index of the corner of [param polygon] under [param local_position], or -1.
+##
+## Searched back to front so that the corner drawn on top is the one grabbed
+## where two overlap.
+func _vertex_at(local_position: Vector2, polygon: int) -> int:
+	if not markers_visible or polygon < 0 or polygon >= _polygons.size():
+		return -1
+	var points: PackedVector2Array = _polygons[polygon]
+	var scale := _scale()
+	for i in range(points.size() - 1, -1, -1):
+		var center := _content_origin + (points[i] + Vector2(0.5, 0.5)) * scale
+		if center.distance_to(local_position) <= HANDLE_GRAB:
+			return i
+	return -1
 
 
 ## Grab-and-drag panning. The middle button always pans; the left button pans
@@ -471,6 +609,25 @@ func _pixel_at(local_position: Vector2) -> Vector2i:
 	return pixel
 
 
+## Image pixel under a position, pulled to the nearest edge pixel when the
+## position is outside the image.
+##
+## The clamping counterpart to [method _pixel_at], for the cases where leaving the
+## image has to mean "stop at the edge" rather than "nothing here": dragging a
+## corner past the frame, and the rubber band while drawing.
+func _pixel_at_clamped(local_position: Vector2) -> Vector2i:
+	if _image_size.x <= 0 or _image_size.y <= 0:
+		return Vector2i(-1, -1)
+	var scale := _scale()
+	if scale <= 0.0:
+		return Vector2i(-1, -1)
+	var image_position := (local_position - _content_origin) / scale
+	return Vector2i(
+		clampi(floori(image_position.x), 0, _image_size.x - 1),
+		clampi(floori(image_position.y), 0, _image_size.y - 1),
+	)
+
+
 # --- Drawing ------------------------------------------------------------
 
 func _draw_canvas() -> void:
@@ -479,6 +636,7 @@ func _draw_canvas() -> void:
 		return
 	_canvas.draw_texture_rect(_texture, Rect2(_content_origin, _content_size), false)
 	_draw_markers()
+	_draw_polygons()
 
 
 func _draw_markers() -> void:
@@ -498,6 +656,92 @@ func _draw_markers() -> void:
 		_canvas.draw_arc(center, radius + 1.0, 0.0, TAU, 24, Color(0, 0, 0, 0.75), 3.0)
 		_canvas.draw_arc(center, radius, 0.0, TAU, 24, color, 1.5)
 		_canvas.draw_circle(center, 1.5, color)
+
+
+## Draws every blackout region: finished ones closed and shaded, the one being
+## drawn as an open path trailing a rubber band to the pointer.
+func _draw_polygons() -> void:
+	if not markers_visible:
+		return
+	for i in _polygons.size():
+		var points: PackedVector2Array = _polygons[i]
+		if points.is_empty():
+			continue
+		var color := _polygon_colors[i] if i < _polygon_colors.size() else Color.MAGENTA
+		var screen := _to_screen(points)
+		if i == _draft_polygon:
+			_draw_draft(screen, color)
+		else:
+			_draw_finished(screen, color, i == _selected_polygon)
+
+
+## Image-space points as canvas positions, taken from pixel centres so a corner
+## sits in the middle of the pixel it names rather than on its top-left edge.
+func _to_screen(points: PackedVector2Array) -> PackedVector2Array:
+	var scale := _scale()
+	var out := PackedVector2Array()
+	for point in points:
+		out.append(_content_origin + (point + Vector2(0.5, 0.5)) * scale)
+	return out
+
+
+func _draw_finished(screen: PackedVector2Array, color: Color, selected: bool) -> void:
+	# Triangulated rather than handed straight to draw_colored_polygon, which
+	# fans from the first vertex and so fills the wrong area for a concave shape —
+	# and concave is the whole point of this tool.
+	if screen.size() >= 3:
+		var indices := Geometry2D.triangulate_polygon(screen)
+		var fill := Color(color, POLYGON_FILL_ALPHA)
+		var triangle := 0
+		while triangle + 2 < indices.size():
+			_canvas.draw_colored_polygon(PackedVector2Array([
+				screen[indices[triangle]],
+				screen[indices[triangle + 1]],
+				screen[indices[triangle + 2]],
+			]), fill)
+			triangle += 3
+
+	var closed := screen.duplicate()
+	closed.append(screen[0])
+	# Dark backing line first, so the outline reads against light and dark art
+	# alike — the same trick the island markers use.
+	_canvas.draw_polyline(closed, Color(0, 0, 0, 0.75), POLYGON_WIDTH + 2.0)
+	_canvas.draw_polyline(closed, color, POLYGON_WIDTH + (1.0 if selected else 0.0))
+	if selected:
+		# Handles only on the highlighted region, since that is the only one whose
+		# corners can be grabbed.
+		for point in screen:
+			_draw_handle(point, color)
+
+
+func _draw_draft(screen: PackedVector2Array, color: Color) -> void:
+	if screen.size() > 1:
+		_canvas.draw_polyline(screen, Color(0, 0, 0, 0.75), POLYGON_WIDTH + 2.0)
+		_canvas.draw_polyline(screen, color, POLYGON_WIDTH)
+
+	# The edge that would be added by clicking where the pointer is, so the shape
+	# can be judged before committing to the corner.
+	if _hover_pixel.x >= 0 and not screen.is_empty():
+		var scale := _scale()
+		var cursor := _content_origin + (Vector2(_hover_pixel) + Vector2(0.5, 0.5)) * scale
+		_canvas.draw_line(screen[screen.size() - 1], cursor, Color(0, 0, 0, 0.6), POLYGON_WIDTH + 2.0)
+		_canvas.draw_line(screen[screen.size() - 1], cursor, Color(color, 0.7), POLYGON_WIDTH)
+		# The closing edge too, dashed-thin, so an open path still reads as the
+		# region it is about to become.
+		if screen.size() >= 2:
+			_canvas.draw_line(cursor, screen[0], Color(color, 0.35), POLYGON_WIDTH)
+
+	for i in screen.size():
+		# The first corner is the close target, so it is drawn larger than the
+		# rest — clicking it again ends the shape.
+		_draw_handle(screen[i], color, i == 0)
+
+
+func _draw_handle(center: Vector2, color: Color, emphasised := false) -> void:
+	var half := HANDLE_SIZE + (1.5 if emphasised else 0.0)
+	var box := Rect2(center - Vector2(half, half), Vector2(half, half) * 2.0)
+	_canvas.draw_rect(box.grow(1.0), Color(0, 0, 0, 0.75), true)
+	_canvas.draw_rect(box, color, true)
 
 
 static func _build_checker() -> Texture2D:

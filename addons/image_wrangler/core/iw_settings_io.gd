@@ -304,6 +304,20 @@ static func self_test(operation: IWOperation) -> bool:
 					colors.clear()
 					colors.add(Color(0.25, 0.5, 0.75), 0.011)
 					colors.add(Color(0.9, 0.1, 0.2), 0.333)
+				elif nested is BlackoutList:
+					# The deepest nesting this codec has to survive: a typed array
+					# of Vector2i inside a Resource inside a typed array of
+					# Resources. Two polygons of different lengths, so a decoder
+					# that reused one instance or one point array shows up as a
+					# length mismatch rather than needing the values compared.
+					var regions := nested as BlackoutList
+					regions.clear()
+					var triangle := regions.add()
+					triangle.points = [Vector2i(3, 4), Vector2i(90, 12), Vector2i(40, 77)]
+					triangle.color = Color(0.1, 0.9, 0.4, 1.0)
+					var quad := regions.add()
+					quad.points = [Vector2i(0, 0), Vector2i(8, 0), Vector2i(8, 8), Vector2i(0, 8)]
+					quad.color = Color(0.8, 0.2, 0.6, 1.0)
 
 	var round_tripped: Variant = JSON.parse_string(JSON.stringify(to_dict(original)))
 	if not (round_tripped is Dictionary):

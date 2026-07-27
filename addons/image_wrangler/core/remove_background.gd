@@ -60,6 +60,15 @@ extends IWOperation
 ## RGB, which is how the background creeps back into an edge that looked clean in
 ## the file.
 ##
+## [b]What colour cannot describe.[/b] Everything above removes background by
+## colour, which leaves no way to say "this region goes, whatever is in it" — a
+## watermark, a scan edge, a stray element in a corner. [member
+## RemoveBackgroundSettings.blackout] is the geometric escape hatch: polygons
+## drawn over the preview whose interiors are forced transparent. They are folded
+## into the classification as background before any alpha is computed, so the rest
+## of the pipeline needs no knowledge of them, and they grow no edge band, since a
+## polygon edge never blended with anything.
+##
 ## [b]Running it twice.[/b] A source pixel that arrives fully transparent is
 ## treated as open ground: it is already removed, so every flood crosses it, it
 ## grows no edge band, and it stays transparent whether or not the flood reached
@@ -322,6 +331,12 @@ func get_settings_schema() -> Array[Dictionary]:
 			"type": SettingType.ISLAND_PICKER,
 			"tooltip": "Enclosed regions to remove anyway, picked off the preview.\nEach one keys out the color of the pixel you clicked at the default\ntolerance, so an island need not match anything in Remove Colors.\nOnly applies while \"Only Outer Background\" is on.",
 		},
+		{
+			"property": &"blackout",
+			"group": "Blackout",
+			"type": SettingType.POLYGON_LIST,
+			"tooltip": "Regions to erase outright, drawn over the preview. Everything inside a\npolygon is made fully transparent whatever color it is.\n\nThis is the one thing here that does not work by color, so it is the way\nto remove something that has no color in common with itself — a watermark,\na scan edge, a stray element in a corner. Shapes may be concave.\n\nThe cut is hard: no antialiasing is rebuilt along a polygon edge, since\nthere is no background there to have blended with.",
+		},
 	]
 
 
@@ -375,12 +390,16 @@ func process_image(source: Image) -> Image:
 		return image
 
 	var data := image.get_data()
+	var blacked := _blackout_mask(width, height)
 	var island_seeds := _build_keys(data, width, height)
 	# No colours and no islands is a coherent request for nothing to happen, and
 	# every map below would otherwise have to defend itself against having no key
-	# to measure against.
+	# to measure against. A blackout still has to land, though — it is geometry
+	# and owes nothing to the keying that is being skipped.
 	if _keys.is_empty():
-		return image
+		if blacked.is_empty():
+			return image
+		return _blackout_only(image, data, blacked, pixel_count)
 
 	# Distances against the first key. Every other one is measured on demand, but
 	# this covers the border flood, which is nearly every background pixel in a
@@ -390,6 +409,25 @@ func process_image(source: Image) -> Image:
 	var classified := _classify(data, key_dist, island_seeds, width, height)
 	var mask: PackedByteArray = classified[0]
 	var key_of: PackedInt32Array = classified[1]
+
+	# Folded into the mask here rather than into the alpha at the end, so that
+	# everything downstream treats a blacked-out pixel correctly without being
+	# told about blackouts at all: coverage gives it zero alpha, the nearest-
+	# subject map stops offering it as a bleed source, and compose bleeds
+	# neighbouring colour into it like any other transparent pixel.
+	#
+	# KEY_CLEAR rather than a real key, because the band pass skips a pixel with
+	# no key: a blackout is a hard cut and must not be matted. Applied after
+	# _classify for the same reason — a band already grown into the region is
+	# overwritten rather than left as a soft rim inside a hard edge.
+	#
+	# Inline rather than in a helper: mask and key_of are Packed arrays, so a
+	# function mutating them through a parameter would write to its own copy.
+	if not blacked.is_empty():
+		for i in pixel_count:
+			if blacked[i] != 0:
+				mask[i] = MASK_BACKGROUND
+				key_of[i] = KEY_CLEAR
 
 	var search_radius := maxi(maxi(bleed_radius, edge_width), _MIN_SEARCH_RADIUS)
 	var nearest := _nearest_subject_map(data, mask, key_dist, width, height, search_radius)
@@ -406,6 +444,86 @@ func process_image(source: Image) -> Image:
 		_clip_alpha(coverage)
 
 	return _compose(data, coverage, key_of, nearest, width, height)
+
+
+## One byte per pixel marking the union of every drawn blackout polygon, or an
+## empty array when nothing is drawable.
+##
+## Scanline fill under the even-odd rule, not a point-in-polygon test per pixel.
+## For each row, the x where every edge crosses that row's centre line is
+## collected, sorted, and the spans between alternate pairs are filled. Concave
+## shapes fall out of this for free — they are exactly the case where a row has
+## more than two crossings — and so do self-intersecting ones, where even-odd
+## gives the sensible answer of a hole. A triangle fan, which is what naive
+## polygon drawing does, gets both wrong.
+##
+## Cost is one pass over each polygon's own bounding box rather than the image, so
+## a small cut-out on a large image is cheap.
+func _blackout_mask(width: int, height: int) -> PackedByteArray:
+	var empty := PackedByteArray()
+	if settings.blackout == null or not settings.blackout.has_drawable():
+		return empty
+
+	var marked := PackedByteArray()
+	marked.resize(width * height)
+	var filled_any := false
+
+	for polygon in settings.blackout.polygons:
+		if polygon == null or not polygon.is_drawable():
+			continue
+		var points := polygon.points
+		var count := points.size()
+		var box := polygon.bounds()
+		var first_row := maxi(box.position.y, 0)
+		var last_row := mini(box.position.y + box.size.y - 1, height - 1)
+
+		for y in range(first_row, last_row + 1):
+			# Sampled at the row's centre, so a vertex landing exactly on an
+			# integer row cannot be counted as a crossing twice.
+			var line := y + 0.5
+			var crossings := PackedFloat32Array()
+			for e in count:
+				var a := points[e]
+				var b := points[(e + 1) % count]
+				# Half-open on purpose: a vertex is counted by the edge below it
+				# and not the one above, which is what stops a shared vertex
+				# registering as two crossings and inverting the rest of the row.
+				if (a.y > line) == (b.y > line):
+					continue
+				var t := (line - a.y) / float(b.y - a.y)
+				crossings.append(a.x + t * (b.x - a.x))
+			if crossings.size() < 2:
+				continue
+			crossings.sort()
+
+			var row := y * width
+			var pair := 0
+			while pair + 1 < crossings.size():
+				# Pixel centres, so a span is filled where it actually covers the
+				# middle of a pixel rather than merely touching its edge.
+				var from_x := maxi(ceili(crossings[pair] - 0.5), 0)
+				var to_x := mini(floori(crossings[pair + 1] - 0.5), width - 1)
+				for x in range(from_x, to_x + 1):
+					marked[row + x] = 1
+					filled_any = true
+				pair += 2
+
+	return marked if filled_any else empty
+
+
+## Applies the blackout to [param image] and nothing else.
+##
+## Reached when there is no colour and no island to key from, which leaves the
+## whole classification pipeline with no key to measure against. The polygons are
+## geometry and owe that pipeline nothing, so they are written straight to alpha.
+func _blackout_only(image: Image, data: PackedByteArray, blacked: PackedByteArray, pixel_count: int) -> Image:
+	var out := data.duplicate()
+	for i in pixel_count:
+		if blacked[i] != 0:
+			out[i * 4 + 3] = 0
+	var result := Image.create_from_data(
+			image.get_width(), image.get_height(), false, Image.FORMAT_RGBA8, out)
+	return result
 
 
 ## Stretches alpha so [member alpha_floor] and below lands on clear and

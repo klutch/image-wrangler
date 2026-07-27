@@ -39,7 +39,7 @@ extends Resource
 
 ## How far from the keying colour the flood may stray to squeeze through a gap
 ## too narrow to hold a single clean background pixel. Only has an effect while
-## [member crevice_reach] is above zero. See [method RemoveBackground._flood_step].
+## [member crevice_reach] is above zero. See [method RemoveBackground._flood_take].
 ##
 ## One number for every key, unlike [member RemoveColorEntry.color_tolerance].
 ## This is not a description of a background — it is how far the flood may leave
@@ -73,6 +73,14 @@ extends Resource
 ## different image, where a coordinate simply would not.
 @export var islands: IslandList
 
+## Regions forced fully transparent whatever is in them. See [BlackoutPolygon].
+##
+## The one part of this operation that does not remove background by colour, and
+## so the only way to describe something that has no colour in common with itself
+## — a watermark, a scan edge, a stray element in a corner. Coordinates, like
+## [member islands], and just as meaningless applied to another image.
+@export var blackout: BlackoutList
+
 ## Un-blend the background out of partially transparent pixels.
 @export var decontaminate: bool = true
 
@@ -105,24 +113,27 @@ extends Resource
 
 func _init() -> void:
 	islands = IslandList.new()
+	blackout = BlackoutList.new()
 	# One white entry rather than none, so a fresh image starts where the single
 	# Remove Color swatch used to: keying out white at 0.02.
 	remove_colors = RemoveColorList.new()
 	remove_colors.add(Color.WHITE)
 
 
-## A copy that belongs to no image: every value kept except the islands, which
-## start empty.
+## A copy that belongs to no image: every value kept except the two that are
+## coordinates, which start empty.
 ##
 ## Used when the selection leaves the list and the form is left describing
-## nothing. The numbers can stay on screen; the picked coordinates cannot, since
-## the image they were picked in is gone.
+## nothing. The numbers can stay on screen; the picked points and drawn polygons
+## cannot, since the image they were placed in is gone.
 ##
-## [method Resource.duplicate] copies the *references* held in [member islands]
-## and [member remove_colors], so without the replacements below the copy would
-## share both with the original and editing either would silently edit both.
+## [method Resource.duplicate] copies the *references* held in [member islands],
+## [member blackout] and [member remove_colors], so without the replacements
+## below the copy would share all three with the original and editing either
+## would silently edit both.
 func duplicate_for_new_image() -> RemoveBackgroundSettings:
 	var copy: RemoveBackgroundSettings = duplicate()
 	copy.islands = IslandList.new()
+	copy.blackout = BlackoutList.new()
 	copy.remove_colors = remove_colors.duplicate_colors()
 	return copy

@@ -66,8 +66,8 @@ The full derivation is in the header comment of
 
 ### Settings
 
-The form is split into a **Remove Colors** group, a **Settings** group and an
-**Island Picker** group.
+The form is split into a **Remove Colors** group, a **Settings** group, an
+**Island Picker** group and a **Blackout** group.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
@@ -77,6 +77,7 @@ The form is split into a **Remove Colors** group, a **Settings** group and an
 | Crevice Tolerance | 0.5 | How far from the background colour those squeezed-through pixels may be. |
 | Only Outer Background | on | Flood fills from the image border, so background-coloured regions enclosed by the subject — eyes, highlights, the holes in an "o" — stay opaque. Also what confines **Remove Colors** to the border. |
 | Island Picker | empty | Enclosed regions to remove anyway, picked off the preview. Held per image. See below. |
+| Blackout | empty | Regions erased outright, drawn over the preview. The only setting here that does not work by colour. Held per image. See below. |
 | Refine Edges | off | Runs the alpha through a guided filter, snapping it to the edges the image itself has. See below. |
 | Refine Radius | 2 | Window radius for that filter: roughly how far a ragged patch of alpha may sit from a real edge and still be pulled onto it. |
 | Alpha Floor | 0.0 | Alpha at or below this is forced fully clear. Applied last, so it also clears what **Refine Edges** leaves behind. See below. |
@@ -280,6 +281,44 @@ Entries are irrelevant while **Only Outer Background** is off, since every
 background-coloured pixel already qualifies then. Click the middle of a region
 rather than its edge: an antialiased pixel is a blend, so keying off one keys off
 the blend rather than the region's true colour.
+
+### Blackout
+
+Everything else here removes background by **colour** — even a picked island,
+which floods from a point and stops wherever the colour changes. That leaves no
+way to say "this region goes, whatever is in it": a watermark, a scan edge, a
+stray element in a corner. Those have no colour in common with themselves, so no
+colour-based tool can describe them. A polygon can.
+
+Hit **Draw** and click the preview to place corners. Close the shape three ways —
+**right-click**, **Escape**, or **clicking the first corner** again — and
+**Backspace** takes back the last corner while you are still placing them. A
+region with fewer than three corners is discarded rather than stored, and the
+hint line says so, since a shape vanishing on close otherwise looks like a bug.
+
+While you draw, the edge you would add follows the pointer and the closing edge
+is drawn faintly, so the shape can be judged before you commit to it. Each region
+gets a random swatch colour, used both on its row and for its outline, so a
+crowded image stays readable. Select a row and its corners become **draggable
+handles**; grabbing one beats starting a pan, and Ctrl+drag still pans as usual.
+The image only reprocesses when you let go, not on every mouse motion.
+
+**Shapes may be concave**, which is the whole point — the regions people actually
+want gone are rarely convex. Filling uses a scanline under the even-odd rule, so
+a C or an L fills correctly and a self-intersecting shape gets a sensible hole.
+Naive polygon drawing fans triangles from the first corner and gets both wrong.
+
+**The cut is hard.** No antialiasing is rebuilt along a polygon edge, because
+there is no background there that the subject blended with — the edge is your
+line, not something recovered from the image. Regions are folded into the
+classification as background before any alpha is worked out, so colour bleed
+still fills the RGB underneath them exactly as it does for keyed-out background.
+
+Blackout works with no **Remove Colors** entries at all. Clear the list and the
+polygons are still cut; nothing else happens.
+
+Press **H** to hide the regions and the island markers together while judging an
+edge.
 
 ### Accuracy
 
@@ -492,10 +531,10 @@ needing work: override `clamp_settings_to_schema()`, call `super()`, and clamp
 the rest yourself, or a hand-edited file will disagree with its own slider.
 
 Setting types are `BOOL`, `INT`, `FLOAT`, `STRING`, `ENUM` (which needs an
-`options` list), `ISLAND_PICKER` and `COLOR_LIST`. The last two give you the
-pick-off-the-preview lists described above, for an `IslandList` and a
-`RemoveColorList` property respectively. Give consecutive entries a matching
-`"group"` and they are boxed under a heading of that name.
+`options` list), `ISLAND_PICKER`, `COLOR_LIST` and `POLYGON_LIST`. The last three
+give you the preview-driven lists described above, for an `IslandList`, a
+`RemoveColorList` and a `BlackoutList` property respectively. Give consecutive
+entries a matching `"group"` and they are boxed under a heading of that name.
 
 Override `get_key_color_property()` to return the name of a `Color` property and
 the dock gives it a swatch under the operation dropdown instead of a row in the

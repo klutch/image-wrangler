@@ -9,6 +9,7 @@ extends RefCounted
 
 const IslandPicker := preload("res://addons/image_wrangler/ui/iw_island_picker.gd")
 const ColorList := preload("res://addons/image_wrangler/ui/iw_color_list.gd")
+const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd")
 
 ## Left indent applied to the contents of a named group.
 const GROUP_INDENT := 8
@@ -62,6 +63,8 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 				control = _build_island_picker(operation, property)
 			IWOperation.SettingType.COLOR_LIST:
 				control = _build_color_list(operation, property)
+			IWOperation.SettingType.POLYGON_LIST:
+				control = _build_polygon_list(operation, property)
 			_:
 				control = _build_number(operation, property, label, setting, false, on_changed)
 
@@ -118,6 +121,15 @@ static func _build_island_picker(operation: IWOperation, property: StringName) -
 ## connects the signals and re-runs the operation from there.
 static func _build_color_list(operation: IWOperation, property: StringName) -> Control:
 	var list := ColorList.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.setup(operation, property)
+	return list
+
+
+## Polygon lists are left unwired here for the same reason the other two are:
+## drawing needs the preview, and only the dock can reach it.
+static func _build_polygon_list(operation: IWOperation, property: StringName) -> Control:
+	var list := PolygonList.new()
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	list.setup(operation, property)
 	return list
@@ -250,4 +262,6 @@ static func _refresh_into(settings: Resource, node: Node) -> void:
 				(child as IslandPicker).refresh()
 			elif child is ColorList:
 				(child as ColorList).refresh()
+			elif child is PolygonList:
+				(child as PolygonList).refresh()
 		_refresh_into(settings, child)
