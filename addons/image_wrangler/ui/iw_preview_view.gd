@@ -69,15 +69,25 @@ const BUSY_PANEL_PADDING := 18.0
 ## much room the contents have on a narrow preview column.
 const BUSY_PANEL_MARGIN := 12.0
 
-## Spinner artwork, used when it is there. Checked for rather than loaded blind,
-## since asking for a resource that does not exist logs an error — and this is
-## reached on every frame of a run.
-const BUSY_SPINNER_PATH := "res://addons/image_wrangler/ui/custom_spinner.png"
-
-## Diameter of the ring drawn when there is no artwork to turn.
-const BUSY_RING_SIZE := 26.0
-
+## Diameter of the spinner, and the gap between it and what sits under it.
+##
+## Drawn rather than loaded from a PNG. Arcs stay crisp at any size and at any
+## editor scale, pick up the theme's accent colour, and cannot go missing — which
+## is worth more here than artwork would be, since this is the one thing on screen
+## whose whole job is to be noticed.
+const BUSY_RING_SIZE := 78.0
 const BUSY_SPINNER_GAP := 10.0
+
+## Stroke width as a fraction of the diameter, rather than a number of pixels.
+##
+## Proportional so the ring keeps its proportions when it has to shrink into a
+## narrow preview column — a fixed stroke would turn a small spinner into a blob
+## and leave a large one looking like wire.
+const BUSY_RING_THICKNESS := 0.115
+
+## Segments in the two arcs. Enough that the ring reads as round at full size,
+## which is where faceting would show.
+const BUSY_RING_SEGMENTS := 64
 
 ## How the spinner turns.
 ##
@@ -160,10 +170,6 @@ var _progress := 0.0
 ## Seconds the current run has been on screen, which is all the spinner needs to
 ## know. Reset per run so every one starts from the same place.
 var _spin_time := 0.0
-
-## Resolved once and remembered, including the answer "there isn't one".
-var _spinner_texture: Texture2D
-var _spinner_looked_up := false
 
 ## Built once. A StyleBox is the only way to get a rounded rectangle out of a
 ## CanvasItem — draw_rect has square corners and nothing else.
@@ -1021,62 +1027,46 @@ func _draw_spinner(center: Vector2, size: Vector2, accent: Color) -> void:
 	var turns := _spin_time * BUSY_SPIN_TURNS_PER_SECOND \
 			+ BUSY_SPIN_WOBBLE_TURNS * sin(TAU * BUSY_SPIN_WOBBLE_HZ * _spin_time)
 	var angle := TAU * turns
-
-	var texture := _spinner()
-	if texture != null:
-		var half := size * 0.5
-		# Rotating about the centre means drawing about the origin and moving the
-		# origin, since the transform is what carries the rotation.
-		_canvas.draw_set_transform(center, angle, Vector2.ONE)
-		_canvas.draw_texture_rect(texture, Rect2(-half, size), false)
-		_canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var radius := minf(size.x, size.y) * 0.5
+	if radius <= 0.0:
 		return
 
-	# No artwork: a ring with a bright arc running round it, which is the same
-	# idea and needs nothing on disk.
-	var radius := minf(size.x, size.y) * 0.5
-	_canvas.draw_arc(center, radius, 0.0, TAU, 32, Color(1, 1, 1, 0.18), 3.0, true)
-	_canvas.draw_arc(center, radius, angle, angle + TAU * BUSY_SPIN_SWEEP, 24, accent, 3.0, true)
+	# Kept off the outer edge, since a stroke straddles the radius it is drawn at
+	# and half of it would otherwise sit outside the size asked for.
+	var thickness := maxf(radius * 2.0 * BUSY_RING_THICKNESS, 1.0)
+	radius -= thickness * 0.5
+
+	# A faint full ring under a bright arc running round it. The ring underneath is
+	# what keeps the arc from reading as a stray mark at the moments the wobble has
+	# it nearly stopped.
+	_canvas.draw_arc(
+		center, radius, 0.0, TAU, BUSY_RING_SEGMENTS, Color(1, 1, 1, 0.18), thickness, true)
+	_canvas.draw_arc(
+		center,
+		radius,
+		angle,
+		angle + TAU * BUSY_SPIN_SWEEP,
+		BUSY_RING_SEGMENTS,
+		accent,
+		thickness,
+		true,
+	)
 
 
 ## How big to draw the spinner, given the [param room] the panel has and the
 ## [param caption_height] that has to share it.
 ##
-## Its own size, and never more. Scaling artwork up is the one way to make a
-## spinner look worse than no spinner at all, so the only thing that shrinks it is
-## running out of room — and then by the same factor on both axes, so it turns
-## round rather than wobbling on an oval.
+## Fixed at [constant BUSY_RING_SIZE] until the view is too small to hold it, and
+## then square, so it turns round rather than wobbling on an oval.
 func _spinner_size(room: Vector2, caption_height: float) -> Vector2:
-	var texture := _spinner()
-	if texture == null:
-		var ring := minf(BUSY_RING_SIZE, minf(room.x, room.y))
-		return Vector2(ring, ring)
-
-	var native := Vector2(texture.get_size())
-	if native.x <= 0.0 or native.y <= 0.0:
-		return Vector2.ZERO
-
 	# What is left once the caption and the bar have taken their share, so a short
 	# view shrinks the spinner rather than pushing them out of the panel.
 	var spare := room.y - BUSY_BAR_HEIGHT - BUSY_SPINNER_GAP
 	if caption_height > 0.0:
 		spare -= caption_height + BUSY_SPINNER_GAP
-	spare = maxf(spare, 1.0)
 
-	var scale := minf(1.0, minf(room.x / native.x, spare / native.y))
-	return (native * scale).floor()
-
-
-## The spinner artwork, or null when the file is not there.
-##
-## Looked up once. [method ResourceLoader.exists] first, because asking to load
-## something absent logs an error, and this is reached every frame of a run.
-func _spinner() -> Texture2D:
-	if not _spinner_looked_up:
-		_spinner_looked_up = true
-		if ResourceLoader.exists(BUSY_SPINNER_PATH):
-			_spinner_texture = load(BUSY_SPINNER_PATH) as Texture2D
-	return _spinner_texture
+	var ring := minf(BUSY_RING_SIZE, minf(room.x, maxf(spare, 0.0)))
+	return Vector2(ring, ring)
 
 
 ## The rounded black panel behind the overlay, built on first use.

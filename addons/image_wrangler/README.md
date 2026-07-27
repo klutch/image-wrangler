@@ -65,11 +65,11 @@ turns at a wobbling rate rather than a constant one, so it reads as something
 working at a thing rather than a wheel freewheeling.
 
 The spinner, caption and bar sit together in a rounded translucent panel, over a
-light scrim across the rest of the view. The artwork is
-`addons/image_wrangler/ui/custom_spinner.png`; without it, a ring is drawn
-instead. It is shown at its own size and never larger — scaling a spinner up is
-the one way to make it look worse than none at all — and shrinks, on both axes
-together, only when the preview column runs out of room for it.
+light scrim across the rest of the view. The spinner is drawn rather than loaded
+from a file: at that size a couple of arcs do everything artwork would, and
+drawing it means it is crisp at any editor scale, picks up the theme's accent
+colour, and cannot go missing. It shrinks only when the preview column runs out
+of room, and stays square when it does.
 
 Only one run happens at a time. Changing a setting mid-run queues another rather
 than starting a second thread, and the result of a run whose image was swapped out
