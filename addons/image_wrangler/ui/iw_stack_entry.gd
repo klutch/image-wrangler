@@ -230,21 +230,25 @@ func refresh_enabled_state() -> void:
 	if _settings_box == null:
 		return
 	_set_form_enabled(_settings_box, live)
-	if live:
-		# Several of the list controls drive their own buttons — Remove is disabled
-		# with nothing selected, Clear with nothing in the list. Enabling everything
-		# above overruled that, so they are asked to say it again.
-		_restore_own_states(_settings_box)
 
 
 ## Turns every input in [param node] on or off.
 ##
 ## By property rather than by type, because the form is built from a schema and holds
-## whatever the operations asked for. The three names cover it: buttons and their
-## kin take [code]disabled[/code], text fields take [code]editable[/code], and
-## [code]EditorSpinSlider[/code] takes [code]read_only[/code].
+## whatever the operations asked for. The three names cover the plain ones: buttons
+## and their kin take [code]disabled[/code], text fields take [code]editable[/code],
+## and [code]EditorSpinSlider[/code] takes [code]read_only[/code].
+##
+## [b]A control that knows how to switch itself off is asked to, and not recursed
+## into.[/b] The list controls rewrite their own buttons whenever the selection
+## changes and rebuild their rows on every edit, so anything set on their insides from
+## here would be overwritten the moment the user touched them — which is exactly how a
+## disabled entry ended up with a live dropdown and a working Remove.
 static func _set_form_enabled(node: Node, enabled: bool) -> void:
 	for child in node.get_children():
+		if child.has_method("set_controls_enabled"):
+			child.call("set_controls_enabled", enabled)
+			continue
 		if "disabled" in child:
 			child.disabled = not enabled
 		elif "editable" in child:
@@ -252,18 +256,6 @@ static func _set_form_enabled(node: Node, enabled: bool) -> void:
 		elif "read_only" in child:
 			child.read_only = not enabled
 		_set_form_enabled(child, enabled)
-
-
-## Asks any control that manages its own buttons to work them out again.
-##
-## Not recursed into: it has just rebuilt whatever it owns, and everything under it
-## was enabled on the way past.
-static func _restore_own_states(node: Node) -> void:
-	for child in node.get_children():
-		if child.has_method("refresh"):
-			child.call("refresh")
-			continue
-		_restore_own_states(child)
 
 
 ## Guarded rather than assumed: outside the editor there is no [code]EditorIcons[/code]

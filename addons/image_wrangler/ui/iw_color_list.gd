@@ -36,6 +36,13 @@ const LABEL_WIDTH := 92
 var _operation: IWOperation
 var _property: StringName
 
+## Whether this control answers to the pointer.
+##
+## Its own state rather than something set on the buttons from outside, because
+## [method _update_buttons] rewrites them whenever the selection or the list changes
+## and would put back whatever it worked out for itself.
+var _interactive := true
+
 var _list: EntryList
 var _pick_button: Button
 var _add_button: Button
@@ -181,6 +188,18 @@ func add_color(color: Color) -> void:
 func refresh() -> void:
 	_set_hint("")
 	_refresh()
+
+
+## Turns every control here on or off, for a stack entry that has been switched off.
+##
+## Handled here rather than by walking the children from outside: the buttons are
+## rewritten by [method _update_buttons] on every selection change, and the rows are
+## rebuilt on every edit, so anything set from outside would survive neither.
+func set_controls_enabled(value: bool) -> void:
+	_interactive = value
+	if _list != null:
+		_list.set_interactive(value)
+	_update_buttons()
 
 
 ## Lets the dock switch picking off without echoing back a [signal pick_toggled] —
@@ -355,5 +374,11 @@ func _row_data(index: int, entry: RemoveColorEntry) -> Dictionary:
 
 
 func _update_buttons() -> void:
-	_remove_button.disabled = _selected_index() < 0
-	_clear_button.disabled = _list.count() == 0
+	_remove_button.disabled = not _interactive or _selected_index() < 0
+	_clear_button.disabled = not _interactive or _list.count() == 0
+	_pick_button.disabled = not _interactive
+	_add_button.disabled = not _interactive
+	if _color_button != null:
+		_color_button.disabled = not _interactive
+	if _tolerance_slider != null:
+		_tolerance_slider.read_only = not _interactive

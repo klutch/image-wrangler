@@ -39,6 +39,13 @@ const DISABLED_MODULATE := Color(1, 1, 1, 0.45)
 var _rows: Array[PanelContainer] = []
 var _selected := -1
 
+## Whether the rows answer to the pointer at all.
+##
+## Held as state rather than pushed onto the row controls once, because the rows are
+## rebuilt from scratch on every edit — anything set on them from outside would be
+## thrown away by the next [method set_rows] and quietly come back live.
+var _interactive := true
+
 ## Whether rows carry a mode dropdown. Colours have no add/subtract sense — they
 ## describe what background is, not what to do with an area — so their list asks
 ## for rows without one.
@@ -51,6 +58,26 @@ var _loading := false
 
 func _init() -> void:
 	add_theme_constant_override("separation", 1)
+
+
+## Turns every row's controls, and row selection itself, on or off.
+##
+## Remembered, so rows built after this call come up in the same state.
+func set_interactive(value: bool) -> void:
+	_interactive = value
+	for row in _rows:
+		_apply_interactive(row)
+
+
+## Applies the current state to one row's controls.
+func _apply_interactive(row: PanelContainer) -> void:
+	var box := row.get_meta(&"check") as CheckBox
+	if box != null:
+		box.disabled = not _interactive
+	if row.has_meta(&"mode"):
+		var choice := row.get_meta(&"mode") as OptionButton
+		if choice != null:
+			choice.disabled = not _interactive
 
 
 ## Whether rows should carry a mode dropdown. Call before the first [method set_rows].
@@ -75,6 +102,7 @@ func set_rows(entries: Array) -> void:
 		var row := _build_row(i, entries[i])
 		add_child(row)
 		_rows.append(row)
+		_apply_interactive(row)
 
 	if _selected >= _rows.size():
 		_selected = -1
@@ -187,6 +215,8 @@ func _notification(what: int) -> void:
 
 
 func _on_row_input(event: InputEvent, index: int) -> void:
+	if not _interactive:
+		return
 	var button := event as InputEventMouseButton
 	if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_LEFT:
 		return

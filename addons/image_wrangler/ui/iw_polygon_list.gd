@@ -38,6 +38,13 @@ const DRAW_ICON := &"Polygon2D"
 var _operation: IWOperation
 var _property: StringName
 
+## Whether this control answers to the pointer.
+##
+## Its own state rather than something set on the buttons from outside, because
+## [method _update_buttons] rewrites them whenever the selection or the list changes
+## and would put back whatever it worked out for itself.
+var _interactive := true
+
 var _list: EntryList
 var _draw_button: Button
 var _remove_button: Button
@@ -127,6 +134,15 @@ func _notification(what: int) -> void:
 ##
 ## Any open drawing session belongs to the image that just left, so it is dropped
 ## rather than carried onto the new one.
+## Turns every control here on or off, for a stack entry that has been switched off.
+## See [method IWColorList.set_controls_enabled].
+func set_controls_enabled(value: bool) -> void:
+	_interactive = value
+	if _list != null:
+		_list.set_interactive(value)
+	_update_buttons()
+
+
 func refresh() -> void:
 	_draft = -1
 	_set_hint("")
@@ -412,5 +428,6 @@ func _row_data(index: int, polygon: PolygonRegion) -> Dictionary:
 
 
 func _update_buttons() -> void:
-	_remove_button.disabled = selected_index() < 0
-	_clear_button.disabled = _list.count() == 0
+	_remove_button.disabled = not _interactive or selected_index() < 0
+	_clear_button.disabled = not _interactive or _list.count() == 0
+	_draw_button.disabled = not _interactive

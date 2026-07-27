@@ -36,6 +36,13 @@ var _property: StringName
 ## remover the swatch is not decoration, it is the colour that island keys out.
 var _color_provider := Callable()
 
+## Whether this control answers to the pointer.
+##
+## Its own state rather than something set on the buttons from outside, because
+## [method _update_buttons] rewrites them whenever the selection or the list changes
+## and would put back whatever it worked out for itself.
+var _interactive := true
+
 var _list: EntryList
 var _pick_button: Button
 var _remove_button: Button
@@ -182,6 +189,15 @@ func get_enabled_flags() -> PackedByteArray:
 
 ## Redraws the rows from whatever list the operation now points at. Called when
 ## the settings Resource is swapped for another image.
+## Turns every control here on or off, for a stack entry that has been switched off.
+## See [method IWColorList.set_controls_enabled].
+func set_controls_enabled(value: bool) -> void:
+	_interactive = value
+	if _list != null:
+		_list.set_interactive(value)
+	_update_buttons()
+
+
 func refresh() -> void:
 	_set_hint("")
 	_refresh()
@@ -334,5 +350,8 @@ func _refresh() -> void:
 
 
 func _update_buttons() -> void:
-	_remove_button.disabled = selected_index() < 0
-	_clear_button.disabled = _list.count() == 0
+	_remove_button.disabled = not _interactive or selected_index() < 0
+	_clear_button.disabled = not _interactive or _list.count() == 0
+	_pick_button.disabled = not _interactive
+	if _tolerance_slider != null:
+		_tolerance_slider.read_only = not _interactive
