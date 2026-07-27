@@ -151,6 +151,11 @@ const _DECONTAMINATE_FADE := 0.25
 ## of pixels of reach even when colour bleed is switched off.
 const _MIN_SEARCH_RADIUS := 2
 
+## Which side of the edge a banded pixel sits on, in the mask [method
+## _restore_band] builds. Zero is outside the band altogether.
+const BAND_OUTWARD := 1
+const BAND_INWARD := 2
+
 ## What [method _restore_edges] counts as fully solid and fully clear.
 ##
 ## Deliberately not 1.0 and 0.0 exactly: alpha arriving here has been through a
@@ -371,7 +376,7 @@ func get_settings_schema() -> Array[Dictionary]:
 			"min": 1.0,
 			"max": 8.0,
 			"step": 0.5,
-			"tooltip": "How many pixels deep the rebuilt antialiasing may run, either side of the\nedge. 1 suits an ordinary aliased edge, which is only ever one pixel wide.\n\nRaise it for something that should have had a soft edge — a glow, a drop\nshadow, a blurred cutout — where the band that needs rebuilding is wider\nthan a single pixel.\n\nIt cannot invent softness that is not in the colors: a pixel further in\nthat is pure subject measures as fully covered and stays solid, so a wide\nsetting on a genuinely hard edge does nothing.",
+			"tooltip": "How many pixels wide the rebuilt antialiasing may be, split across the\nedge — half into the transparent side, half into the solid one, so the new\nedge straddles the boundary rather than growing off one side of it.\n\n1 suits an ordinary aliased edge, which is only ever a pixel wide. Raise it\nfor something that should have had a soft edge — a glow, a drop shadow, a\nblurred cutout — where the band that needs rebuilding is wider than that.\n\nIt cannot invent softness that is not in the colors: a pixel further in\nthat is pure subject measures as fully covered and stays solid, so a wide\nsetting on a genuinely hard edge does nothing.",
 		},
 		{
 			"property": &"sample_inward_distance",
@@ -796,11 +801,13 @@ func _coverage_map(data: PackedByteArray, key_dist: PackedFloat32Array, mask: Pa
 ## finished with.
 ##
 ## [b]Adjacency is the test.[/b] The band starts at pixels with the opposite
-## extreme directly beside them and grows inwards from there by
-## [member RemoveBackgroundSettings.restore_thickness]. A properly matted edge has
-## half-covered pixels in between, so neither side can see the other, nothing
-## seeds, and the edge is left exactly as it was — which is what keeps this from
-## undoing the good work of the edge band.
+## extreme directly beside them and grows from there by
+## [member RemoveBackgroundSettings.restore_thickness], split half into the
+## transparent side and half into the solid one so the rebuilt edge straddles the
+## boundary rather than hanging off it. A properly matted edge has half-covered
+## pixels in between, so neither side can see the other, nothing seeds, and the
+## edge is left exactly as it was — which is what keeps this from undoing the good
+## work of the edge band.
 ##
 ## Thickness cannot invent softness. A pixel deeper into the band that is pure
 ## subject measures as fully covered and keeps its alpha, so a wide setting on a
@@ -811,9 +818,16 @@ func _coverage_map(data: PackedByteArray, key_dist: PackedFloat32Array, mask: Pa
 ## since a drawn cut is a straight line the user asked for rather than an edge
 ## that lost its antialiasing.
 func _restore_edges(data: PackedByteArray, coverage: PackedFloat32Array, key_of: PackedInt32Array, nearest: PackedInt32Array, blacked: PackedByteArray, width: int, height: int) -> PackedFloat32Array:
-	# Rounded to whole pixels, since the band is grown a pixel at a time. At least
-	# one, so an enabled pass always does something.
+	# Split down the middle: a rebuilt edge sits across the boundary rather than
+	# hanging off one side of it, so half the thickness goes into the transparent
+	# side and half into the solid. The odd pixel goes outward, since that is the
+	# side a hard cut leaves recoverable colour on.
+	#
+	# Rounded to whole pixels, since the band is grown a pixel at a time, and at
+	# least one each way so an enabled pass always reaches both sides of the edge.
 	var thickness := maxi(roundi(settings.restore_thickness), 1)
+	var outward := maxi(ceili(thickness * 0.5), 1)
+	var inward := maxi(thickness - outward, 1)
 	var reach := 0 if settings.sample_inward_distance <= 0.0 else maxi(roundi(settings.sample_inward_distance), 1)
 	var has_regions := not blacked.is_empty()
 	var fallback_key: Color = _keys[0]
@@ -822,7 +836,7 @@ func _restore_edges(data: PackedByteArray, coverage: PackedFloat32Array, key_of:
 	# the evidence that its neighbour needs restoring too.
 	var out := coverage.duplicate()
 
-	var band := _restore_band(coverage, blacked, thickness, width, height)
+	var band := _restore_band(coverage, blacked, outward, inward, width, height)
 	if band.is_empty():
 		return out
 
@@ -868,11 +882,20 @@ func _restore_edges(data: PackedByteArray, coverage: PackedFloat32Array, key_of:
 ## edge was found.
 ##
 ## Seeded from every pixel that is at one extreme with the other extreme directly
-## beside it, then grown [param thickness] steps outwards through pixels that are
-## themselves at an extreme. Growing only through extremes is what stops the band
-## leaking along an edge that already has a matte — the first half-covered pixel
-## it meets is a wall.
-func _restore_band(coverage: PackedFloat32Array, blacked: PackedByteArray, thickness: int, width: int, height: int) -> PackedByteArray:
+## beside it — one seed ring on each side of the boundary — and then grown from
+## there, [param outward] pixels into the transparent side and [param inward]
+## pixels into the solid one.
+##
+## [b]Each side is grown separately.[/b] A pixel keeps the side it was seeded on
+## and may only spread onto pixels of that same extreme, which is what makes the
+## two depths mean anything: a single side-blind flood would spend its budget
+## wherever the search happened to wander, and since a hard cut leaves its
+## recoverable colour on the transparent side, that was in practice almost all
+## outward.
+##
+## Growing only through extremes is also what stops the band leaking along an edge
+## that already has a matte — the first half-covered pixel it meets is a wall.
+func _restore_band(coverage: PackedFloat32Array, blacked: PackedByteArray, outward: int, inward: int, width: int, height: int) -> PackedByteArray:
 	var empty := PackedByteArray()
 	var has_regions := not blacked.is_empty()
 	var pixel_count := width * height
@@ -907,7 +930,7 @@ func _restore_band(coverage: PackedFloat32Array, blacked: PackedByteArray, thick
 			touching = true
 		if not touching:
 			continue
-		band[i] = 1
+		band[i] = BAND_INWARD if solid else BAND_OUTWARD
 		queue[tail] = i
 		tail += 1
 
@@ -921,37 +944,39 @@ func _restore_band(coverage: PackedFloat32Array, blacked: PackedByteArray, thick
 	while head < tail:
 		var index := queue[head]
 		head += 1
+		var side := band[index]
+		var solid_side := side == BAND_INWARD
 		var step := depth[index] + 1
-		if step >= thickness:
+		if step >= (inward if solid_side else outward):
 			continue
 		var x := index % width
 		@warning_ignore("integer_division")
 		var y := index / width
 		if x > 0:
 			var left := index - 1
-			if band[left] == 0 and _restore_extends(coverage, blacked, has_regions, left):
-				band[left] = 1
+			if band[left] == 0 and _restore_extends(coverage, blacked, has_regions, left, solid_side):
+				band[left] = side
 				depth[left] = step
 				queue[tail] = left
 				tail += 1
 		if x < width - 1:
 			var right := index + 1
-			if band[right] == 0 and _restore_extends(coverage, blacked, has_regions, right):
-				band[right] = 1
+			if band[right] == 0 and _restore_extends(coverage, blacked, has_regions, right, solid_side):
+				band[right] = side
 				depth[right] = step
 				queue[tail] = right
 				tail += 1
 		if y > 0:
 			var up := index - width
-			if band[up] == 0 and _restore_extends(coverage, blacked, has_regions, up):
-				band[up] = 1
+			if band[up] == 0 and _restore_extends(coverage, blacked, has_regions, up, solid_side):
+				band[up] = side
 				depth[up] = step
 				queue[tail] = up
 				tail += 1
 		if y < height - 1:
 			var down := index + width
-			if band[down] == 0 and _restore_extends(coverage, blacked, has_regions, down):
-				band[down] = 1
+			if band[down] == 0 and _restore_extends(coverage, blacked, has_regions, down, solid_side):
+				band[down] = side
 				depth[down] = step
 				queue[tail] = down
 				tail += 1
@@ -959,16 +984,16 @@ func _restore_band(coverage: PackedFloat32Array, blacked: PackedByteArray, thick
 	return band
 
 
-## Whether the band may grow onto [param index].
+## Whether the band may grow onto [param index] while staying on its own side.
 ##
-## Only through pixels still at an extreme. The first half-covered pixel the band
-## meets is a wall, which is what stops a thick setting running away along an edge
-## that already has its matte.
-func _restore_extends(coverage: PackedFloat32Array, blacked: PackedByteArray, has_regions: bool, index: int) -> bool:
+## [param want_solid] is the side doing the growing. Crossing to the other extreme
+## is refused rather than allowed and counted, since a band that changed sides
+## halfway would make both depths meaningless.
+func _restore_extends(coverage: PackedFloat32Array, blacked: PackedByteArray, has_regions: bool, index: int, want_solid: bool) -> bool:
 	if has_regions and blacked[index] != REGION_NONE:
 		return false
 	var here := coverage[index]
-	return here >= _RESTORE_SOLID or here <= _RESTORE_CLEAR
+	return here >= _RESTORE_SOLID if want_solid else here <= _RESTORE_CLEAR
 
 
 ## Whether [param index] sits at the opposite extreme to a pixel that is

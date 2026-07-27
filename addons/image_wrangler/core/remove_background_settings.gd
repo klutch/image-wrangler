@@ -119,7 +119,12 @@ extends Resource
 ## setting elsewhere flattened.
 @export var restore_edges: bool = false
 
-## How many pixels deep the rebuilt antialiasing may run, either side of the edge.
+## How many pixels wide the rebuilt antialiasing may be, split across the edge.
+##
+## Half goes into the transparent side and half into the solid one, so the new
+## edge straddles the boundary the way a real antialiased edge does rather than
+## growing off one side of it. The odd pixel goes outward, which is the side a
+## hard cut leaves recoverable colour on.
 ##
 ## One suits an ordinary aliased edge, which is only ever a pixel wide. Wider is
 ## for something that should have had a soft edge — a glow, a drop shadow — where

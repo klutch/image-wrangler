@@ -102,7 +102,7 @@ image.
 | Alpha Floor | 0.0 | Alpha at or below this is forced fully clear. Applied last, so it also clears what **Refine Edges** leaves behind. See below. |
 | Alpha Ceiling | 1.0 | Alpha at or above this is forced fully solid, with the range between stretched across the two. |
 | Restore Edges → Enabled | off | Re-mattes edges that ended up hard, working their coverage back out of the colours either side. See below. |
-| Restore Edges → Edge Thickness | 1.0 | How many pixels deep the rebuilt antialiasing may run, either side of the edge. |
+| Restore Edges → Edge Thickness | 1.0 | How many pixels wide the rebuilt antialiasing may be, split half into the transparent side and half into the solid one. |
 | Restore Edges → Sample Color Inward | 2.0 | How far into the shape to reach for the subject colour, in pixels. 0 uses the nearest opaque pixel instead. |
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
@@ -280,13 +280,23 @@ the other, nothing seeds, and the edge is left exactly as it was. Polygon Edit
 regions are skipped on both sides — a drawn cut is a straight line you asked for,
 not an edge that lost its antialiasing.
 
-**Edge Thickness** is how deep the band grows from those seeds, in pixels, either
-side of the edge. 1 suits an ordinary aliased edge, which is only ever one pixel
-wide. Raise it for something that should have had a soft edge — a glow, a drop
-shadow, a blurred cutout — where the band needing rebuilt is wider than a single
-pixel. The band grows only through pixels that are themselves at an extreme, so
-the first half-covered pixel it meets is a wall and a thick setting cannot run
-away along an edge that already has its matte.
+**Edge Thickness** is how wide the rebuilt edge may be, **split across the
+boundary** — half into the transparent side, half into the solid one, with the
+odd pixel going outward. A real antialiased edge straddles the boundary rather
+than hanging off one side of it, so the band does too.
+
+Each side is grown separately, and a banded pixel may only spread onto pixels at
+its own extreme. That is what makes the two halves mean anything: one side-blind
+flood spends its budget wherever the search wanders, and since a hard cut leaves
+its recoverable colour on the transparent side, in practice that was nearly all
+outward.
+
+1 suits an ordinary aliased edge, which is only ever one pixel wide. Raise it for
+something that should have had a soft edge — a glow, a drop shadow, a blurred
+cutout — where the band needing rebuilt is wider than a single pixel. The band
+grows only through pixels that are themselves at an extreme, so the first
+half-covered pixel it meets is a wall and a thick setting cannot run away along an
+edge that already has its matte.
 
 It cannot invent softness that is not in the colours. A pixel deeper in that is
 pure subject measures as fully covered and keeps its alpha, so a wide setting on a
