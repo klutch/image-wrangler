@@ -60,21 +60,26 @@ extends IWOperation
 ## RGB, which is how the background creeps back into an edge that looked clean in
 ## the file.
 ##
-## [b]Edges that never got a matte.[/b] Everything above builds the antialiasing
-## while it is deciding what is background, which only helps where it is the one
-## doing the cutting. An image that arrived aliased, or an edge a hard alpha clip
-## flattened on the way past, has a solid pixel sitting straight against a clear
-## one and nothing in between. [member
-## RemoveBackgroundSettings.restore_antialiasing] is a pass over the finished alpha
-## that finds those and works the coverage back out of the same relation. It needs
-## no settings: a pixel only qualifies when the opposite extreme is directly beside
-## it, so a properly matted edge is invisible to it.
+## [b]Edge cleanup.[/b] Two finishing jobs, both switched on by
+## [member RemoveBackgroundSettings.stroke_width] rising above zero.
 ##
-## [b]Paint on the result.[/b] [member RemoveBackgroundSettings.stroke_width] draws
-## an outline inside the silhouette of whatever is left, at
+## The first restores antialiasing to edges that never got a matte. Everything
+## above builds one while deciding what is background, which only helps where it
+## is the one doing the cutting; an image that arrived aliased, or an edge a hard
+## alpha clip flattened on the way past, has a solid pixel sitting straight against
+## a clear one and nothing in between. [method _restore_edges] finds those and
+## works the coverage back out of the same relation. It needs no settings of its
+## own: a pixel only qualifies when the opposite extreme is directly beside it, so
+## a properly matted edge is invisible to it.
+##
+## The second draws an outline inside the silhouette of whatever is left, at
 ## [member RemoveBackgroundSettings.stroke_color]. It is the one thing here that
 ## adds rather than removes, so it happens last and touches only the colour — the
 ## alpha channel is left exactly as the keying left it.
+##
+## They share a switch because they need each other. The stroke places its edges
+## from the alpha's own sub-pixel contour, which a hard silhouette does not have —
+## and giving a hard silhouette one is precisely what the restoration does.
 ##
 ## [b]What colour cannot describe.[/b] Everything above removes background by
 ## colour, which leaves no way to say "this region goes, whatever is in it" — a
@@ -382,12 +387,15 @@ func get_settings_schema() -> Array[Dictionary]:
 			"tooltip": "Regions drawn over the preview by hand. Subtract makes the inside fully\ntransparent whatever color it is; Add makes it fully opaque.\n\nThis is the one thing here that does not work by color, so it is the way\nto edit something that has no color in common with itself — a watermark,\na scan edge, a stray element in a corner. Shapes may be concave.\n\nThe edge is hard: no antialiasing is rebuilt along it, since there is no\nbackground there to have blended with.",
 		},
 		{
-			"property": &"restore_antialiasing",
-			"label": "Enabled",
+			"property": &"stroke_width",
+			"label": "Stroke Width",
 			"group": "Edge Cleanup",
 			"collapsed": true,
-			"type": SettingType.BOOL,
-			"tooltip": "Restores the antialiasing on edges that ended up hard — a solid pixel\nsitting straight against a transparent one, with no half-covered pixels\nbetween — by working out what their coverage should have been from the\ncolors either side.\n\nOn by default, and it costs nothing where nothing is wrong: an edge that\nalready has its matte has half-covered pixels in the way, so the pass never\nsees it. It earns its place on a source that was aliased before it arrived,\nor on an edge that Alpha Floor or a hard cutoff flattened.\n\nPolygon Edit regions are left alone: those edges are hard on purpose.",
+			"type": SettingType.FLOAT,
+			"min": 0.0,
+			"max": 5.0,
+			"step": 0.25,
+			"tooltip": "Width of the inside stroke in pixels, and the switch for this whole group.\n0 does nothing at all.\n\nInside: the stroke is drawn within the silhouette of everything visible and\nnever extends it, so it follows the holes in a shape as well as its outer\ncontour, and leaves the alpha channel exactly as it found it.\n\nIt is antialiased, so fractional widths are worth having — both its edges\nfall between pixels rather than stepping along them.\n\nAbove 0 this also restores the antialiasing on edges that ended up hard,\nwhich is what gives the stroke a soft silhouette to measure its own edge\nagainst. Polygon Edit regions are left out of that: those edges are hard on\npurpose.",
 		},
 		{
 			"property": &"stroke_color",
@@ -395,16 +403,6 @@ func get_settings_schema() -> Array[Dictionary]:
 			"group": "Edge Cleanup",
 			"type": SettingType.COLOR,
 			"tooltip": "Color of the inside stroke. Its alpha is how strongly it is laid over what\nis already there, not how transparent the result becomes — at half alpha\nthe stroke tints the art beneath it rather than covering it.",
-		},
-		{
-			"property": &"stroke_width",
-			"label": "Stroke Width",
-			"group": "Edge Cleanup",
-			"type": SettingType.FLOAT,
-			"min": 0.0,
-			"max": 5.0,
-			"step": 0.25,
-			"tooltip": "Width of the inside stroke in pixels. 0 draws none.\n\nInside: it is drawn within the silhouette of everything visible and never\nextends it, so it follows the holes in a shape as well as its outer\ncontour, and leaves the alpha channel exactly as it found it.\n\nThe stroke is antialiased, so fractional widths are worth having — its\ninner boundary fades over the last pixel rather than stepping.",
 		},
 	]
 
@@ -467,7 +465,7 @@ func process_image(source: Image) -> Image:
 	# they are geometry and paint, and owe nothing to the keying being skipped.
 	if _keys.is_empty():
 		var regions := _protect_mask(data, width, height)
-		if blacked.is_empty() and regions.is_empty() and not _wants_stroke():
+		if blacked.is_empty() and regions.is_empty() and not _edge_cleanup_enabled():
 			return image
 		return _regions_only(image, data, blacked, regions, pixel_count)
 
@@ -519,7 +517,7 @@ func process_image(source: Image) -> Image:
 
 	# After the clip, because flattening an edge is one of the ways an edge comes
 	# to need restoring, and before the regions below, which are hard on purpose.
-	if settings.restore_antialiasing:
+	if _edge_cleanup_enabled():
 		coverage = _restore_edges(data, coverage, key_of, nearest, blacked, width, height)
 
 	# After everything that can move alpha, since a region is an instruction about
@@ -546,10 +544,17 @@ func process_image(source: Image) -> Image:
 	return _compose(data, coverage, key_of, nearest, stroke, width, height)
 
 
-## Whether a stroke would draw anything. A width of zero or a fully transparent
-## colour both mean no, and neither is worth a pass over the image to discover.
-func _wants_stroke() -> bool:
-	return settings.stroke_width > 0.0 and settings.stroke_color.a > 0.0
+## Whether the Edge Cleanup group does anything.
+##
+## The stroke width is the switch for both halves of it. At zero there is no
+## stroke to draw and no reason to spend a scan re-matteing edges nobody asked
+## about; above zero the two want to run together anyway, since the restoration is
+## what gives a hard silhouette the partial alpha the stroke measures against.
+##
+## The colour's alpha is deliberately not part of this. A transparent colour still
+## means the group is on — the restoration runs, and only the drawing is a no-op.
+func _edge_cleanup_enabled() -> bool:
+	return settings.stroke_width > 0.0
 
 
 ## The alpha the image ends up with, 0 to 1, which is the source's own multiplied
@@ -971,27 +976,39 @@ func _restore_subject(coverage: PackedFloat32Array, x: int, y: int, width: int, 
 ## contour and leaves the alpha channel alone. What it needs is a distance from
 ## each visible pixel to the nearest place there is nothing.
 ##
-## [b]Distance by grassfire.[/b] Seeded from every pixel that ends up fully
-## transparent and grown outwards, each pixel keeping the [i]index of the seed[/i]
-## that reached it rather than the number of steps taken. Measuring back to that
-## stored seed gives a real Euclidean distance; counting steps would give a
-## Manhattan staircase, and a stroke drawn from one would come out visibly
-## diamond-shaped on a curve. Same trick [method _nearest_subject_map] uses.
+## [b]The silhouette sits between pixels, not on them.[/b] What matters is the
+## contour where alpha crosses a half, and a pixel's own alpha says where that
+## contour runs relative to its centre: coverage on a properly antialiased edge
+## falls off over about one pixel, so a pixel of alpha [code]a[/code] is
+## [code]a - 0.5[/code] from the boundary, signed, with inside positive. That holds
+## for a hard edge too, where the two sides read +0.5 and -0.5 and put the contour
+## exactly halfway between them.
+##
+## Measuring from that sub-pixel contour rather than from the nearest transparent
+## pixel is the whole of the antialiasing. Whole-pixel distances quantise, and on
+## a shallow diagonal — where the nearest empty pixel stays directly below for a
+## long run — they quantise into a staircase, which is exactly the artefact a
+## stroke must not have.
+##
+## [b]Distance by grassfire.[/b] Seeded from every pixel on the outside of that
+## contour and grown inwards, each pixel keeping the [i]index of the seed[/i] that
+## reached it rather than the number of steps taken. Distance is then the real
+## Euclidean span back to that seed, plus the seed's own signed offset; counting
+## steps instead would give a Manhattan staircase, and the stroke would come out
+## visibly diamond-shaped on a curve. Same trick [method _nearest_subject_map]
+## uses, carrying a fractional offset as well.
 ##
 ## [b]The canvas edge counts as outside.[/b] Rather than seeding the border, every
 ## pixel also measures its distance to just past the frame and takes whichever is
 ## nearer — one comparison, no extra seeds, and a shape running off the edge is
 ## stroked along it like any other contour.
 ##
-## The falloff is linear over the last pixel, which is what makes the stroke
-## antialiased and fractional widths worth having.
-##
 ## [param alpha] is the alpha the image actually ends up with, 0 to 1 — not the
 ## coverage, which is only half of it, since [method _compose] multiplies coverage
 ## by the alpha the source arrived with.
 func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedFloat32Array:
 	var empty := PackedFloat32Array()
-	if not _wants_stroke():
+	if not _edge_cleanup_enabled() or settings.stroke_color.a <= 0.0:
 		return empty
 	var stroke_width := settings.stroke_width
 	var strength := settings.stroke_color.a
@@ -1007,8 +1024,12 @@ func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedF
 	var head := 0
 	var tail := 0
 
+	# Outside is below half coverage, not fully transparent. The half-covered band
+	# along an antialiased edge belongs to the shape's soft edge, and treating it
+	# as solid would push the contour a pixel out and blunt the very gradient this
+	# is trying to measure.
 	for i in pixel_count:
-		if alpha[i] <= 0.0:
+		if alpha[i] < 0.5:
 			source[i] = i
 			queue[tail] = i
 			tail += 1
@@ -1051,24 +1072,40 @@ func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedF
 	mask.resize(pixel_count)
 	var painted := false
 	for i in pixel_count:
-		# A seed is outside by definition. Its raw distance is zero, which would
-		# come out as full stroke and paint over the colour bleed.
+		# Nothing there to paint on, and painting anyway would put stroke colour
+		# into the pixels the colour bleed is filling.
 		if alpha[i] <= 0.0:
 			continue
 		var x := i % width
 		@warning_ignore("integer_division")
 		var y := i / width
 
-		# Just past the frame, so a pixel on the border sits one away from outside.
-		var distance := float(mini(mini(x, y), mini(width - 1 - x, height - 1 - y)) + 1)
-		var seed_index := source[i]
-		if seed_index >= 0:
-			var sx := seed_index % width
-			@warning_ignore("integer_division")
-			var sy := seed_index / width
-			distance = minf(distance, sqrt(float((x - sx) * (x - sx) + (y - sy) * (y - sy))))
+		# Half a pixel, because the frame runs along the outer edge of the border
+		# row rather than through its centre.
+		var distance := float(mini(mini(x, y), mini(width - 1 - x, height - 1 - y))) + 0.5
 
-		var band := clampf(stroke_width - distance + 1.0, 0.0, 1.0)
+		if alpha[i] < 0.5:
+			# Outside the contour but still visible: part of the shape's own soft
+			# edge. Its distance is negative, so the stroke covers it outright and
+			# the pixel's own alpha does the fading.
+			distance = minf(distance, alpha[i] - 0.5)
+		else:
+			var seed_index := source[i]
+			if seed_index >= 0:
+				var sx := seed_index % width
+				@warning_ignore("integer_division")
+				var sy := seed_index / width
+				var span := sqrt(float((x - sx) * (x - sx) + (y - sy) * (y - sy)))
+				# The seed is a pixel centre, and the contour is a fraction of a
+				# pixel short of it. Adding the seed's own signed offset — negative,
+				# since a seed is outside — walks the measurement back to the
+				# contour, and is what makes this smooth along an edge rather than
+				# stepping with the seed positions.
+				distance = minf(distance, span + (alpha[seed_index] - 0.5))
+
+		# Linear over the last pixel, from a distance measured to the contour
+		# itself: half a pixel in is the outermost the stroke can be.
+		var band := clampf(stroke_width - distance + 0.5, 0.0, 1.0)
 		if band <= 0.0:
 			continue
 		mask[i] = band * strength

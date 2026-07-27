@@ -102,9 +102,8 @@ working on rather than about the image.
 | Alpha Ceiling | 1.0 | Alpha at or above this is forced fully solid, with the range between stretched across the two. |
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
-| Edge Cleanup → Enabled | **on** | Restores the antialiasing on edges that ended up hard. See below. |
+| Edge Cleanup → Stroke Width | 0.0 (off) | Width of the inside stroke in pixels, antialiased, and the switch for the whole group. See below. |
 | Edge Cleanup → Stroke Color | opaque black | Colour of the inside stroke. Its alpha is blend strength, not result transparency. |
-| Edge Cleanup → Stroke Width | 0.0 (off) | Width of the inside stroke in pixels, antialiased. See below. |
 
 ### Remove Colors
 
@@ -257,14 +256,19 @@ and is honoured rather than rejected.
 ### Edge Cleanup
 
 Two finishing jobs the keyer cannot do while it is still deciding what is
-background.
+background. **Stroke Width** is the switch for both: at 0 the group does nothing
+at all, and above 0 both halves run.
 
-**Enabled** restores antialiasing to edges that ended up hard. Everything else
-here builds the matte *while* cutting, which only helps where this operation is
-the one doing the cutting — it cannot help an edge that arrived aliased (a sprite
-someone already cut out badly, a screenshot, art drawn with a hard brush) or one
-that a low **Alpha Ceiling** flattened on the way past. Those come out with a
-solid pixel sitting straight against a transparent one and nothing between.
+They share a switch because they need each other. The stroke places its edges
+from the alpha's own sub-pixel contour, which a hard silhouette does not have —
+and giving a hard silhouette one is exactly what the restoration does.
+
+**Restoring antialiasing.** Everything else here builds the matte *while*
+cutting, which only helps where this operation is the one doing the cutting — it
+cannot help an edge that arrived aliased (a sprite someone already cut out badly,
+a screenshot, art drawn with a hard brush) or one that a low **Alpha Ceiling**
+flattened on the way past. Those come out with a solid pixel sitting straight
+against a transparent one and nothing between.
 
 It works from the same relation as everything else. An edge pixel is
 `C = a * F + (1 - a) * K`, so its distance from the background is `a` times the
@@ -273,19 +277,30 @@ subject's distance from the background, and dividing one by the other gives back
 into the shape rather than from the pixel itself — the pixel being fixed is part
 background, so asking it how much of a blend it is would answer "all of it".
 
-**It has no settings, and that is deliberate.** A pixel only qualifies when the
-opposite extreme is *directly* beside it. A properly matted edge has half-covered
-pixels in between, so neither side can see the other and the pass never touches
-it. There is nothing to tune down because it cannot undo good work in the first
-place. On by default for the same reason: where nothing is wrong it costs a scan
-and changes nothing. Polygon Edit regions are skipped on both sides — those edges
+**It has no settings of its own, and that is deliberate.** A pixel only qualifies
+when the opposite extreme is *directly* beside it. A properly matted edge has
+half-covered pixels in between, so neither side can see the other and the pass
+never touches it. There is nothing to tune down, because it cannot undo good work
+in the first place. Polygon Edit regions are skipped on both sides — those edges
 are hard on purpose.
 
-**Stroke Width** draws an outline *inside* the silhouette of everything visible.
-Inside means it never extends the shape: it follows the holes in a subject as
-well as its outer contour, and leaves the alpha channel exactly as it found it.
-The stroke is antialiased, so fractional widths are worth having — its inner
-boundary fades over the last pixel rather than stepping.
+**The stroke** is drawn *inside* the silhouette of everything visible. Inside
+means it never extends the shape: it follows the holes in a subject as well as
+its outer contour, and leaves the alpha channel exactly as it found it.
+
+**It is antialiased, and that is the fiddly part.** What matters is the contour
+where alpha crosses a half, and that sits *between* pixels rather than on them. A
+pixel's own alpha says where: coverage on a real antialiased edge falls off over
+about one pixel, so a pixel of alpha `a` is `a - 0.5` from the contour, signed,
+inside positive. That holds for a hard edge too, where the two sides read +0.5 and
+-0.5 and put the contour exactly halfway between them.
+
+Measuring from that sub-pixel contour rather than from the nearest transparent
+pixel is what makes the stroke smooth. Whole-pixel distances quantise, and on a
+shallow diagonal — where the nearest empty pixel stays directly below for a long
+run — they quantise into a staircase, which is the one artefact a stroke must not
+have. Fractional widths are therefore worth having: both edges of the stroke fall
+between pixels.
 
 **Stroke Color**'s alpha is blend strength, not result transparency. At half
 alpha the stroke tints the art beneath it; it does not make the silhouette
