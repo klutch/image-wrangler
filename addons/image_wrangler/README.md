@@ -102,7 +102,8 @@ working on rather than about the image.
 | Alpha Ceiling | 1.0 | Alpha at or above this is forced fully solid, with the range between stretched across the two. |
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
-| Edge Cleanup → Stroke Width | 0.0 (off) | Width of the inside stroke in pixels, antialiased, and the switch for the whole group. See below. |
+| Edge Cleanup → Enabled | on | Restores the antialiasing on edges that ended up hard, and switches the stroke on. See below. |
+| Edge Cleanup → Stroke Width | 0.0 (off) | Width of the inside stroke in pixels, antialiased. See below. |
 | Edge Cleanup → Stroke Softness | 0.75 | How soft the stroke's inner edge is. 0 is a hard step, 0.5 a one-pixel falloff, 1 the softest. |
 | Edge Cleanup → Stroke Color | opaque black | Colour of the inside stroke. Its alpha is blend strength, not result transparency. |
 
@@ -257,12 +258,13 @@ and is honoured rather than rejected.
 ### Edge Cleanup
 
 Two finishing jobs the keyer cannot do while it is still deciding what is
-background. **Stroke Width** is the switch for both: at 0 the group does nothing
-at all, and above 0 both halves run.
+background. **Enabled** switches both on, and is on by default; **Stroke Width**
+at 0 leaves the restoration running on its own.
 
-They share a switch because they need each other. The stroke places its edges
-from the alpha's own sub-pixel contour, which a hard silhouette does not have —
-and giving a hard silhouette one is exactly what the restoration does.
+They sit together because the stroke depends on the restoration. The stroke
+places its edges from the alpha's own sub-pixel contour, which a hard silhouette
+does not have — and giving a hard silhouette one is exactly what the restoration
+does.
 
 **Restoring antialiasing.** Everything else here builds the matte *while*
 cutting, which only helps where this operation is the one doing the cutting — it
@@ -345,11 +347,20 @@ Colors**: a white plate with a red panel inside the subject takes one entry and
 one pick. The colour is sampled from the image at process time rather than
 stored, so a swatch can never disagree with what it will actually remove.
 
-An island has no row to carry a tolerance on, so it uses the default 0.02.
-Loosening a **Remove Colors** entry does not loosen the islands — the entries
-there describe colours an island by definition is not, or the border flood would
-have reached it already. An island that needs a looser tolerance is really a
-background colour: add it to the list instead.
+**Each island has its own tolerance**, on the slider under the list, applying to
+whichever row is highlighted. How clean one region is says nothing about the one
+beside it — a speckled patch wants a loose tolerance where the flat panel next to
+it would be eaten by the same number.
+
+Loosening a **Remove Colors** entry does not loosen the islands, and never did:
+the entries there describe colours an island by definition is not, or the border
+flood would have reached it already.
+
+**A new island starts where the last one left off**, taking the previous row's
+tolerance and its Subtract/Add mode. Picking islands is repetitive — several
+spots in one image, wanted the same way — and setting the same two controls after
+every click is exactly the sort of thing the list should remember. The same goes
+for a new **Polygon Edit** region and its mode.
 
 One consequence: clicking the subject by mistake keys out *that* colour and eats
 part of the subject. The preview shows it at once, and removing the row undoes

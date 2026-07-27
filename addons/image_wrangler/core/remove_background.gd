@@ -238,10 +238,11 @@ func _snapshot_settings() -> void:
 ## to precompute against. An island's key is the colour of the pixel it landed on,
 ## sampled now rather than stored, so it always removes exactly what was clicked.
 ##
-## Islands have no row of their own to carry a tolerance on, so they take
-## [constant RemoveColorEntry.DEFAULT_TOLERANCE]. Borrowing one from the Remove
-## Colors list would be worse than a constant: the entries there describe colours
-## an island by definition is not, or the flood would have reached it already.
+## Each island brings its own tolerance. An island is pointed at one region of one
+## image, and how clean that region is says nothing about the one beside it —
+## borrowing a number from the Remove Colors list would be worse still, since
+## those entries describe colours an island by definition is not, or the flood
+## would have reached it already.
 ##
 ## The returned order matters — island [code]i[/code] owns key
 ## [code]_color_count + i[/code], which is what saves carrying a second array.
@@ -272,7 +273,7 @@ func _build_keys(data: PackedByteArray, width: int, height: int) -> PackedInt32A
 			continue
 		var index := point.y * width + point.x
 		_keys.append(_color_at(data, index))
-		_key_tolerances.append(RemoveColorEntry.DEFAULT_TOLERANCE)
+		_key_tolerances.append(entry.color_tolerance)
 		seeds.append(index)
 	return seeds
 
@@ -395,15 +396,22 @@ func get_settings_schema() -> Array[Dictionary]:
 			"tooltip": "Regions drawn over the preview by hand. Subtract makes the inside fully\ntransparent whatever color it is; Add makes it fully opaque.\n\nThis is the one thing here that does not work by color, so it is the way\nto edit something that has no color in common with itself — a watermark,\na scan edge, a stray element in a corner. Shapes may be concave.\n\nThe edge is hard: no antialiasing is rebuilt along it, since there is no\nbackground there to have blended with.",
 		},
 		{
+			"property": &"edge_cleanup",
+			"label": "Enabled",
+			"group": "Edge Cleanup",
+			"collapsed": true,
+			"type": SettingType.BOOL,
+			"tooltip": "Restores the antialiasing on edges that ended up hard — a solid pixel\nsitting straight against a transparent one, with no half-covered pixels\nbetween — by working out what their coverage should have been from the\ncolors either side.\n\nIt costs nothing where nothing is wrong: an edge that already has its matte\nhas half-covered pixels in the way, so the pass never sees it. It earns its\nplace on a source that was aliased before it arrived, or on an edge that\nAlpha Floor or a hard cutoff flattened.\n\nAlso the switch for the stroke below, which needs a soft silhouette to\nmeasure its own edge against. Polygon Edit regions are left alone: those\nedges are hard on purpose.",
+		},
+		{
 			"property": &"stroke_width",
 			"label": "Stroke Width",
 			"group": "Edge Cleanup",
-			"collapsed": true,
 			"type": SettingType.FLOAT,
 			"min": 0.0,
 			"max": 5.0,
 			"step": 0.25,
-			"tooltip": "Width of the inside stroke in pixels, and the switch for this whole group.\n0 does nothing at all.\n\nInside: the stroke is drawn within the silhouette of everything visible and\nnever extends it, so it follows the holes in a shape as well as its outer\ncontour, and leaves the alpha channel exactly as it found it.\n\nIt is antialiased, so fractional widths are worth having — both its edges\nfall between pixels rather than stepping along them.\n\nAbove 0 this also restores the antialiasing on edges that ended up hard,\nwhich is what gives the stroke a soft silhouette to measure its own edge\nagainst. Polygon Edit regions are left out of that: those edges are hard on\npurpose.",
+			"tooltip": "Width of the inside stroke in pixels. 0 draws none, leaving the rest of\nthis group to its antialiasing work.\n\nInside: the stroke is drawn within the silhouette of everything visible and\nnever extends it, so it follows the holes in a shape as well as its outer\ncontour, and leaves the alpha channel exactly as it found it.\n\nIt is antialiased, so fractional widths are worth having — both its edges\nfall between pixels rather than stepping along them.",
 		},
 		{
 			"property": &"stroke_softness",
@@ -439,11 +447,17 @@ func clamp_settings_to_schema(target: Resource = null) -> void:
 	if target == null:
 		target = get_settings()
 	var typed := target as RemoveBackgroundSettings
-	if typed == null or typed.remove_colors == null:
+	if typed == null:
 		return
-	for entry in typed.remove_colors.entries:
-		if entry != null:
-			entry.color_tolerance = clampf(entry.color_tolerance, 0.0, RemoveColorEntry.MAX_TOLERANCE)
+	if typed.remove_colors != null:
+		for entry in typed.remove_colors.entries:
+			if entry != null:
+				entry.color_tolerance = clampf(entry.color_tolerance, 0.0, RemoveColorEntry.MAX_TOLERANCE)
+	# Islands carry one each now, and are just as far out of the schema's reach.
+	if typed.islands != null:
+		for island in typed.islands.entries:
+			if island != null:
+				island.color_tolerance = clampf(island.color_tolerance, 0.0, RemoveColorEntry.MAX_TOLERANCE)
 
 
 ## Convenience entry point for code that just wants the default behaviour.
@@ -483,7 +497,7 @@ func process_image(source: Image) -> Image:
 	# they are geometry and paint, and owe nothing to the keying being skipped.
 	if _keys.is_empty():
 		var regions := _protect_mask(data, width, height)
-		if blacked.is_empty() and regions.is_empty() and not _edge_cleanup_enabled():
+		if blacked.is_empty() and regions.is_empty() and not _wants_stroke():
 			return image
 		return _regions_only(image, data, blacked, regions, pixel_count)
 
@@ -562,17 +576,21 @@ func process_image(source: Image) -> Image:
 	return _compose(data, coverage, key_of, nearest, stroke, width, height)
 
 
-## Whether the Edge Cleanup group does anything.
+## Whether the Edge Cleanup group does anything: its antialiasing restoration and
+## its stroke both hang off the one switch.
 ##
-## The stroke width is the switch for both halves of it. At zero there is no
-## stroke to draw and no reason to spend a scan re-matteing edges nobody asked
-## about; above zero the two want to run together anyway, since the restoration is
-## what gives a hard silhouette the partial alpha the stroke measures against.
-##
-## The colour's alpha is deliberately not part of this. A transparent colour still
-## means the group is on — the restoration runs, and only the drawing is a no-op.
+## The stroke's own width and colour are deliberately not part of this. A width of
+## zero or a transparent colour still leaves the group on and the restoration
+## running — only the drawing becomes a no-op.
 func _edge_cleanup_enabled() -> bool:
-	return settings.stroke_width > 0.0
+	return settings.edge_cleanup
+
+
+## Whether a stroke would actually put paint down. Zero width or a fully
+## transparent colour both mean no, and neither is worth a pass over the image to
+## find out.
+func _wants_stroke() -> bool:
+	return _edge_cleanup_enabled() and settings.stroke_width > 0.0 and settings.stroke_color.a > 0.0
 
 
 ## The alpha the image ends up with, 0 to 1, which is the source's own multiplied
@@ -667,11 +685,10 @@ func _polygon_mask(width: int, height: int) -> PackedByteArray:
 ## when there are none.
 ##
 ## An Add island floods exactly as a Subtract one does — outwards from the clicked
-## pixel, through anything within [constant RemoveColorEntry.DEFAULT_TOLERANCE] of
-## the colour it landed on — and then forces that region opaque instead of
-## removing it. So the two are the same gesture pointed the other way: click a
-## region a loose tolerance ate and it comes back, bounded by the same edges that
-## would have bounded its removal.
+## pixel, through anything within its own tolerance of the colour it landed on —
+## and then forces that region opaque instead of removing it. So the two are the
+## same gesture pointed the other way: click a region a loose tolerance ate and it
+## comes back, bounded by the same edges that would have bounded its removal.
 ##
 ## Its own flood rather than a mode inside [method _classify], because the two
 ## cannot share a queue. The background flood claims pixels once and never
@@ -684,6 +701,7 @@ func _protect_mask(data: PackedByteArray, width: int, height: int) -> PackedByte
 
 	var seeds := PackedInt32Array()
 	var seed_keys: Array[Color] = []
+	var seed_tolerances: Array[float] = []
 	for entry in settings.islands.entries:
 		if entry == null or not entry.enabled or entry.mode != IWAlphaMode.Mode.ADD:
 			continue
@@ -693,6 +711,7 @@ func _protect_mask(data: PackedByteArray, width: int, height: int) -> PackedByte
 		var index := point.y * width + point.x
 		seeds.append(index)
 		seed_keys.append(_color_at(data, index))
+		seed_tolerances.append(entry.color_tolerance)
 	if seeds.is_empty():
 		return empty
 
@@ -706,9 +725,9 @@ func _protect_mask(data: PackedByteArray, width: int, height: int) -> PackedByte
 	# background flood is: the marking has to land in this array, and handing a
 	# Packed array to a function to be written through is the sort of thing that
 	# depends on which side of a copy-on-write you end up on.
-	var tolerance := RemoveColorEntry.DEFAULT_TOLERANCE
 	for s in seeds.size():
 		var key: Color = seed_keys[s]
+		var tolerance: float = seed_tolerances[s]
 		var head := 0
 		var tail := 0
 		if protect[seeds[s]] == 0:
@@ -1035,7 +1054,7 @@ func _restore_subject(coverage: PackedFloat32Array, x: int, y: int, width: int, 
 ## by the alpha the source arrived with.
 func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedFloat32Array:
 	var empty := PackedFloat32Array()
-	if not _edge_cleanup_enabled() or settings.stroke_color.a <= 0.0:
+	if not _wants_stroke():
 		return empty
 	var stroke_width := settings.stroke_width
 	var strength := settings.stroke_color.a

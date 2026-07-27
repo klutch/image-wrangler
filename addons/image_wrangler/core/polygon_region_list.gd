@@ -38,8 +38,15 @@ func get_at(index: int) -> PolygonRegion:
 
 ## Appends an empty region with a fresh swatch and returns it, for the drawing
 ## session to fill in.
+##
+## It starts on the same mode as the region before it, so drawing several Add
+## regions in a row does not mean resetting the dropdown after each one. The first
+## region has nothing to follow and takes the default.
 func add() -> PolygonRegion:
 	var region := PolygonRegion.create()
+	var previous := get_at(regions.size() - 1)
+	if previous != null:
+		region.mode = previous.mode
 	regions.append(region)
 	return region
 

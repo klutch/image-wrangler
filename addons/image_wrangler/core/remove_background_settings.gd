@@ -110,6 +110,14 @@ extends Resource
 ## Alpha at or above this is forced solid. See [member alpha_floor].
 @export var alpha_ceiling: float = 1.0
 
+## Switch for the whole Edge Cleanup group: the antialiasing restoration in
+## [method RemoveBackground._restore_edges] and the inside stroke both.
+##
+## On by default, and cheap where there is nothing to fix — the restoration only
+## touches a solid pixel sitting straight against a clear one, and a properly
+## matted edge has half-covered pixels in between.
+@export var edge_cleanup: bool = true
+
 ## How soft the stroke's inner edge is, from a hard step at zero to the widest
 ## feather at one.
 ##
@@ -125,14 +133,12 @@ extends Resource
 ## it, and does not make the silhouette half-transparent.
 @export var stroke_color: Color = Color(0, 0, 0, 1)
 
-## Width of the inside stroke in pixels, and the switch for the whole Edge
-## Cleanup group.
+## Width of the inside stroke in pixels, or zero for none.
 ##
-## At zero there is no stroke to draw and no reason to spend a scan re-matteing
-## edges nobody asked about, so the antialiasing restoration in [method
-## RemoveBackground._restore_edges] is off too. Above zero both run — and they
-## want to run together, since the restoration is what gives a hard silhouette the
-## partial alpha the stroke needs to place its own edge to sub-pixel accuracy.
+## Zero leaves the rest of [member edge_cleanup] to its antialiasing work. The two
+## sit together because the stroke depends on that work: it places its edges from
+## the alpha's own sub-pixel contour, which a hard silhouette does not have, and
+## giving a hard silhouette one is precisely what the restoration does.
 ##
 ## Inside: the stroke is drawn within the silhouette of everything visible and
 ## never extends it, so it follows interior holes as well as the outer contour and

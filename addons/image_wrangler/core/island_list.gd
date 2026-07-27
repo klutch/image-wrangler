@@ -70,9 +70,19 @@ func has(at: Vector2i) -> bool:
 
 
 ## Appends an entry at [param at] and returns it.
+##
+## It starts on the same mode and tolerance as the entry before it. Picking
+## islands is repetitive work — several spots in one image, wanted the same way —
+## and setting the same two controls again after every click is exactly the sort
+## of thing the list should remember for you. The first entry has nothing to
+## follow and takes the defaults.
 func add(at: Vector2i) -> IslandEntry:
 	var entry := IslandEntry.new()
 	entry.point = at
+	var previous := get_at(entries.size() - 1)
+	if previous != null:
+		entry.mode = previous.mode
+		entry.color_tolerance = previous.color_tolerance
 	entries.append(entry)
 	return entry
 

@@ -309,6 +309,7 @@ static func self_test(operation: IWOperation) -> bool:
 					var picked := islands.add(Vector2i(3, 900))
 					picked.enabled = false
 					picked.mode = IWAlphaMode.Mode.ADD
+					picked.color_tolerance = 0.077
 				elif nested is RemoveColorList:
 					# Two entries with different tolerances, because one would not
 					# catch a decoder that returned the same instance for every

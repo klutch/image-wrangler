@@ -18,6 +18,15 @@ extends Resource
 ## and forces it opaque instead.
 @export var mode: int = IWAlphaMode.Mode.SUBTRACT
 
+## How far a pixel may drift from the colour under this island and still be part
+## of the region it floods.
+##
+## Its own, rather than the constant every island used to share. An island is
+## pointed at one region of one image, and how clean that region is has nothing to
+## do with how clean the one next to it is — a speckled patch wants a loose
+## tolerance where the flat panel beside it would be eaten by the same number.
+@export var color_tolerance: float = RemoveColorEntry.DEFAULT_TOLERANCE
+
 
 ## An independent copy, so two images never share one entry.
 func duplicate_entry() -> IslandEntry:
@@ -25,4 +34,5 @@ func duplicate_entry() -> IslandEntry:
 	copy.point = point
 	copy.enabled = enabled
 	copy.mode = mode
+	copy.color_tolerance = color_tolerance
 	return copy

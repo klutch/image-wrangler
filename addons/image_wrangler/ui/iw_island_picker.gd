@@ -40,6 +40,16 @@ var _list: EntryList
 var _pick_button: Button
 var _remove_button: Button
 var _clear_button: Button
+
+## Tolerance editor for the highlighted row. Hidden rather than disabled when
+## nothing is selected, so the group does not show a control that edits nothing.
+var _editor: HBoxContainer
+var _tolerance_slider: EditorSpinSlider
+
+## Set while the editor is being pointed at another row, so its change signal does
+## not write the row that was selected a moment ago.
+var _loading_editor := false
+
 var _hint: Label
 
 
@@ -84,6 +94,19 @@ func _build() -> void:
 	_list.enabled_toggled.connect(_on_enabled_toggled)
 	_list.mode_changed.connect(_on_mode_changed)
 	add_child(_list)
+
+	_editor = HBoxContainer.new()
+	add_child(_editor)
+
+	_tolerance_slider = EditorSpinSlider.new()
+	_tolerance_slider.label = "Tolerance"
+	_tolerance_slider.min_value = 0.0
+	_tolerance_slider.max_value = RemoveColorEntry.MAX_TOLERANCE
+	_tolerance_slider.step = 0.005
+	_tolerance_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_tolerance_slider.tooltip_text = "How far a pixel may drift from the color under this island and still be\npart of the region it floods.\n\nIts own, not shared: how clean one region is says nothing about the one\nbeside it. A new island starts on whatever the last one was set to."
+	_tolerance_slider.value_changed.connect(_on_tolerance_changed)
+	_editor.add_child(_tolerance_slider)
 
 	_hint = Label.new()
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -188,8 +211,42 @@ func _island_list() -> IslandList:
 
 
 func _on_row_selected(_index: int) -> void:
+	_load_editor()
 	_update_buttons()
 	selection_changed.emit()
+
+
+## Points the tolerance slider at the highlighted row, or hides it when there is
+## none.
+func _load_editor() -> void:
+	var islands := _island_list()
+	var entry := islands.get_at(selected_index()) if islands != null else null
+	_editor.visible = entry != null
+	if entry == null:
+		return
+	# The control is being told what the row holds, not the other way round.
+	_loading_editor = true
+	_tolerance_slider.set_value_no_signal(entry.color_tolerance)
+	# EditorSpinSlider paints its own value, and the no-signal setter deliberately
+	# skips the notification that would repaint it.
+	_tolerance_slider.queue_redraw()
+	_loading_editor = false
+
+
+func _on_tolerance_changed(value: float) -> void:
+	if _loading_editor:
+		return
+	var islands := _island_list()
+	var index := selected_index()
+	var entry := islands.get_at(index) if islands != null else null
+	if entry == null:
+		return
+	entry.color_tolerance = value
+	# Redrawn rather than rebuilt, so dragging the slider does not pull the row
+	# out from under the selection driving it.
+	_list.update_row(index, _row_data(index, entry))
+	_set_hint("")
+	islands_changed.emit()
 
 
 func _on_enabled_toggled(index: int, on: bool) -> void:
@@ -242,6 +299,7 @@ func _on_clear_pressed() -> void:
 
 func _select(index: int) -> void:
 	_list.select(index)
+	_load_editor()
 	_update_buttons()
 	selection_changed.emit()
 
@@ -253,9 +311,10 @@ func _row_data(index: int, entry: IslandEntry) -> Dictionary:
 	var color := Color.MAGENTA
 	if _color_provider.is_valid():
 		color = _color_provider.call(point)
+	var tolerance := entry.color_tolerance if entry != null else RemoveColorEntry.DEFAULT_TOLERANCE
 	return {
 		"color": color,
-		"text": "%d.  (%d, %d)" % [index + 1, point.x, point.y],
+		"text": "%d.  (%d, %d)   %.3f" % [index + 1, point.x, point.y, tolerance],
 		"enabled": entry != null and entry.enabled,
 		"mode": entry.mode if entry != null else IWAlphaMode.Mode.SUBTRACT,
 	}
@@ -270,6 +329,7 @@ func _refresh() -> void:
 		for i in islands.size():
 			rows.append(_row_data(i, islands.get_at(i)))
 	_list.set_rows(rows)
+	_load_editor()
 	_update_buttons()
 
 
