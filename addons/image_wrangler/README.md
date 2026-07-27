@@ -80,13 +80,12 @@ The full derivation is in the header comment of
 ### Settings
 
 The form is split into a **Remove Colors** group, a **Settings** group, an
-**Island Picker** group, a **Polygon Edit** group and a **Restore Edges** group.
-Each folds away by clicking its heading; **Remove Colors** and **Settings** start
-open, since all five expanded is taller than the dock. Folds are remembered for as
-long as the editor is open, so
-switching to another operation and back finds the form as you left it — they are
-not saved to a sidecar, being about what you are working on rather than about the
-image.
+**Island Picker** group and a **Polygon Edit** group. Each folds away by clicking
+its heading; **Remove Colors** and **Settings** start open, since all four
+expanded is taller than the dock. Folds are remembered for as long as the editor
+is open, so switching to another operation and back finds the form as you left it
+— they are not saved to a sidecar, being about what you are working on rather than
+about the image.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
@@ -101,9 +100,6 @@ image.
 | Refine Radius | 2 | Window radius for that filter: roughly how far a ragged patch of alpha may sit from a real edge and still be pulled onto it. |
 | Alpha Floor | 0.0 | Alpha at or below this is forced fully clear. Applied last, so it also clears what **Refine Edges** leaves behind. See below. |
 | Alpha Ceiling | 1.0 | Alpha at or above this is forced fully solid, with the range between stretched across the two. |
-| Restore Edges → Enabled | off | Re-mattes edges that ended up hard, working their coverage back out of the colours either side. See below. |
-| Restore Edges → Edge Thickness | 1.0 | How many pixels wide the rebuilt antialiasing may be, split half into the transparent side and half into the solid one. |
-| Restore Edges → Sample Color Inward | 2.0 | How far into the shape to reach for the subject colour, in pixels. 0 uses the nearest opaque pixel instead. |
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
 
@@ -254,68 +250,6 @@ So start low. A floor around 0.1–0.2 with the ceiling left at 1.0 clears haze
 while keeping most of the gradient; 0.5 / 0.6 is decisive but close to a binary
 cutout. Setting the ceiling at or below the floor is a hard cutoff at that value,
 and is honoured rather than rejected.
-
-### Restoring edges
-
-Everything above builds the antialiasing *while* deciding what is background,
-which only helps where this operation is the one doing the cutting. It cannot
-help an edge that arrived aliased — a sprite someone already cut out badly, a
-screenshot, art drawn with a hard brush — or an edge that a low **Alpha Ceiling**
-flattened on the way past. Those come out with a solid pixel sitting straight
-against a transparent one and nothing in between.
-
-The **Restore Edges** group is a pass over the finished alpha that looks for
-exactly that and rebuilds the missing coverage. **Enabled** is off by default: a
-well-keyed edge has nothing here to fix, and the pass costs a scan over the image.
-
-It works from the same relation as everything else. An edge pixel is
-`C = a * F + (1 - a) * K`, so its distance from the background is `a` times the
-subject's distance from the background, and dividing one by the other gives back
-`a` with the unknown `F` cancelled out.
-
-**Adjacency is the test**, and it is what stops this undoing good work. The band
-is seeded only from pixels with the opposite extreme *directly* beside them. A
-properly matted edge has half-covered pixels in between, so neither side can see
-the other, nothing seeds, and the edge is left exactly as it was. Polygon Edit
-regions are skipped on both sides — a drawn cut is a straight line you asked for,
-not an edge that lost its antialiasing.
-
-**Edge Thickness** is how wide the rebuilt edge may be, **split across the
-boundary** — half into the transparent side, half into the solid one, with the
-odd pixel going outward. A real antialiased edge straddles the boundary rather
-than hanging off one side of it, so the band does too.
-
-Each side is grown separately, and a banded pixel may only spread onto pixels at
-its own extreme. That is what makes the two halves mean anything: one side-blind
-flood spends its budget wherever the search wanders, and since a hard cut leaves
-its recoverable colour on the transparent side, in practice that was nearly all
-outward.
-
-1 suits an ordinary aliased edge, which is only ever one pixel wide. Raise it for
-something that should have had a soft edge — a glow, a drop shadow, a blurred
-cutout — where the band needing rebuilt is wider than a single pixel. The band
-grows only through pixels that are themselves at an extreme, so the first
-half-covered pixel it meets is a wall and a thick setting cannot run away along an
-edge that already has its matte.
-
-It cannot invent softness that is not in the colours. A pixel deeper in that is
-pure subject measures as fully covered and keeps its alpha, so a wide setting on a
-genuinely hard edge does nothing — it only matters where the colours carry a
-gradient, which is exactly where a soft edge was lost.
-
-**Sample Color Inward** decides where `F` comes from, in pixels of reach. The
-pixel being restored is itself part background — that is what makes it an edge —
-so measuring it against its own colour asks how much of a blend a blend is, and
-answers "all of it". Reaching inward gets past that, following the direction the
-alpha around the pixel points. The walk stops at the first pixel that is not
-solid, so it can never cross a gap and come back with a colour from the far side,
-however far the reach is set. **0 switches it off** and uses the nearest opaque
-pixel instead, which is what a subject too thin to step into needs. Both this and
-the thickness are rounded to whole pixels, since the walks are over pixels.
-
-Where the subject is indistinguishable from the background the division has
-nothing to divide by, and the pixel is left as it was rather than amplified into
-noise.
 
 ### Picking islands
 

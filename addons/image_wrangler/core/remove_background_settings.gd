@@ -110,42 +110,6 @@ extends Resource
 ## Alpha at or above this is forced solid. See [member alpha_floor].
 @export var alpha_ceiling: float = 1.0
 
-## Re-matte edges that ended up hard, working the coverage back out of the
-## colours either side of them. See [method RemoveBackground._restore_edges].
-##
-## Off by default because a correctly keyed image has nothing for it to do: the
-## edge band already builds the matte. It earns its place on an edge that never
-## got one — a source that was aliased before it arrived, or an edge a hard
-## setting elsewhere flattened.
-@export var restore_edges: bool = false
-
-## How many pixels wide the rebuilt antialiasing may be, split across the edge.
-##
-## Half goes into the transparent side and half into the solid one, so the new
-## edge straddles the boundary the way a real antialiased edge does rather than
-## growing off one side of it. The odd pixel goes outward, which is the side a
-## hard cut leaves recoverable colour on.
-##
-## One suits an ordinary aliased edge, which is only ever a pixel wide. Wider is
-## for something that should have had a soft edge — a glow, a drop shadow — where
-## the band needing rebuilt is more than one pixel across.
-##
-## Self-limiting rather than a blur radius: a pixel further in that is pure subject
-## measures as fully covered and keeps its alpha, so widening this on a genuinely
-## hard edge changes nothing.
-@export var restore_thickness: float = 1.0
-
-## How far into the opaque shape to reach for the subject colour, in pixels.
-##
-## The pixel on the boundary is itself part background, which is the whole reason
-## it is being restored. Measuring against it asks how much of a blend a blend is
-## and answers "all of it". Reaching inward gets past the contamination to
-## something that is only subject.
-##
-## Zero switches the reach off and falls back to the nearest opaque pixel, which
-## is what a subject too thin to step into needs.
-@export var sample_inward_distance: float = 2.0
-
 
 func _init() -> void:
 	islands = IslandList.new()
