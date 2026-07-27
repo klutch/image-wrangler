@@ -205,15 +205,30 @@ func clamp_settings_to_schema(settings: Resource = null) -> void:
 ## the bar having moved, which is the right answer for one that is instant.
 var progress_reporter := Callable()
 
+## Set from another thread to ask a run to give up early.
+##
+## A plain flag rather than anything guarded, because it is written once from the
+## main thread and only ever read on the worker: the worst a torn read could do is
+## miss a checkpoint and stop at the next one.
+##
+## Safe to ignore. An operation that never checks it simply runs to the end, which
+## for a fast one is the same thing.
+var cancelled := false
 
-## Reports [param fraction] complete, if anyone is listening.
+
+## Reports [param fraction] complete, and returns whether the run should carry on.
+##
+## The two are one call because they want the same places: a boundary worth
+## reporting from is a boundary worth stopping at, and pairing them means a new
+## pass cannot pick up the reporting and quietly forget the checking.
 ##
 ## Called from whichever thread is doing the work, so what is on the other end
 ## must expect that — the dock's reporter defers to the main thread rather than
 ## touching a control from the worker.
-func report_progress(fraction: float) -> void:
+func report_progress(fraction: float) -> bool:
 	if progress_reporter.is_valid():
 		progress_reporter.call(clampf(fraction, 0.0, 1.0))
+	return not cancelled
 
 
 ## Runs the operation. [param source] is left untouched; a new image is returned.
@@ -222,5 +237,9 @@ func report_progress(fraction: float) -> void:
 ## be. It must therefore touch nothing but its own settings and the image it was
 ## given — no dock state, no shared resources, nothing the editor might be reading
 ## at the same time.
+##
+## When [method report_progress] says to stop, return anything at all and return it
+## quickly — the caller asked because it has already decided to throw the answer
+## away. Returning [param source] is the cheapest way to say nothing.
 func process_image(source: Image) -> Image:
 	return source

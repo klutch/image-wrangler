@@ -141,17 +141,29 @@ extends Resource
 ## it, and does not make the silhouette half-transparent.
 @export var stroke_color: Color = Color(0, 0, 0, 1)
 
-## Width of the inside stroke in pixels, or zero for none.
+## Width of the stroke drawn inside the silhouette, in pixels, or zero for none.
 ##
-## Zero leaves the rest of [member edge_cleanup] to its antialiasing work. The two
-## sit together because the stroke depends on that work: it places its edges from
-## the alpha's own sub-pixel contour, which a hard silhouette does not have, and
-## giving a hard silhouette one is precisely what the restoration does.
+## Inside means it never extends the shape: it follows interior holes as well as
+## the outer contour, and leaves the alpha channel exactly as it found it. Only
+## colour changes.
 ##
-## Inside: the stroke is drawn within the silhouette of everything visible and
-## never extends it, so it follows interior holes as well as the outer contour and
-## leaves the alpha channel exactly as it found it.
-@export var stroke_width: float = 0.0
+## Both stroke widths sit under [member edge_cleanup] because they depend on its
+## other half: a stroke places its edges from the alpha's own sub-pixel contour,
+## which a hard silhouette does not have, and giving a hard silhouette one is
+## precisely what the antialiasing restoration does.
+@export var inner_stroke_width: float = 0.5
+
+## Width of the stroke drawn outside the silhouette, in pixels, or zero for none.
+##
+## The counterpart to [member inner_stroke_width], and unlike it this one [i]adds
+## alpha[/i]: outside the shape there is nothing to colour, so the stroke has to
+## bring its own. The result is a subject that has grown by this many pixels.
+##
+## Composited underneath the subject rather than over it, so the shape's own soft
+## edge stays on top and the stroke shows through it — which is what an outer
+## stroke looks like, and what stops it eating the antialiasing it is meant to sit
+## behind.
+@export var outer_stroke_width: float = 0.5
 
 
 func _init() -> void:

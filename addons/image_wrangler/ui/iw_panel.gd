@@ -88,6 +88,13 @@ var _preview_thread: Thread
 ## Whether something asked for a preview while one was already running, which also
 ## means whatever comes back from that run is out of date.
 var _preview_pending := false
+
+## The operation the worker is running, kept so it can be told to stop.
+##
+## A run that has been superseded is producing an answer nobody will look at, so
+## there is no reason to let it finish — cancelling it frees the core and gets the
+## replacement started sooner.
+var _preview_worker_op: IWOperation
 var _suffix_is_default := true
 var _pending_outputs: Dictionary = {}
 
@@ -243,9 +250,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 func _exit_tree() -> void:
 	_flush_autosave()
 	_preview_pending = false
+	# Asked to stop before being waited on, so the wait is however long the current
+	# pass has left rather than however long the whole image takes.
+	if _preview_worker_op != null:
+		_preview_worker_op.cancelled = true
 	if _preview_thread != null:
 		_preview_thread.wait_to_finish()
 		_preview_thread = null
+	_preview_worker_op = null
 
 
 func _build_operations() -> void:
@@ -1162,17 +1174,21 @@ func _on_original_fade_changed(value: float) -> void:
 	_preview.original_fade = value * 0.01
 
 
-## Asks for a preview, starting one now or queueing it behind the run in flight.
+## Asks for a preview, starting one now or replacing the run in flight.
 ##
-## Only ever one worker at a time. A second [Thread] would have to be joined
-## before it could be replaced, and joining blocks — which is the whole thing this
-## is here to avoid. The pending flag does the same job for nothing.
+## Only ever one worker at a time. A second [Thread] would have to be joined before
+## it could be replaced, and joining blocks — which is the whole thing this is here
+## to avoid. So a request arriving mid-run tells that run to stop and leaves a note
+## to start again; the run bails at its next checkpoint, and the handler that
+## collects it starts the replacement.
 func _run_preview() -> void:
 	_debounce.stop()
 	if _source_image == null or _operation == null:
 		return
 	if _preview_thread != null:
 		_preview_pending = true
+		if _preview_worker_op != null:
+			_preview_worker_op.cancelled = true
 		return
 	_start_preview()
 
@@ -1194,7 +1210,10 @@ func _start_preview() -> void:
 		# so it hands the number to the main thread and returns.
 		_on_preview_progress.call_deferred(fraction)
 
+	# set_busy resets the bar even when it is already up, so a restart begins from
+	# nothing rather than from wherever the abandoned run had got to.
 	_preview.set_busy(true)
+	_preview_worker_op = worker
 	_preview_thread = Thread.new()
 	_preview_thread.start(_preview_worker.bind(worker, source))
 
@@ -1221,6 +1240,7 @@ func _on_preview_done(source: Image, result: Image, elapsed: int) -> void:
 		# Thread insists on before it can be let go.
 		_preview_thread.wait_to_finish()
 		_preview_thread = null
+	_preview_worker_op = null
 
 	# Kept only while it still describes what is on screen. A run whose image was
 	# swapped out under it, or one already superseded by another request, is a

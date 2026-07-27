@@ -71,11 +71,17 @@ drawing it means it is crisp at any editor scale, picks up the theme's accent
 colour, and cannot go missing. It shrinks only when the preview column runs out
 of room, and stays square when it does.
 
-Only one run happens at a time. Changing a setting mid-run queues another rather
-than starting a second thread, and the result of a run whose image was swapped out
-underneath it is thrown away rather than shown. The worker gets its own copy of
-the settings, so nothing you touch while it runs can change the answer it is
-halfway through computing.
+Only one run happens at a time. Changing a setting mid-run **tells that run to
+stop** and queues a replacement: the answer it was working towards is one nobody
+will look at, so finishing it would only hold up the one that matters. It gives up
+at its next stage boundary — between them a pass runs to its end once started, so
+how quickly a cancel takes hold is however long the current pass has left. The bar
+resets when the replacement starts; the spinner does not, since work never
+actually stopped happening.
+
+The result of a run whose image was swapped out underneath it is thrown away
+rather than shown. The worker gets its own copy of the settings, so nothing you
+touch while it runs can change the answer it is halfway through computing.
 
 **Process All is still synchronous** and will lock the editor for the length of
 the batch.
@@ -132,7 +138,8 @@ working on rather than about the image.
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
 | Edge Cleanup → Enabled | on | Restores the antialiasing on edges that ended up hard, and switches the stroke on. See below. |
-| Edge Cleanup → Stroke Width | 0.0 (off) | Width of the inside stroke in pixels, antialiased. See below. |
+| Edge Cleanup → Inner Stroke Width | 0.5 | Width of the stroke drawn inside the silhouette, in pixels. Colour only. See below. |
+| Edge Cleanup → Outer Stroke Width | 0.5 | Width of the stroke drawn outside it. Adds alpha, so the subject grows. See below. |
 | Edge Cleanup → Stroke Softness | 0.75 | How soft the stroke's inner edge is. 0 is a hard step, 0.5 a one-pixel falloff, 1 the softest. |
 | Edge Cleanup → Auto Stroke Color | off | Takes the stroke colour from the image instead of picking one. Hides the picker. See below. |
 | Edge Cleanup → Stroke Color | opaque black | Colour of the inside stroke. Its alpha is blend strength, not result transparency. |
@@ -288,13 +295,12 @@ and is honoured rather than rejected.
 ### Edge Cleanup
 
 Two finishing jobs the keyer cannot do while it is still deciding what is
-background. **Enabled** switches both on, and is on by default; **Stroke Width**
-at 0 leaves the restoration running on its own.
+background. **Enabled** switches both on, and is on by default; leaving both
+stroke widths at 0 leaves the restoration running on its own.
 
-They sit together because the stroke depends on the restoration. The stroke
-places its edges from the alpha's own sub-pixel contour, which a hard silhouette
-does not have — and giving a hard silhouette one is exactly what the restoration
-does.
+They sit together because a stroke depends on the restoration. A stroke places
+its edges from the alpha's own sub-pixel contour, which a hard silhouette does
+not have — and giving a hard silhouette one is exactly what the restoration does.
 
 **Restoring antialiasing.** Everything else here builds the matte *while*
 cutting, which only helps where this operation is the one doing the cutting — it
@@ -317,9 +323,19 @@ never touches it. There is nothing to tune down, because it cannot undo good wor
 in the first place. Polygon Edit regions are skipped on both sides — those edges
 are hard on purpose.
 
-**The stroke** is drawn *inside* the silhouette of everything visible. Inside
-means it never extends the shape: it follows the holes in a subject as well as
-its outer contour, and leaves the alpha channel exactly as it found it.
+**There are two strokes**, either or both. The **inner** one is drawn inside the
+silhouette of everything visible: it never extends the shape, follows the holes in
+a subject as well as its outer contour, and leaves the alpha channel exactly as it
+found it. Only colour changes.
+
+The **outer** one is its mirror, and differs in one way that matters: outside the
+shape there is nothing to colour, so it has to **add alpha**. The subject comes out
+that many pixels larger than it went in. It is composited *underneath* the
+subject rather than over it, so the shape's own soft edge stays on top and the
+stroke shows through it — which is what an outer stroke looks like, and what stops
+it eating the antialiasing it is there to sit behind.
+
+Both measure from the same contour and share the colour and the softness.
 
 **It is antialiased, and that is the fiddly part.** What matters is the contour
 where alpha crosses a half, and that sits *between* pixels rather than on them. A

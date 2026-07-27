@@ -345,15 +345,27 @@ func set_polygons(polygons: Array, colors: PackedColorArray, selected: int, draf
 ## Starting a run resets the bar, so a second run cannot appear to begin wherever
 ## the first one left off.
 func set_busy(active: bool) -> void:
-	if _busy == active:
-		return
-	_busy = active
 	if active:
+		# The bar resets even when a run was already going, since a replacement run
+		# starts from nothing and showing it inheriting the abandoned one's place
+		# would be a lie about how far along it is.
 		_progress = 0.0
-		_spin_time = 0.0
-	# The spinner is the only thing here that animates, so the frame loop is only
-	# running while there is something to turn.
-	set_process(active)
+		if not _busy:
+			# The spinner does not, though. It is saying work is happening, and one
+			# run giving way to another has not stopped it happening — restarting it
+			# would put a stutter in the one thing on screen that must look continuous.
+			_spin_time = 0.0
+			_busy = true
+			# The spinner is the only thing here that animates, so the frame loop only
+			# runs while there is something to turn.
+			set_process(true)
+		_canvas.queue_redraw()
+		return
+
+	if not _busy:
+		return
+	_busy = false
+	set_process(false)
 	_canvas.queue_redraw()
 
 

@@ -60,8 +60,7 @@ extends IWOperation
 ## RGB, which is how the background creeps back into an edge that looked clean in
 ## the file.
 ##
-## [b]Edge cleanup.[/b] Two finishing jobs, both switched on by
-## [member RemoveBackgroundSettings.stroke_width] rising above zero.
+## [b]Edge cleanup.[/b] Two finishing jobs under one switch.
 ##
 ## The first restores antialiasing to edges that never got a matte. Everything
 ## above builds one while deciding what is background, which only helps where it
@@ -72,14 +71,17 @@ extends IWOperation
 ## own: a pixel only qualifies when the opposite extreme is directly beside it, so
 ## a properly matted edge is invisible to it.
 ##
-## The second draws an outline inside the silhouette of whatever is left, at
-## [member RemoveBackgroundSettings.stroke_color]. It is the one thing here that
-## adds rather than removes, so it happens last and touches only the colour — the
-## alpha channel is left exactly as the keying left it.
+## The second draws an outline along the silhouette of whatever is left. The inner
+## stroke runs within the shape and touches only colour; the outer one runs outside
+## it and has to bring alpha with it, since out there is nothing to colour. Both
+## come last, after everything else has finished working out what the subject's own
+## colour was — a stroke is paint going on top of that answer rather than part of
+## the image to be recovered — and the outer one is composited underneath the
+## subject, so the shape's own soft edge stays on top of it.
 ##
-## They share a switch because they need each other. The stroke places its edges
-## from the alpha's own sub-pixel contour, which a hard silhouette does not have —
-## and giving a hard silhouette one is precisely what the restoration does.
+## They share a switch because they need each other. A stroke places its edges from
+## the alpha's own sub-pixel contour, which a hard silhouette does not have — and
+## giving a hard silhouette one is precisely what the restoration does.
 ##
 ## [b]What colour cannot describe.[/b] Everything above removes background by
 ## colour, which leaves no way to say "this region goes, whatever is in it" — a
@@ -426,14 +428,24 @@ func get_settings_schema() -> Array[Dictionary]:
 			"tooltip": "Restores the antialiasing on edges that ended up hard — a solid pixel\nsitting straight against a transparent one, with no half-covered pixels\nbetween — by working out what their coverage should have been from the\ncolors either side.\n\nIt costs nothing where nothing is wrong: an edge that already has its matte\nhas half-covered pixels in the way, so the pass never sees it. It earns its\nplace on a source that was aliased before it arrived, or on an edge that\nAlpha Floor or a hard cutoff flattened.\n\nAlso the switch for the stroke below, which needs a soft silhouette to\nmeasure its own edge against. Polygon Edit regions are left alone: those\nedges are hard on purpose.",
 		},
 		{
-			"property": &"stroke_width",
-			"label": "Stroke Width",
+			"property": &"inner_stroke_width",
+			"label": "Inner Stroke Width",
 			"group": "Edge Cleanup",
 			"type": SettingType.FLOAT,
 			"min": 0.0,
 			"max": 5.0,
 			"step": 0.25,
-			"tooltip": "Width of the inside stroke in pixels. 0 draws none, leaving the rest of\nthis group to its antialiasing work.\n\nInside: the stroke is drawn within the silhouette of everything visible and\nnever extends it, so it follows the holes in a shape as well as its outer\ncontour, and leaves the alpha channel exactly as it found it.\n\nIt is antialiased, so fractional widths are worth having — both its edges\nfall between pixels rather than stepping along them.",
+			"tooltip": "Width of the stroke drawn inside the silhouette, in pixels. 0 draws none.\n\nInside means it never extends the shape: it follows the holes in a subject\nas well as its outer contour, and leaves the alpha channel exactly as it\nfound it. Only color changes.\n\nAntialiased, so fractional widths are worth having — both its edges fall\nbetween pixels rather than stepping along them.",
+		},
+		{
+			"property": &"outer_stroke_width",
+			"label": "Outer Stroke Width",
+			"group": "Edge Cleanup",
+			"type": SettingType.FLOAT,
+			"min": 0.0,
+			"max": 5.0,
+			"step": 0.25,
+			"tooltip": "Width of the stroke drawn outside the silhouette, in pixels. 0 draws none.\n\nUnlike the inner one this adds alpha — outside the shape there is nothing\nto color, so the stroke brings its own. The subject comes out this many\npixels larger than it went in.\n\nDrawn underneath the subject rather than over it, so the shape's own soft\nedge stays on top and the stroke shows through it. That is what an outer\nstroke looks like, and what stops it eating the antialiasing it is there to\nsit behind.",
 		},
 		{
 			"property": &"stroke_softness",
@@ -522,7 +534,12 @@ func process_image(source: Image) -> Image:
 	# rather than evenly spaced, because the passes are nothing like equal: the
 	# flood and the nearest-subject map between them are most of the work, and a
 	# bar that pretended otherwise would crawl and then leap.
-	report_progress(0.02)
+	#
+	# Each is also where the run gives up if it has been asked to. Between them it
+	# cannot: a pass runs to its end once started, so how quickly a cancel takes
+	# hold is however long the longest pass has left.
+	if not report_progress(0.02):
+		return source
 
 	var data := image.get_data()
 	var blacked := _polygon_mask(width, height)
@@ -541,12 +558,14 @@ func process_image(source: Image) -> Image:
 	# this covers the border flood, which is nearly every background pixel in a
 	# normal image.
 	var key_dist := _distance_map(data, pixel_count)
-	report_progress(0.10)
+	if not report_progress(0.10):
+		return source
 
 	var classified := _classify(data, key_dist, island_seeds, width, height)
 	var mask: PackedByteArray = classified[0]
 	var key_of: PackedInt32Array = classified[1]
-	report_progress(0.40)
+	if not report_progress(0.40):
+		return source
 
 	# Folded into the mask here rather than into the alpha at the end, so that
 	# everything downstream treats these pixels correctly without being told about
@@ -571,20 +590,24 @@ func process_image(source: Image) -> Image:
 				mask[i] = MASK_SUBJECT
 				key_of[i] = KEY_NONE
 
-	report_progress(0.48)
+	if not report_progress(0.48):
+		return source
 
 	var search_radius := maxi(maxi(bleed_radius, edge_width), _MIN_SEARCH_RADIUS)
 	var nearest := _nearest_subject_map(data, mask, key_dist, width, height, search_radius)
-	report_progress(0.62)
+	if not report_progress(0.62):
+		return source
 
 	# Alpha is settled for the whole image before any colour work, because the
 	# refinement below is a neighbourhood operation and cannot run a pixel at a
 	# time.
 	var coverage := _coverage_map(data, key_dist, mask, key_of, nearest, width, height)
-	report_progress(0.72)
+	if not report_progress(0.72):
+		return source
 	if refine_edges:
 		coverage = _guided_refine(coverage, key_dist, width, height)
-		report_progress(0.80)
+		if not report_progress(0.80):
+			return source
 	# Last, so it settles the refinement's leftovers rather than being smoothed
 	# back into a haze by it.
 	if alpha_floor > 0.0 or alpha_ceiling < 1.0:
@@ -594,7 +617,8 @@ func process_image(source: Image) -> Image:
 	# to need restoring, and before the regions below, which are hard on purpose.
 	if _edge_cleanup_enabled():
 		coverage = _restore_edges(data, coverage, key_of, nearest, blacked, width, height)
-	report_progress(0.86)
+	if not report_progress(0.86):
+		return source
 
 	# After everything that can move alpha, since a region is an instruction about
 	# the result rather than a suggestion to the keyer. Refinement smooths across
@@ -616,11 +640,15 @@ func process_image(source: Image) -> Image:
 	# Last of all, so the stroke follows the silhouette that actually comes out —
 	# drawn regions and all — rather than the one the keyer alone would have given.
 	var final_alpha := _final_alpha(data, coverage, pixel_count)
-	var stroke := _stroke_mask(final_alpha, width, height)
-	var stroke_colors := _auto_stroke_colors(data, final_alpha, stroke, width, height)
-	report_progress(0.92)
+	var bands := _stroke_bands(final_alpha, width, height)
+	var inner: PackedFloat32Array = bands[0]
+	var outer: PackedFloat32Array = bands[1]
+	var stroke_colors := _auto_stroke_colors(data, final_alpha, inner, outer, width, height)
+	if not report_progress(0.92):
+		return source
 
-	var composed := _compose(data, coverage, key_of, nearest, stroke, stroke_colors, width, height)
+	var composed := _compose(
+			data, coverage, key_of, nearest, inner, outer, stroke_colors, width, height)
 	report_progress(1.0)
 	return composed
 
@@ -635,12 +663,14 @@ func _edge_cleanup_enabled() -> bool:
 	return settings.edge_cleanup
 
 
-## Whether a stroke would actually put paint down. Zero width means no, and so
-## does a fully transparent colour — but only when the colour is the one being
+## Whether either stroke would actually put paint down. Two zero widths mean no,
+## and so does a fully transparent colour — but only when the colour is the one being
 ## used: an automatic stroke takes its colour from the image and never sees the
 ## picker, whose alpha would otherwise be a hidden switch for a hidden control.
 func _wants_stroke() -> bool:
-	if not _edge_cleanup_enabled() or settings.stroke_width <= 0.0:
+	if not _edge_cleanup_enabled():
+		return false
+	if settings.inner_stroke_width <= 0.0 and settings.outer_stroke_width <= 0.0:
 		return false
 	return settings.auto_stroke_color or settings.stroke_color.a > 0.0
 
@@ -859,23 +889,49 @@ func _regions_only(image: Image, data: PackedByteArray, blacked: PackedByteArray
 	alpha.resize(pixel_count)
 	for i in pixel_count:
 		alpha[i] = out[i * 4 + 3] * to_unit
-	var stroke := _stroke_mask(alpha, width, height)
-	if not stroke.is_empty():
+	var bands := _stroke_bands(alpha, width, height)
+	var inner: PackedFloat32Array = bands[0]
+	var outer: PackedFloat32Array = bands[1]
+	var has_inner := not inner.is_empty()
+	var has_outer := not outer.is_empty()
+	if has_inner or has_outer:
 		var stroke_color := settings.stroke_color
-		var stroke_colors := _auto_stroke_colors(data, alpha, stroke, width, height)
+		var stroke_colors := _auto_stroke_colors(data, alpha, inner, outer, width, height)
 		var auto_colors := not stroke_colors.is_empty()
 		for i in pixel_count:
-			var over := stroke[i]
-			if over <= 0.0:
+			var over := inner[i] if has_inner else 0.0
+			var behind := outer[i] if has_outer else 0.0
+			if over <= 0.0 and behind <= 0.0:
 				continue
 			var offset := i * 4
-			var target := stroke_color
+			var paint := stroke_color
 			if auto_colors:
 				var slot := i * 3
-				target = Color(stroke_colors[slot], stroke_colors[slot + 1], stroke_colors[slot + 2])
-			out[offset] = roundi(clampf(lerpf(out[offset] * to_unit, target.r, over), 0.0, 1.0) * 255.0)
-			out[offset + 1] = roundi(clampf(lerpf(out[offset + 1] * to_unit, target.g, over), 0.0, 1.0) * 255.0)
-			out[offset + 2] = roundi(clampf(lerpf(out[offset + 2] * to_unit, target.b, over), 0.0, 1.0) * 255.0)
+				paint = Color(stroke_colors[slot], stroke_colors[slot + 1], stroke_colors[slot + 2])
+
+			var r := out[offset] * to_unit
+			var g := out[offset + 1] * to_unit
+			var b := out[offset + 2] * to_unit
+			var out_alpha := out[offset + 3] * to_unit
+
+			if over > 0.0:
+				r = lerpf(r, paint.r, over)
+				g = lerpf(g, paint.g, over)
+				b = lerpf(b, paint.b, over)
+			# Under what is already there, exactly as in _compose.
+			if behind > 0.0:
+				var combined := out_alpha + behind * (1.0 - out_alpha)
+				if combined > _EPSILON:
+					var share := behind * (1.0 - out_alpha)
+					r = (r * out_alpha + paint.r * share) / combined
+					g = (g * out_alpha + paint.g * share) / combined
+					b = (b * out_alpha + paint.b * share) / combined
+				out_alpha = combined
+
+			out[offset] = roundi(clampf(r, 0.0, 1.0) * 255.0)
+			out[offset + 1] = roundi(clampf(g, 0.0, 1.0) * 255.0)
+			out[offset + 2] = roundi(clampf(b, 0.0, 1.0) * 255.0)
+			out[offset + 3] = roundi(clampf(out_alpha, 0.0, 1.0) * 255.0)
 
 	return Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, out)
 
@@ -1071,21 +1127,16 @@ func _restore_subject(coverage: PackedFloat32Array, x: int, y: int, width: int, 
 	return found
 
 
-## How strongly the stroke colour is laid over each pixel, or an empty array when
-## there is no stroke to draw.
-##
-## An [i]inside[/i] stroke: it runs within the silhouette of everything visible
-## and never extends it, so it follows the holes in a shape as well as its outer
-## contour and leaves the alpha channel alone. What it needs is a distance from
-## each visible pixel to the nearest place there is nothing.
+## The two stroke bands, as [code][inner, outer][/code], each a strength per pixel
+## and each empty when that stroke is not being drawn.
 ##
 ## [b]The silhouette sits between pixels, not on them.[/b] What matters is the
 ## contour where alpha crosses a half, and a pixel's own alpha says where that
 ## contour runs relative to its centre: coverage on a properly antialiased edge
 ## falls off over about one pixel, so a pixel of alpha [code]a[/code] is
-## [code]a - 0.5[/code] from the boundary, signed, with inside positive. That holds
-## for a hard edge too, where the two sides read +0.5 and -0.5 and put the contour
-## exactly halfway between them.
+## [code]a - 0.5[/code] from the contour, signed. That holds for a hard edge too,
+## where the two sides read +0.5 and -0.5 and put the contour exactly halfway
+## between them.
 ##
 ## Measuring from that sub-pixel contour rather than from the nearest transparent
 ## pixel is the whole of the antialiasing. Whole-pixel distances quantise, and on
@@ -1093,39 +1144,40 @@ func _restore_subject(coverage: PackedFloat32Array, x: int, y: int, width: int, 
 ## long run — they quantise into a staircase, which is exactly the artefact a
 ## stroke must not have.
 ##
-## [b]Distance by grassfire.[/b] Seeded from every pixel on the outside of that
-## contour and grown inwards, each pixel keeping the [i]index of the seed[/i] that
-## reached it rather than the number of steps taken. Distance is then the real
-## Euclidean span back to that seed, plus the seed's own signed offset; counting
-## steps instead would give a Manhattan staircase, and the stroke would come out
-## visibly diamond-shaped on a curve. Same trick [method _nearest_subject_map]
-## uses, carrying a fractional offset as well.
-##
-## [b]The canvas edge counts as outside.[/b] Rather than seeding the border, every
-## pixel also measures its distance to just past the frame and takes whichever is
-## nearer — one comparison, no extra seeds, and a shape running off the edge is
-## stroked along it like any other contour.
-##
-## [b]The inner edge is feathered, the outer one is not.[/b] The outer edge is the
-## silhouette, and its softness is already in the image's own alpha — the stroke
-## covers those pixels outright and lets that alpha do the fading. Feathering it
-## as well would let the stroke bleed past the shape, which is the one thing an
-## inside stroke must not do. So
-## [member RemoveBackgroundSettings.stroke_softness] widens the falloff on the
-## inside only, centred on the requested width so that softening blurs the edge in
-## place rather than walking the stroke inwards.
-##
 ## [param alpha] is the alpha the image actually ends up with, 0 to 1 — not the
 ## coverage, which is only half of it, since [method _compose] multiplies coverage
 ## by the alpha the source arrived with.
-func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedFloat32Array:
-	var empty := PackedFloat32Array()
+func _stroke_bands(alpha: PackedFloat32Array, width: int, height: int) -> Array:
+	var none := PackedFloat32Array()
 	if not _wants_stroke():
-		return empty
-	var stroke_width := settings.stroke_width
+		return [none, none]
+
 	var strength := _stroke_strength()
 	var feather := clampf(settings.stroke_softness, 0.0, 1.0) * _STROKE_MAX_FEATHER
+	var inner_width := settings.inner_stroke_width
+	var outer_width := settings.outer_stroke_width
 
+	var inner := none
+	if inner_width > 0.0:
+		inner = _inner_band(alpha, inner_width, feather, strength, width, height)
+	var outer := none
+	if outer_width > 0.0:
+		outer = _outer_band(alpha, outer_width, feather, strength, width, height)
+	return [inner, outer]
+
+
+## Nearest seed index for every pixel within [param reach] of the contour, or -1.
+##
+## Seeded from one side of the contour and grown across it, each pixel keeping the
+## [i]index of the seed[/i] that reached it rather than the number of steps taken.
+## Distance is then the real Euclidean span back to that seed; counting steps
+## instead would give a Manhattan staircase, and a stroke drawn from one would come
+## out visibly diamond-shaped on a curve. Same trick [method _nearest_subject_map]
+## uses.
+##
+## [param seed_inside] picks which side seeds: the far side from whichever band is
+## being measured, since what each pixel wants is the distance to the other side.
+func _contour_seeds(alpha: PackedFloat32Array, seed_inside: bool, reach: int, width: int, height: int) -> PackedInt32Array:
 	var pixel_count := width * height
 	var source := PackedInt32Array()
 	source.resize(pixel_count)
@@ -1137,20 +1189,18 @@ func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedF
 	var head := 0
 	var tail := 0
 
-	# Outside is below half coverage, not fully transparent. The half-covered band
-	# along an antialiased edge belongs to the shape's soft edge, and treating it
-	# as solid would push the contour a pixel out and blunt the very gradient this
-	# is trying to measure.
+	# Half coverage is the line, not full transparency. The half-covered band along
+	# an antialiased edge belongs to the shape's soft edge, and counting it as solid
+	# would push the contour a pixel out and blunt the very gradient this measures.
 	for i in pixel_count:
-		if alpha[i] < 0.5:
+		if (alpha[i] >= 0.5) == seed_inside:
 			source[i] = i
 			queue[tail] = i
 			tail += 1
+	if tail == 0 or tail == pixel_count:
+		# All of one side, so there is no contour anywhere to measure from.
+		return PackedInt32Array()
 
-	# Far enough to cover the whole falloff and one more, so a pixel that should
-	# still be faintly stroked is never left unreached and reading as empty. The
-	# feather counts here: it pushes the fade out past the requested width.
-	var reach := ceili(stroke_width + feather * 0.5) + 1
 	while head < tail:
 		var index := queue[head]
 		head += 1
@@ -1182,6 +1232,30 @@ func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedF
 			queue[tail] = index + width
 			tail += 1
 
+	return source
+
+
+## Strength per pixel for the stroke inside the silhouette.
+##
+## [b]The canvas edge counts as outside.[/b] Rather than seeding the border, every
+## pixel also measures its distance to just past the frame and takes whichever is
+## nearer — one comparison, no extra seeds, and a shape running off the edge is
+## stroked along it like any other contour.
+##
+## [b]The inner edge is feathered, the outer one is not.[/b] The outer edge here is
+## the silhouette, and its softness is already in the image's own alpha — the
+## stroke covers those pixels outright and lets that alpha do the fading.
+## Feathering it as well would let the stroke bleed past the shape, which is the
+## one thing an inside stroke must not do.
+func _inner_band(alpha: PackedFloat32Array, stroke_width: float, feather: float, strength: float, width: int, height: int) -> PackedFloat32Array:
+	var empty := PackedFloat32Array()
+	var pixel_count := width * height
+	# Far enough to cover the whole falloff and one more, so a pixel that should
+	# still be faintly stroked is never left unreached and reading as empty. The
+	# feather counts here: it pushes the fade out past the requested width.
+	var reach := ceili(stroke_width + feather * 0.5) + 1
+	var source := _contour_seeds(alpha, false, reach, width, height)
+
 	var mask := PackedFloat32Array()
 	mask.resize(pixel_count)
 	var painted := false
@@ -1203,7 +1277,7 @@ func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedF
 			# edge. Its distance is negative, so the stroke covers it outright and
 			# the pixel's own alpha does the fading.
 			distance = minf(distance, alpha[i] - 0.5)
-		else:
+		elif not source.is_empty():
 			var seed_index := source[i]
 			if seed_index >= 0:
 				var sx := seed_index % width
@@ -1217,19 +1291,79 @@ func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedF
 				# stepping with the seed positions.
 				distance = minf(distance, span + (alpha[seed_index] - 0.5))
 
-		# Falls off across the requested width rather than up to it, so softening
-		# blurs the inner edge in place instead of moving the stroke inwards.
-		var band := 0.0
-		if feather <= _EPSILON:
-			band = 1.0 if distance <= stroke_width else 0.0
-		else:
-			band = clampf((stroke_width + feather * 0.5 - distance) / feather, 0.0, 1.0)
+		var band := _stroke_falloff(distance, stroke_width, feather)
 		if band <= 0.0:
 			continue
 		mask[i] = band * strength
 		painted = true
 
 	return mask if painted else empty
+
+
+## Strength per pixel for the stroke outside the silhouette.
+##
+## The mirror of [method _inner_band], measuring outwards from the same contour,
+## and with the frame deliberately playing no part: there is nothing beyond it to
+## grow into, so a shape running off the edge simply gets clipped there.
+##
+## A pixel already solid is skipped. The stroke is drawn under the subject, so
+## where the subject is opaque there is nothing of the stroke left to see and
+## working it out would be effort spent on an invisible result.
+func _outer_band(alpha: PackedFloat32Array, stroke_width: float, feather: float, strength: float, width: int, height: int) -> PackedFloat32Array:
+	var empty := PackedFloat32Array()
+	var pixel_count := width * height
+	var reach := ceili(stroke_width + feather * 0.5) + 1
+	var source := _contour_seeds(alpha, true, reach, width, height)
+	if source.is_empty():
+		return empty
+
+	var mask := PackedFloat32Array()
+	mask.resize(pixel_count)
+	var painted := false
+	for i in pixel_count:
+		if alpha[i] >= 1.0:
+			continue
+		var x := i % width
+		@warning_ignore("integer_division")
+		var y := i / width
+
+		var distance := 0.0
+		if alpha[i] >= 0.5:
+			# Inside the contour but not solid: the shape's own soft edge again,
+			# seen from the other side. Negative distance, so the stroke fills the
+			# whole of it and is then hidden by whatever alpha the subject has.
+			distance = 0.5 - alpha[i]
+		else:
+			var seed_index := source[i]
+			if seed_index < 0:
+				continue
+			var sx := seed_index % width
+			@warning_ignore("integer_division")
+			var sy := seed_index / width
+			var span := sqrt(float((x - sx) * (x - sx) + (y - sy) * (y - sy)))
+			# Subtracted rather than added: the seed is inside this time, so its own
+			# offset is how far past the contour it sits.
+			distance = span - (alpha[seed_index] - 0.5)
+
+		var band := _stroke_falloff(distance, stroke_width, feather)
+		if band <= 0.0:
+			continue
+		mask[i] = band * strength
+		painted = true
+
+	return mask if painted else empty
+
+
+## How much of the stroke covers a pixel [param distance] from the contour.
+##
+## Falls off across the requested width rather than up to it, so softening blurs
+## the far edge in place instead of walking the stroke inwards. A feather of zero
+## is a genuine step rather than a very narrow ramp, so the division is skipped
+## rather than approximated.
+func _stroke_falloff(distance: float, stroke_width: float, feather: float) -> float:
+	if feather <= _EPSILON:
+		return 1.0 if distance <= stroke_width else 0.0
+	return clampf((stroke_width + feather * 0.5 - distance) / feather, 0.0, 1.0)
 
 
 ## A stroke colour per pixel, taken from the image, or an empty array when the
@@ -1248,9 +1382,13 @@ func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedF
 ## colour over itself shows nothing. What reads as a line is a darker, more
 ## saturated relative of the fill it borders, which is what
 ## [constant _AUTO_STROKE_DARKEN] and [constant _AUTO_STROKE_SATURATION] make of it.
-func _auto_stroke_colors(data: PackedByteArray, alpha: PackedFloat32Array, stroke: PackedFloat32Array, width: int, height: int) -> PackedFloat32Array:
+func _auto_stroke_colors(data: PackedByteArray, alpha: PackedFloat32Array, inner: PackedFloat32Array, outer: PackedFloat32Array, width: int, height: int) -> PackedFloat32Array:
 	var empty := PackedFloat32Array()
-	if not settings.auto_stroke_color or stroke.is_empty():
+	if not settings.auto_stroke_color:
+		return empty
+	var has_inner := not inner.is_empty()
+	var has_outer := not outer.is_empty()
+	if not has_inner and not has_outer:
 		return empty
 
 	var pixel_count := width * height
@@ -1272,7 +1410,8 @@ func _auto_stroke_colors(data: PackedByteArray, alpha: PackedFloat32Array, strok
 		premul_b[i] = data[offset + 2] * to_unit * a
 		weight[i] = a
 
-	var radius := maxi(ceili(settings.stroke_width * _AUTO_STROKE_BLUR_SCALE), _AUTO_STROKE_BLUR_MIN)
+	var widest := maxf(settings.inner_stroke_width, settings.outer_stroke_width)
+	var radius := maxi(ceili(widest * _AUTO_STROKE_BLUR_SCALE), _AUTO_STROKE_BLUR_MIN)
 	premul_r = _box_mean(premul_r, width, height, radius)
 	premul_g = _box_mean(premul_g, width, height, radius)
 	premul_b = _box_mean(premul_b, width, height, radius)
@@ -1281,7 +1420,9 @@ func _auto_stroke_colors(data: PackedByteArray, alpha: PackedFloat32Array, strok
 	var colors := PackedFloat32Array()
 	colors.resize(pixel_count * 3)
 	for i in pixel_count:
-		if stroke[i] <= 0.0:
+		# Wherever either stroke paints. They share a colour, so the sample only has
+		# to be worked out once per pixel.
+		if (not has_inner or inner[i] <= 0.0) and (not has_outer or outer[i] <= 0.0):
 			continue
 		var w := weight[i]
 		# No subject within the whole blur radius, which for a stroke pixel means
@@ -1304,11 +1445,12 @@ func _auto_stroke_colors(data: PackedByteArray, alpha: PackedFloat32Array, strok
 
 ## Writes the final image: alpha from [param coverage], colour un-blended and
 ## bled outwards as needed.
-func _compose(data: PackedByteArray, coverage: PackedFloat32Array, key_of: PackedInt32Array, nearest: PackedInt32Array, stroke: PackedFloat32Array, stroke_colors: PackedFloat32Array, width: int, height: int) -> Image:
+func _compose(data: PackedByteArray, coverage: PackedFloat32Array, key_of: PackedInt32Array, nearest: PackedInt32Array, inner: PackedFloat32Array, outer: PackedFloat32Array, stroke_colors: PackedFloat32Array, width: int, height: int) -> Image:
 	var bleed_radius := settings.bleed_radius
 	var decontaminate := settings.decontaminate
 	var stroke_color := settings.stroke_color
-	var has_stroke := not stroke.is_empty()
+	var has_inner := not inner.is_empty()
+	var has_outer := not outer.is_empty()
 	var auto_colors := not stroke_colors.is_empty()
 	# Stand-in for a pixel no flood ever claimed. Only reachable once refinement
 	# or the alpha clip has pulled a subject pixel below full coverage, since
@@ -1361,23 +1503,39 @@ func _compose(data: PackedByteArray, coverage: PackedFloat32Array, key_of: Packe
 		# answer, and it must not be un-blended or bled as if it were part of the
 		# image. Alpha is untouched — an inside stroke draws on the silhouette
 		# rather than adding to it.
-		if has_stroke:
-			var over := stroke[i]
+		var paint := stroke_color
+		if auto_colors:
+			var slot := i * 3
+			paint = Color(stroke_colors[slot], stroke_colors[slot + 1], stroke_colors[slot + 2])
+
+		if has_inner:
+			var over := inner[i]
 			if over > 0.0:
-				if auto_colors:
-					var slot := i * 3
-					r = lerpf(r, stroke_colors[slot], over)
-					g = lerpf(g, stroke_colors[slot + 1], over)
-					b = lerpf(b, stroke_colors[slot + 2], over)
-				else:
-					r = lerpf(r, stroke_color.r, over)
-					g = lerpf(g, stroke_color.g, over)
-					b = lerpf(b, stroke_color.b, over)
+				r = lerpf(r, paint.r, over)
+				g = lerpf(g, paint.g, over)
+				b = lerpf(b, paint.b, over)
+
+		var out_alpha := clampf(source_alpha * alpha, 0.0, 1.0)
+
+		# The outer stroke goes *under* what is already here, which is what keeps it
+		# from eating the soft edge it is meant to sit behind. Standard over-
+		# compositing with the subject on top, so where the subject is solid the
+		# stroke contributes nothing and where there is nothing it contributes all.
+		if has_outer:
+			var behind := outer[i]
+			if behind > 0.0:
+				var combined := out_alpha + behind * (1.0 - out_alpha)
+				if combined > _EPSILON:
+					var share := behind * (1.0 - out_alpha)
+					r = (r * out_alpha + paint.r * share) / combined
+					g = (g * out_alpha + paint.g * share) / combined
+					b = (b * out_alpha + paint.b * share) / combined
+				out_alpha = combined
 
 		out[offset] = roundi(clampf(r, 0.0, 1.0) * 255.0)
 		out[offset + 1] = roundi(clampf(g, 0.0, 1.0) * 255.0)
 		out[offset + 2] = roundi(clampf(b, 0.0, 1.0) * 255.0)
-		out[offset + 3] = roundi(clampf(source_alpha * alpha, 0.0, 1.0) * 255.0)
+		out[offset + 3] = roundi(clampf(out_alpha, 0.0, 1.0) * 255.0)
 
 	return Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, out)
 
