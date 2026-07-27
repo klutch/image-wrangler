@@ -51,11 +51,21 @@ the only reason to want automatic preview off is that it has become too slow, an
 the dock can see that for itself.
 
 **Processing runs on a worker thread**, so the editor stays usable while it
-works — you can keep panning, zooming and dragging sliders. A progress bar sits
-over the preview while a run is in flight, dimming the image rather than covering
-it, since what you are looking at is one revision out of date rather than gone.
-It advances unevenly on purpose: the passes report where they have actually got
-to, and they are nothing like equally expensive.
+works — you can keep panning, zooming and dragging sliders. A spinner and a
+progress bar sit over the preview while a run is in flight, dimming the image
+rather than covering it, since what you are looking at is one revision out of date
+rather than gone.
+
+The two answer different questions. The bar says how far along the work is, and
+advances unevenly on purpose — the passes report where they have actually got to,
+and they are nothing like equally expensive. The spinner says the work is still
+happening, which a bar cannot: one that has not moved for four seconds looks
+exactly like one that has hung, and a single pass can easily take that long. It
+turns at a wobbling rate rather than a constant one, so it reads as something
+working at a thing rather than a wheel freewheeling.
+
+Drop a `progress_spinner.png` in `addons/image_wrangler/ui/` and it is used as the
+spinner artwork; without one, a ring is drawn instead.
 
 Only one run happens at a time. Changing a setting mid-run queues another rather
 than starting a second thread, and the result of a run whose image was swapped out

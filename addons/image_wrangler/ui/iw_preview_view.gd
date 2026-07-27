@@ -60,6 +60,27 @@ const BUSY_BAR_HEIGHT := 6.0
 const BUSY_BAR_MARGIN := 24.0
 const BUSY_CAPTION := "Processing…"
 
+## Spinner artwork, used when it is there. Checked for rather than loaded blind,
+## since asking for a resource that does not exist logs an error — and this is
+## reached on every frame of a run.
+const BUSY_SPINNER_PATH := "res://addons/image_wrangler/ui/progress_spinner.png"
+const BUSY_SPINNER_SIZE := 26.0
+const BUSY_SPINNER_GAP := 9.0
+
+## How the spinner turns.
+##
+## Not at a constant rate: the wobble term takes a tenth of a turn off and puts it
+## back once or so a second, which reads as something working at a thing rather
+## than as a wheel freewheeling. The numbers are picked so it never quite reverses
+## — the wobble's own peak rate is [code]0.10 * TAU * 1.3[/code], a hair under the
+## base rate — so it slows almost to a stop and then picks up again.
+const BUSY_SPIN_TURNS_PER_SECOND := 0.85
+const BUSY_SPIN_WOBBLE_TURNS := 0.10
+const BUSY_SPIN_WOBBLE_HZ := 1.3
+
+## Fraction of the ring the drawn fallback spinner fills.
+const BUSY_SPIN_SWEEP := 0.28
+
 const MIN_ZOOM := 1.0
 const MAX_ZOOM := 1000.0
 
@@ -123,6 +144,14 @@ var original_fade := 0.0:
 ## which defers, so nothing here is touched from two threads at once.
 var _busy := false
 var _progress := 0.0
+
+## Seconds the current run has been on screen, which is all the spinner needs to
+## know. Reset per run so every one starts from the same place.
+var _spin_time := 0.0
+
+## Resolved once and remembered, including the answer "there isn't one".
+var _spinner_texture: Texture2D
+var _spinner_looked_up := false
 
 var _texture: Texture2D
 
@@ -210,7 +239,14 @@ func _init() -> void:
 
 
 func _ready() -> void:
+	# Off until there is a spinner to turn; see set_busy.
+	set_process(false)
 	_relayout()
+
+
+func _process(delta: float) -> void:
+	_spin_time += delta
+	_canvas.queue_redraw()
 
 
 func _notification(what: int) -> void:
@@ -292,6 +328,10 @@ func set_busy(active: bool) -> void:
 	_busy = active
 	if active:
 		_progress = 0.0
+		_spin_time = 0.0
+	# The spinner is the only thing here that animates, so the frame loop is only
+	# running while there is something to turn.
+	set_process(active)
 	_canvas.queue_redraw()
 
 
@@ -879,17 +919,48 @@ func _draw_busy() -> void:
 
 	_canvas.draw_rect(Rect2(Vector2.ZERO, _viewport), Color(0, 0, 0, BUSY_SCRIM_ALPHA), true)
 
-	var bar_width := minf(BUSY_BAR_WIDTH, maxf(_viewport.x - BUSY_BAR_MARGIN * 2.0, 0.0))
-	if bar_width <= 0.0:
-		return
-	var origin := Vector2(
-		floorf((_viewport.x - bar_width) * 0.5),
-		floorf((_viewport.y - BUSY_BAR_HEIGHT) * 0.5),
-	)
-
 	var accent := Color(0.4, 0.6, 1.0)
 	if has_theme_color(&"accent_color", &"Editor"):
 		accent = get_theme_color(&"accent_color", &"Editor")
+
+	var font := get_theme_default_font()
+	var font_size := get_theme_default_font_size()
+	var caption := Vector2.ZERO
+	if font != null:
+		caption = font.get_string_size(BUSY_CAPTION, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size)
+
+	var bar_width := minf(BUSY_BAR_WIDTH, maxf(_viewport.x - BUSY_BAR_MARGIN * 2.0, 0.0))
+
+	# Stacked and centred as one group, so a short preview column drops the bar
+	# rather than pushing the spinner off its middle.
+	var stack := BUSY_SPINNER_SIZE
+	if caption.y > 0.0:
+		stack += BUSY_SPINNER_GAP + caption.y
+	if bar_width > 0.0:
+		stack += BUSY_SPINNER_GAP + BUSY_BAR_HEIGHT
+	var top := floorf((_viewport.y - stack) * 0.5)
+
+	_draw_spinner(Vector2(floorf(_viewport.x * 0.5), top + BUSY_SPINNER_SIZE * 0.5), accent)
+	top += BUSY_SPINNER_SIZE
+
+	if caption.y > 0.0:
+		top += BUSY_SPINNER_GAP
+		_canvas.draw_string(
+			font,
+			# draw_string takes the baseline, not the top of the line.
+			Vector2(floorf((_viewport.x - caption.x) * 0.5), top + font.get_ascent(font_size)),
+			BUSY_CAPTION,
+			HORIZONTAL_ALIGNMENT_LEFT,
+			-1.0,
+			font_size,
+			Color(1, 1, 1, 0.85),
+		)
+		top += caption.y
+
+	if bar_width <= 0.0:
+		return
+	top += BUSY_SPINNER_GAP
+	var origin := Vector2(floorf((_viewport.x - bar_width) * 0.5), floorf(top))
 
 	# Track first, then the fill over it, so a fraction of zero still reads as a
 	# bar waiting rather than as nothing at all.
@@ -900,20 +971,45 @@ func _draw_busy() -> void:
 	_canvas.draw_rect(
 		Rect2(origin, Vector2(bar_width, BUSY_BAR_HEIGHT)), Color(1, 1, 1, 0.25), false, 1.0)
 
-	var font := get_theme_default_font()
-	if font == null:
+
+## The spinner at [param center], turned to wherever the run has got to in time.
+##
+## The bar says how far along the work is and the spinner says the work is still
+## happening. They answer different questions: a bar that has not moved for four
+## seconds is indistinguishable from one that has hung, and a stage of this
+## operation can easily take that long.
+func _draw_spinner(center: Vector2, accent: Color) -> void:
+	var turns := _spin_time * BUSY_SPIN_TURNS_PER_SECOND \
+			+ BUSY_SPIN_WOBBLE_TURNS * sin(TAU * BUSY_SPIN_WOBBLE_HZ * _spin_time)
+	var angle := TAU * turns
+	var radius := BUSY_SPINNER_SIZE * 0.5
+
+	var texture := _spinner()
+	if texture != null:
+		var half := Vector2(radius, radius)
+		# Rotating about the centre means drawing about the origin and moving the
+		# origin, since the transform is what carries the rotation.
+		_canvas.draw_set_transform(center, angle, Vector2.ONE)
+		_canvas.draw_texture_rect(texture, Rect2(-half, half * 2.0), false)
+		_canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		return
-	var size := get_theme_default_font_size()
-	var caption := font.get_string_size(BUSY_CAPTION, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size)
-	_canvas.draw_string(
-		font,
-		Vector2(floorf((_viewport.x - caption.x) * 0.5), origin.y - BUSY_BAR_HEIGHT * 1.5),
-		BUSY_CAPTION,
-		HORIZONTAL_ALIGNMENT_LEFT,
-		-1.0,
-		size,
-		Color(1, 1, 1, 0.85),
-	)
+
+	# No artwork: a ring with a bright arc running round it, which is the same
+	# idea and needs nothing on disk.
+	_canvas.draw_arc(center, radius, 0.0, TAU, 32, Color(1, 1, 1, 0.18), 3.0, true)
+	_canvas.draw_arc(center, radius, angle, angle + TAU * BUSY_SPIN_SWEEP, 24, accent, 3.0, true)
+
+
+## The spinner artwork, or null when the file is not there.
+##
+## Looked up once. [method ResourceLoader.exists] first, because asking to load
+## something absent logs an error, and this is reached every frame of a run.
+func _spinner() -> Texture2D:
+	if not _spinner_looked_up:
+		_spinner_looked_up = true
+		if ResourceLoader.exists(BUSY_SPINNER_PATH):
+			_spinner_texture = load(BUSY_SPINNER_PATH) as Texture2D
+	return _spinner_texture
 
 
 static func _build_checker() -> Texture2D:
