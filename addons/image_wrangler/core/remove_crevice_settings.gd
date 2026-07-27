@@ -29,6 +29,13 @@ extends Resource
 ## subject.
 @export var crevice_reach: int = 2
 
+## Width of the antialiased band rebuilt around whatever this opens, in pixels.
+##
+## Its own rather than borrowed from a keying stage, so this operation works wherever
+## it is put and reads the same as every other one that mattes an edge. Same default,
+## because a crevice mouth wants the same treatment as the silhouette it opens off.
+@export var edge_width: int = 2
+
 
 ## A copy that belongs to no image. Nothing here is a coordinate and nothing is a
 ## nested Resource, so the plain duplicate is the whole of it.

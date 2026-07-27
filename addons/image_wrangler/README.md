@@ -44,10 +44,12 @@ independent sets of shapes. A second Remove Background adds its colours to the
 keys the first registered rather than starting again. Refine Edges above Edge
 Cleanup smooths before the outline is measured; below it, after.
 
-Several of them only mean something downstream of a Remove Background — there is
-no coverage to refine and no key to measure against until something has keyed. An
-entry in that position says so on its own face rather than failing, so a
-half-built stack is a normal state to be in.
+Each one leaves a complete result for the next, and works out for itself anything
+it needs that is not already there — Remove Crevice will classify an image from its
+alpha and read the background colour back off the source rather than insisting on a
+Remove Background above it. Where an operation genuinely cannot do its job from
+what it has been handed, its entry says so on its own face rather than failing, so
+a half-built stack is a normal state to be in.
 
 Rename is deliberately **not** in the stack. It does not touch pixels, and its
 settings describe the whole batch rather than any one image, so it has a
@@ -177,6 +179,7 @@ the image — and two entries of the same operation fold independently.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Crevice Reach | 2 | How many near-background pixels may be crossed in a row before solid background is needed again. 0 does nothing at all. See below. |
+| Edge Width | 2 | How many pixels of antialiasing to rebuild around whatever it opens. Its own, so this works wherever you put it — usually worth matching to Remove Background's. |
 | Crevice Tolerance | 0.5 | How far from the background colour those squeezed-through pixels may be. |
 
 **Refine Edges**
@@ -280,6 +283,19 @@ the border, and an image whose only backgrounds are enclosed regions is describe
 by islands alone. With no colours *and* no islands the image comes back untouched.
 
 ### Nooks and crannies
+
+Remove Crevice runs on its own. Given a classification from a Remove Background
+above it, it grows that; given none, it reads the alpha instead — what is already
+transparent is background, what is solid is subject, what is between them is the
+band — and recovers the background colour from the source, which still holds it
+wherever an operation above did the removing. It carries its own **Edge Width** for
+the band it rebuilds, so it mattes what it opens without borrowing a number from
+somewhere else in the stack.
+
+The one thing it cannot recover is a background that was gone before the file was
+opened. There is nothing in the source to read, and the colour sitting in its place
+is the previous run's colour bleed — subject colour wearing a background's
+position. On a source like that it does nothing rather than guess.
 
 Background sometimes survives in a tight concave corner. The usual cause is not
 the edge handling but **reachability**: where two walls nearly meet, their
