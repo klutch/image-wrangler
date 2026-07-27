@@ -60,6 +60,15 @@ extends IWOperation
 ## RGB, which is how the background creeps back into an edge that looked clean in
 ## the file.
 ##
+## [b]Edges that never got a matte.[/b] Everything above builds the antialiasing
+## while it is deciding what is background, which only helps where it is the one
+## doing the cutting. An image that arrived aliased, or an edge a hard alpha clip
+## flattened on the way past, has a solid pixel sitting straight against a clear
+## one and nothing in between. [member RemoveBackgroundSettings.restore_edges] is
+## a pass over the finished alpha that finds those and works the coverage back out
+## of the same relation, measuring the subject colour a step inside the shape so
+## it is not asking a half-background pixel how much background it contains.
+##
 ## [b]What colour cannot describe.[/b] Everything above removes background by
 ## colour, which leaves no way to say "this region goes, whatever is in it" — a
 ## watermark, a scan edge, a stray element in a corner. [member
@@ -141,6 +150,19 @@ const _DECONTAMINATE_FADE := 0.25
 ## Minimum reach for the nearest-subject map. Coverage estimation needs a couple
 ## of pixels of reach even when colour bleed is switched off.
 const _MIN_SEARCH_RADIUS := 2
+
+## What [method _restore_edges] counts as fully solid and fully clear.
+##
+## Deliberately not 1.0 and 0.0 exactly: alpha arriving here has been through a
+## division, possibly a guided filter and possibly a clip, and a pixel that is
+## solid for every practical purpose can miss an exact comparison by a hair.
+const _RESTORE_SOLID := 0.995
+const _RESTORE_CLEAR := 0.005
+
+## How many pixels [method _restore_edges] may step inward looking for a subject
+## colour. Two, because from a clear pixel the first step only reaches the
+## boundary — which is the contaminated pixel being stepped past.
+const _RESTORE_INWARD_MAX := 2
 
 ## Regularisation for [method _guided_refine]. Small enough that the filter
 ## follows any real silhouette rather than averaging across it, large enough that
@@ -338,6 +360,20 @@ func get_settings_schema() -> Array[Dictionary]:
 			"tooltip": "Alpha at or above this is forced fully solid, with everything between the\nfloor and here stretched across the two. Bring it down towards the floor for\na harder cutoff, leave it at 1 for a soft one.",
 		},
 		{
+			"property": &"restore_edges",
+			"label": "Restore Edges",
+			"group": "Settings",
+			"type": SettingType.BOOL,
+			"tooltip": "Finds edges that ended up hard — solid pixels sitting straight against\ntransparent ones, with no half-covered pixels between — and works out what\ntheir coverage should have been from the colors either side.\n\nOff by default, because a well-keyed edge already has its antialiasing and\nthere is nothing here to fix. Turn it on for a source that was aliased\nbefore it arrived, or an edge that Alpha Floor or a hard cutoff flattened.\n\nBlackout regions are left alone: those edges are hard on purpose.",
+		},
+		{
+			"property": &"sample_color_inward",
+			"label": "Sample Color Inward",
+			"group": "Settings",
+			"type": SettingType.BOOL,
+			"tooltip": "Take the subject color from a step inside the opaque shape rather than from\nthe nearest opaque pixel.\n\nThe pixel being restored is itself part background — that is what makes it\nan edge — so measuring it against its own color asks how much of a blend a\nblend is, and answers \"all of it\". A step inward gets past that.\n\nTurn it off for a subject so thin that a step inward leaves it altogether.\nOnly applies while Restore Edges is on.",
+		},
+		{
 			"property": &"islands",
 			"group": "Island Picker",
 			"collapsed": true,
@@ -461,6 +497,11 @@ func process_image(source: Image) -> Image:
 	# back into a haze by it.
 	if alpha_floor > 0.0 or alpha_ceiling < 1.0:
 		_clip_alpha(coverage)
+
+	# After the clip, because flattening an edge is one of the ways an edge comes
+	# to need restoring, and before the regions below, which are hard on purpose.
+	if settings.restore_edges:
+		coverage = _restore_edges(data, coverage, key_of, nearest, blacked, width, height)
 
 	# After everything that can move alpha, since a region is an instruction about
 	# the result rather than a suggestion to the keyer. Refinement smooths across
@@ -725,6 +766,135 @@ func _coverage_map(data: PackedByteArray, key_dist: PackedFloat32Array, mask: Pa
 		coverage[i] = value
 
 	return coverage
+
+
+## Alpha with hard edges re-matted from the colours on either side of them.
+##
+## The rest of this operation builds a matte while it is deciding what is
+## background, which works when it is the one doing the cutting. It cannot help
+## an edge that arrived aliased, or one that [member alpha_floor] flattened on the
+## way past. This looks at the finished alpha instead and asks, of every place a
+## solid pixel sits straight against a clear one, what the coverage there should
+## have been.
+##
+## The answer is the same relation the whole operation rests on. A pixel on an
+## antialiased edge is [code]C = a * F + (1 - a) * K[/code], so its distance from
+## the background is [code]a[/code] times the subject's distance from the
+## background, and dividing one by the other gives back [code]a[/code] with the
+## unknown [code]F[/code] cancelled out. The work is in finding a trustworthy
+## [code]F[/code] and [code]K[/code] for a pixel the classifier has already
+## finished with.
+##
+## [b]Adjacency is the test.[/b] Only a pixel with the opposite extreme directly
+## beside it is touched. A properly matted edge has half-covered pixels in
+## between, so neither side can see the other and the edge is left exactly as it
+## was — which is what keeps this from undoing the good work of the edge band.
+##
+## Hard by intent is left hard: a pixel in or against a blackout region is skipped,
+## since a drawn cut is a straight line the user asked for rather than an edge
+## that lost its antialiasing.
+func _restore_edges(data: PackedByteArray, coverage: PackedFloat32Array, key_of: PackedInt32Array, nearest: PackedInt32Array, blacked: PackedByteArray, width: int, height: int) -> PackedFloat32Array:
+	var inward := settings.sample_color_inward
+	var has_regions := not blacked.is_empty()
+	var fallback_key: Color = _keys[0]
+	var pixel_count := width * height
+	# Written to a copy, so that a pixel restored early in the scan cannot become
+	# the evidence that its neighbour needs restoring too.
+	var out := coverage.duplicate()
+
+	for i in pixel_count:
+		if has_regions and blacked[i] != BLACKOUT_NONE:
+			continue
+		var here := coverage[i]
+		var solid := here >= _RESTORE_SOLID
+		if not solid and here > _RESTORE_CLEAR:
+			continue
+
+		var x := i % width
+		@warning_ignore("integer_division")
+		var y := i / width
+
+		# The opposite extreme, if it is right there. Anything softer between the
+		# two means this edge already has its matte.
+		var facing := -1
+		if x > 0 and _restore_opposes(coverage, i - 1, solid):
+			facing = i - 1
+		elif x < width - 1 and _restore_opposes(coverage, i + 1, solid):
+			facing = i + 1
+		elif y > 0 and _restore_opposes(coverage, i - width, solid):
+			facing = i - width
+		elif y < height - 1 and _restore_opposes(coverage, i + width, solid):
+			facing = i + width
+		if facing < 0:
+			continue
+		if has_regions and blacked[facing] != BLACKOUT_NONE:
+			continue
+
+		# The background this edge is against. Taken from whichever of the two
+		# sides the flood actually claimed, since that is the one that knows.
+		var claimed := key_of[facing] if key_of[facing] >= 0 else key_of[i]
+		var key: Color = _keys[claimed] if claimed >= 0 else fallback_key
+
+		var subject := _restore_subject(coverage, x, y, width, height) if inward else -1
+		if subject < 0:
+			subject = nearest[i]
+		if subject < 0:
+			continue
+
+		var reference := _distance_at(data, subject, key)
+		# Subject indistinguishable from background here: the division would
+		# amplify nothing into anything, and there is no coverage to recover.
+		if reference <= _EPSILON:
+			continue
+		out[i] = clampf(_distance_at(data, i, key) / reference, 0.0, 1.0)
+
+	return out
+
+
+## Whether [param index] sits at the opposite extreme to a pixel that is
+## [param solid].
+func _restore_opposes(coverage: PackedFloat32Array, index: int, solid: bool) -> bool:
+	return coverage[index] <= _RESTORE_CLEAR if solid else coverage[index] >= _RESTORE_SOLID
+
+
+## A pixel a step or two into the opaque shape from ([param x], [param y]), or -1.
+##
+## The direction comes from the alpha around the pixel — every neighbour pulls
+## towards itself in proportion to how opaque it is, so the sum points the way the
+## shape lies. Walking it stops at the first pixel that is not solid, so a step
+## can never cross a gap and come back with a colour from the far side.
+func _restore_subject(coverage: PackedFloat32Array, x: int, y: int, width: int, height: int) -> int:
+	var dx := 0.0
+	var dy := 0.0
+	for oy in [-1, 0, 1]:
+		for ox in [-1, 0, 1]:
+			if ox == 0 and oy == 0:
+				continue
+			var nx: int = x + ox
+			var ny: int = y + oy
+			if nx < 0 or ny < 0 or nx >= width or ny >= height:
+				continue
+			var weight := coverage[ny * width + nx]
+			dx += ox * weight
+			dy += oy * weight
+
+	var length := sqrt(dx * dx + dy * dy)
+	if length <= _EPSILON:
+		return -1
+	dx /= length
+	dy /= length
+
+	var found := -1
+	for step in range(1, _RESTORE_INWARD_MAX + 1):
+		var sx := x + roundi(dx * step)
+		var sy := y + roundi(dy * step)
+		if sx < 0 or sy < 0 or sx >= width or sy >= height:
+			break
+		var candidate := sy * width + sx
+		if coverage[candidate] < _RESTORE_SOLID:
+			break
+		found = candidate
+	return found
 
 
 ## Writes the final image: alpha from [param coverage], colour un-blended and

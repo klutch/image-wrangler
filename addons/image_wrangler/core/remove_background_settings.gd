@@ -110,6 +110,24 @@ extends Resource
 ## Alpha at or above this is forced solid. See [member alpha_floor].
 @export var alpha_ceiling: float = 1.0
 
+## Re-matte edges that ended up hard, working the coverage back out of the
+## colours either side of them. See [method RemoveBackground._restore_edges].
+##
+## Off by default because a correctly keyed image has nothing for it to do: the
+## edge band already builds the matte. It earns its place on an edge that never
+## got one — a source that was aliased before it arrived, or an edge a hard
+## setting elsewhere flattened.
+@export var restore_edges: bool = false
+
+## Take the subject colour from a step further into the opaque shape rather than
+## from the nearest opaque pixel.
+##
+## The pixel on the boundary is itself part background, which is the whole reason
+## it is being restored. Measuring against it asks how much of a blend a blend is
+## and answers "all of it". A step inward gets past the contamination to something
+## that is only subject.
+@export var sample_color_inward: bool = true
+
 
 func _init() -> void:
 	islands = IslandList.new()

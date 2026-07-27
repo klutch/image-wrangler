@@ -100,6 +100,8 @@ image.
 | Refine Radius | 2 | Window radius for that filter: roughly how far a ragged patch of alpha may sit from a real edge and still be pulled onto it. |
 | Alpha Floor | 0.0 | Alpha at or below this is forced fully clear. Applied last, so it also clears what **Refine Edges** leaves behind. See below. |
 | Alpha Ceiling | 1.0 | Alpha at or above this is forced fully solid, with the range between stretched across the two. |
+| Restore Edges | off | Re-mattes edges that ended up hard, working their coverage back out of the colours either side. See below. |
+| Sample Color Inward | on | Takes the subject colour a step inside the shape when restoring. Only applies while **Restore Edges** is on. |
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
 
@@ -250,6 +252,44 @@ So start low. A floor around 0.1–0.2 with the ceiling left at 1.0 clears haze
 while keeping most of the gradient; 0.5 / 0.6 is decisive but close to a binary
 cutout. Setting the ceiling at or below the floor is a hard cutoff at that value,
 and is honoured rather than rejected.
+
+### Restoring edges
+
+Everything above builds the antialiasing *while* deciding what is background,
+which only helps where this operation is the one doing the cutting. It cannot
+help an edge that arrived aliased — a sprite someone already cut out badly, a
+screenshot, art drawn with a hard brush — or an edge that a low **Alpha Ceiling**
+flattened on the way past. Those come out with a solid pixel sitting straight
+against a transparent one and nothing in between.
+
+**Restore Edges** is a pass over the finished alpha that looks for exactly that
+and rebuilds the missing coverage. It is off by default: a well-keyed edge has
+nothing here to fix, and the pass costs a scan over the image.
+
+It works from the same relation as everything else. An edge pixel is
+`C = a * F + (1 - a) * K`, so its distance from the background is `a` times the
+subject's distance from the background, and dividing one by the other gives back
+`a` with the unknown `F` cancelled out.
+
+**Adjacency is the test**, and it is what stops this undoing good work. Only a
+pixel with the opposite extreme *directly* beside it is touched. A properly
+matted edge has half-covered pixels in between, so neither side can see the other
+and the edge is left exactly as it was. Blackout regions are skipped on both
+sides — a drawn cut is a straight line you asked for, not an edge that lost its
+antialiasing.
+
+**Sample Color Inward** decides where `F` comes from. The pixel being restored is
+itself part background — that is what makes it an edge — so measuring it against
+its own colour asks how much of a blend a blend is, and answers "all of it". With
+this on, the subject colour is taken a step or two further into the shape,
+following the direction the alpha around the pixel points. The walk stops at the
+first pixel that is not solid, so it can never cross a gap and come back with a
+colour from the far side. Turn it off for a subject so thin that a step inward
+leaves it altogether; the nearest opaque pixel is used instead.
+
+Where the subject is indistinguishable from the background the division has
+nothing to divide by, and the pixel is left as it was rather than amplified into
+noise.
 
 ### Picking islands
 
