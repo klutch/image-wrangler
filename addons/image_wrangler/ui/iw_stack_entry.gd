@@ -154,7 +154,7 @@ func _build() -> void:
 	_tick.tooltip_text = "Run this operation.\nUnticking it keeps everything dialled into it, which removing the entry would not."
 	_tick.toggled.connect(func(pressed: bool) -> void:
 		stage.enabled = pressed
-		_refresh_dimming()
+		refresh_enabled_state()
 		enabled_toggled.emit(self, pressed))
 	header.add_child(_tick)
 
@@ -210,17 +210,60 @@ func _build() -> void:
 	_body.add_child(_settings_box)
 
 
-## Fades a switched-off entry, so the stack reads at a glance.
+## Fades a switched-off entry and takes its settings out of use, so the stack reads at
+## a glance and nothing can be dialled into an operation that is not running.
+##
+## The header is deliberately left alone. The tick, the title and the close button
+## have to keep working, or an entry could be switched off and never switched back on.
 ##
 ## Guarded because the theme fires at the header while the body is still being built:
 ## adding the title to the tree raises [code]theme_changed[/code], and the arrow that
 ## hangs off it comes through here.
-func _refresh_dimming() -> void:
+func refresh_enabled_state() -> void:
 	if _title == null or _body == null:
 		return
-	var shade := Color(1, 1, 1, 1.0 if stage.enabled else 0.5)
+	var live := stage.enabled
+	var shade := Color(1, 1, 1, 1.0 if live else 0.5)
 	_title.modulate = shade
 	_body.modulate = shade
+
+	if _settings_box == null:
+		return
+	_set_form_enabled(_settings_box, live)
+	if live:
+		# Several of the list controls drive their own buttons — Remove is disabled
+		# with nothing selected, Clear with nothing in the list. Enabling everything
+		# above overruled that, so they are asked to say it again.
+		_restore_own_states(_settings_box)
+
+
+## Turns every input in [param node] on or off.
+##
+## By property rather than by type, because the form is built from a schema and holds
+## whatever the operations asked for. The three names cover it: buttons and their
+## kin take [code]disabled[/code], text fields take [code]editable[/code], and
+## [code]EditorSpinSlider[/code] takes [code]read_only[/code].
+static func _set_form_enabled(node: Node, enabled: bool) -> void:
+	for child in node.get_children():
+		if "disabled" in child:
+			child.disabled = not enabled
+		elif "editable" in child:
+			child.editable = enabled
+		elif "read_only" in child:
+			child.read_only = not enabled
+		_set_form_enabled(child, enabled)
+
+
+## Asks any control that manages its own buttons to work them out again.
+##
+## Not recursed into: it has just rebuilt whatever it owns, and everything under it
+## was enabled on the way past.
+static func _restore_own_states(node: Node) -> void:
+	for child in node.get_children():
+		if child.has_method("refresh"):
+			child.call("refresh")
+			continue
+		_restore_own_states(child)
 
 
 ## Guarded rather than assumed: outside the editor there is no [code]EditorIcons[/code]
@@ -232,7 +275,7 @@ func _apply_fold_arrow() -> void:
 	var name := &"GuiTreeArrowDown" if open else &"GuiTreeArrowRight"
 	if has_theme_icon(name, &"EditorIcons"):
 		_title.icon = get_theme_icon(name, &"EditorIcons")
-	_refresh_dimming()
+	refresh_enabled_state()
 
 
 # --- Reordering ---------------------------------------------------------

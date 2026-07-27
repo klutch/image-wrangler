@@ -181,6 +181,9 @@ func rebuild() -> void:
 		record["entry"] = entry
 		if form_builder.is_valid():
 			form_builder.call(record["stage"], entry.settings_box(), entry, record["uid"])
+		# After the form exists, not before: a switched-off entry has to hand its
+		# controls over disabled, and there were none to disable until now.
+		entry.refresh_enabled_state()
 
 	entries_rebuilt.emit()
 

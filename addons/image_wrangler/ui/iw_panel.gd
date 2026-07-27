@@ -922,6 +922,7 @@ func _bind_pick_control(control: Control) -> void:
 func _on_stack_changed() -> void:
 	if _refreshing:
 		return
+	_release_pick_if_disabled()
 	_store_stack(_current_path())
 	_refresh_notes()
 	_schedule_autosave()
@@ -979,6 +980,22 @@ func _active_operation() -> IWOperation:
 	for stage: IWStackOperation in _stack_view.stages():
 		pipeline.stages.append(stage)
 	return pipeline
+
+
+## Takes the crosshair back if whichever control holds it has just been switched off.
+##
+## Its button is disabled along with the rest of the entry's form, so without this the
+## preview would stay in pick mode with no way to leave it — the click would still
+## land, and the button that turns it off would be unpressable.
+func _release_pick_if_disabled() -> void:
+	if _pick_target == null:
+		return
+	for entry: Control in _stack_view.entries():
+		if entry.stage.enabled:
+			continue
+		if _pick_target in entry.pick_controls():
+			_release_pick()
+			return
 
 
 ## Drops out of pick mode, leaving every control's button unpressed.
