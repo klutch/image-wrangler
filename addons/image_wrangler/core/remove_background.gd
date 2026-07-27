@@ -231,7 +231,6 @@ func get_settings_schema() -> Array[Dictionary]:
 		{
 			"property": &"remove_colors",
 			"group": "Remove Colors",
-			"collapsed": true,
 			"type": SettingType.COLOR_LIST,
 			"tooltip": "The background colors to key out, each with its own tolerance.\nPick them off the preview, or add one and set it by hand. An image with\ntwo flat backgrounds needs two entries: one tolerance loose enough for a\nspeckled one would eat into the subject beside the clean one.\n\nThe flood spreads through every listed color, so entries work together —\na white plate around a green stem needs both listed, and taking white out\nstops green working too, because nothing reaches it from the border.\n\nBackground walled off by opaque subject is never reached, whatever you\nlist. Pick that with the Island Picker instead.\n\nWhere two entries could both claim a pixel, the higher one wins.",
 		},
@@ -239,7 +238,6 @@ func get_settings_schema() -> Array[Dictionary]:
 			"property": &"edge_width",
 			"label": "Edge Width",
 			"group": "Settings",
-			"collapsed": true,
 			"type": SettingType.INT,
 			"min": 0,
 			"max": 16,
@@ -330,6 +328,7 @@ func get_settings_schema() -> Array[Dictionary]:
 		{
 			"property": &"islands",
 			"group": "Island Picker",
+			"collapsed": true,
 			"type": SettingType.ISLAND_PICKER,
 			"tooltip": "Enclosed regions to remove anyway, picked off the preview.\nEach one keys out the color of the pixel you clicked at the default\ntolerance, so an island need not match anything in Remove Colors.\nOnly applies while \"Only Outer Background\" is on.",
 		},

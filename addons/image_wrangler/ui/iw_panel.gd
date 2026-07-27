@@ -75,6 +75,14 @@ var _pending_outputs: Dictionary = {}
 ## mid-drag cannot clobber live state.
 var _settings_by_path: Dictionary = {}
 
+## Which settings groups are folded, keyed by operation and group name.
+##
+## Held here rather than in the settings builder because the builder is static and
+## throws its form away on every operation switch. Kept for the session and not
+## written to a sidecar: a fold is about what you are working on this afternoon,
+## not about the image.
+var _fold_state: Dictionary = {}
+
 ## Set while the form is being repointed at another image's settings. Every
 ## change handler early-returns on it.
 ##
@@ -697,7 +705,7 @@ func _select_operation(index: int) -> void:
 	_operation = _operations[index]
 	_operation_selector.selected = index
 	_bind_key_color()
-	SettingsBuilder.build(_operation, _settings_box, _on_setting_changed)
+	SettingsBuilder.build(_operation, _settings_box, _on_setting_changed, _fold_state)
 	_bind_settings_controls()
 	# _bind_settings_controls already applied this image's settings for the
 	# operation just selected, so the form and the operation agree before the

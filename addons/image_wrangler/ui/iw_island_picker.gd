@@ -95,7 +95,18 @@ func _build() -> void:
 	_hint = Label.new()
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_hint.modulate = Color(1, 1, 1, 0.6)
+	_hint.visible = false
 	add_child(_hint)
+
+
+## Shows [param text] under the list, or gives the line back when it is empty.
+##
+## Hidden rather than blanked. An empty Label still claims a line's height, and
+## three of these controls in one form is a visible band of nothing in a dock with
+## no room to spare.
+func _set_hint(text: String) -> void:
+	_hint.text = text
+	_hint.visible = not text.is_empty()
 
 
 func _notification(what: int) -> void:
@@ -117,14 +128,14 @@ func add_island(at: Vector2i) -> void:
 	if islands == null:
 		return
 	if islands.has(at):
-		_hint.text = "That position is already in the list."
+		_set_hint("That position is already in the list.")
 		_select(islands.find(at))
 		return
 
 	islands.add(at)
 	_refresh()
 	_select(islands.size() - 1)
-	_hint.text = ""
+	_set_hint("")
 	islands_changed.emit()
 
 
@@ -136,7 +147,7 @@ func get_islands() -> Array[Vector2i]:
 ## Redraws the rows from whatever list the operation now points at. Called when
 ## the settings Resource is swapped for another image.
 func refresh() -> void:
-	_hint.text = ""
+	_set_hint("")
 	_refresh()
 
 
@@ -178,7 +189,7 @@ func _on_remove_pressed() -> void:
 	_refresh()
 	if _list.item_count > 0:
 		_select(mini(index, _list.item_count - 1))
-	_hint.text = ""
+	_set_hint("")
 	islands_changed.emit()
 	selection_changed.emit()
 
@@ -189,7 +200,7 @@ func _on_clear_pressed() -> void:
 		return
 	islands.clear()
 	_refresh()
-	_hint.text = ""
+	_set_hint("")
 	islands_changed.emit()
 	selection_changed.emit()
 

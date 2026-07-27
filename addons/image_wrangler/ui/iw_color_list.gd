@@ -132,7 +132,18 @@ func _build() -> void:
 	_hint = Label.new()
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_hint.modulate = Color(1, 1, 1, 0.6)
+	_hint.visible = false
 	add_child(_hint)
+
+
+## Shows [param text] under the list, or gives the line back when it is empty.
+##
+## Hidden rather than blanked. An empty Label still claims a line's height, and
+## three of these controls in one form is a visible band of nothing in a dock with
+## no room to spare.
+func _set_hint(text: String) -> void:
+	_hint.text = text
+	_hint.visible = not text.is_empty()
 
 
 func _notification(what: int) -> void:
@@ -154,7 +165,7 @@ func add_color(color: Color) -> void:
 	if existing >= 0:
 		# Silently adding a duplicate would look like nothing happened, and the
 		# second entry could never claim a pixel the first had not already taken.
-		_hint.text = "That color is already in the list."
+		_set_hint("That color is already in the list.")
 		_select(existing)
 		return
 
@@ -164,14 +175,14 @@ func add_color(color: Color) -> void:
 	# Said on the way in rather than left to the tooltip. Picking a colour the
 	# flood has no route to looks like it should work and does nothing, and this
 	# is the moment that misunderstanding happens.
-	_hint.text = "Reached through the other colors in the list, so keep the ones around it. Background walled off by the subject needs the Island Picker."
+	_set_hint("Reached through the other colors in the list, so keep the ones around it. Background walled off by the subject needs the Island Picker.")
 	colors_changed.emit()
 
 
 ## Redraws the rows from whatever list the operation now points at. Called when
 ## the settings Resource is swapped for another image.
 func refresh() -> void:
-	_hint.text = ""
+	_set_hint("")
 	_refresh()
 
 
@@ -221,7 +232,7 @@ func _on_add_pressed() -> void:
 	colors.add(Color.WHITE)
 	_refresh()
 	_select(colors.size() - 1)
-	_hint.text = "Set the color with the swatch, or use Pick to take one off the image."
+	_set_hint("Set the color with the swatch, or use Pick to take one off the image.")
 	colors_changed.emit()
 
 
@@ -236,7 +247,7 @@ func _on_remove_pressed() -> void:
 		_select(mini(index, _list.item_count - 1))
 	else:
 		_load_editor()
-	_hint.text = ""
+	_set_hint("")
 	colors_changed.emit()
 
 
@@ -247,7 +258,7 @@ func _on_clear_pressed() -> void:
 	colors.clear()
 	_refresh()
 	_load_editor()
-	_hint.text = "Nothing is keyed out from the border now. Islands still apply."
+	_set_hint("Nothing is keyed out from the border now. Islands still apply.")
 	colors_changed.emit()
 
 

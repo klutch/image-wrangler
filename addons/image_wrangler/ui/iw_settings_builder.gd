@@ -24,7 +24,13 @@ const META_PROPERTY := &"iw_property"
 
 ## Replaces the contents of [param container] with controls for every setting
 ## [param operation] declares. [param on_changed] is called after each edit.
-static func build(operation: IWOperation, container: Container, on_changed: Callable) -> void:
+##
+## [param fold_state] carries which groups are folded, keyed by operation and
+## group name. Read here for the initial state and written to as headings are
+## clicked, so the caller holding it decides how long a fold survives — the dock
+## keeps one for the session, so switching operations and coming back finds the
+## form as it was left.
+static func build(operation: IWOperation, container: Container, on_changed: Callable, fold_state: Dictionary) -> void:
 	for child in container.get_children():
 		container.remove_child(child)
 		child.queue_free()
@@ -43,9 +49,14 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 		var group: String = setting.get("group", "")
 		if group != open_group:
 			open_group = group
-			# Read off the entry that opens the group, since that is the only one
-			# the heading exists for.
-			target = _begin_group(container, group, bool(setting.get("collapsed", false)))
+			# Keyed by operation as well as group name, so two operations that
+			# happen to name a group the same thing do not fold each other.
+			var key := "%s/%s" % [operation.get_operation_id(), group]
+			# What the user last left it at, falling back to what the schema asks
+			# for. The schema key is read off the entry that opens the group, since
+			# that is the only one the heading exists for.
+			var collapsed: bool = fold_state.get(key, bool(setting.get("collapsed", false)))
+			target = _begin_group(container, group, collapsed, fold_state, key)
 
 		var label: String = setting.get("label", String(property).capitalize())
 		var tooltip: String = setting.get("tooltip", "")
@@ -84,10 +95,9 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 ## reach the one being used is the worst of both. [param collapsed] is the state
 ## it starts in; the schema entry that opens the group decides.
 ##
-## Fold state is deliberately not remembered across a form rebuild. The form is
-## only rebuilt when the operation changes, and carrying one operation's folds
-## onto another's differently-named groups would mean guessing.
-static func _begin_group(container: Container, title: String, collapsed: bool) -> Container:
+## [param collapsed] is the state it opens in, and every click writes the new one
+## back to [param fold_state] under [param key], so the fold outlives the form.
+static func _begin_group(container: Container, title: String, collapsed: bool, fold_state: Dictionary, key: String) -> Container:
 	if title.is_empty():
 		return container
 
@@ -125,6 +135,9 @@ static func _begin_group(container: Container, title: String, collapsed: bool) -
 	heading.toggled.connect(
 		func(pressed: bool) -> void:
 			indent.visible = pressed
+			# A Dictionary is a reference, so this writes straight into the store
+			# the caller handed in and outlives the form being rebuilt.
+			fold_state[key] = not pressed
 			_apply_fold_arrow(heading)
 	)
 	# Re-resolved on a theme switch, since the arrow comes out of the theme and

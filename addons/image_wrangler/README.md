@@ -68,8 +68,11 @@ The full derivation is in the header comment of
 
 The form is split into a **Remove Colors** group, a **Settings** group, an
 **Island Picker** group and a **Blackout** group. Each folds away by clicking its
-heading, and only **Island Picker** starts open — all four expanded is taller
-than the dock.
+heading; **Remove Colors** and **Settings** start open, since all four expanded is
+taller than the dock. Folds are remembered for as long as the editor is open, so
+switching to another operation and back finds the form as you left it — they are
+not saved to a sidecar, being about what you are working on rather than about the
+image.
 
 | Setting | Default | What it does |
 | --- | --- | --- |

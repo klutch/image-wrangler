@@ -101,7 +101,18 @@ func _build() -> void:
 	_hint = Label.new()
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_hint.modulate = Color(1, 1, 1, 0.6)
+	_hint.visible = false
 	add_child(_hint)
+
+
+## Shows [param text] under the list, or gives the line back when it is empty.
+##
+## Hidden rather than blanked. An empty Label still claims a line's height, and
+## three of these controls in one form is a visible band of nothing in a dock with
+## no room to spare.
+func _set_hint(text: String) -> void:
+	_hint.text = text
+	_hint.visible = not text.is_empty()
 
 
 func _notification(what: int) -> void:
@@ -158,7 +169,7 @@ static func _drained(source: Texture2D) -> Texture2D:
 ## rather than carried onto the new one.
 func refresh() -> void:
 	_draft = -1
-	_hint.text = ""
+	_set_hint("")
 	_refresh()
 
 
@@ -210,7 +221,7 @@ func begin_polygon() -> void:
 	_refresh()
 	_list.select(_draft)
 	_update_buttons()
-	_hint.text = "Click to place corners. Right-click or Escape closes the shape."
+	_set_hint("Click to place corners. Right-click or Escape closes the shape.")
 	selection_changed.emit()
 
 
@@ -251,7 +262,7 @@ func undo_vertex() -> void:
 	polygon.remove_last()
 	if polygon.is_empty():
 		_discard_draft()
-		_hint.text = "Region discarded."
+		_set_hint("Region discarded.")
 		return
 	_redraw_row(_draft)
 	_update_buttons()
@@ -269,13 +280,13 @@ func finish_polygon() -> void:
 		_discard_draft()
 		# Said rather than left silent: a shape vanishing on close looks like a
 		# bug unless the reason is on screen.
-		_hint.text = "Needs at least %d corners — region discarded." % BlackoutPolygon.MIN_POINTS
+		_set_hint("Needs at least %d corners — region discarded." % BlackoutPolygon.MIN_POINTS)
 		return
 
 	var finished := _draft
 	_draft = -1
 	_redraw_row(finished)
-	_hint.text = ""
+	_set_hint("")
 	_update_buttons()
 	selection_changed.emit()
 	polygons_changed.emit()
@@ -345,7 +356,7 @@ func _on_remove_pressed() -> void:
 	_refresh()
 	if _list.item_count > 0:
 		_select(mini(index, _list.item_count - 1))
-	_hint.text = ""
+	_set_hint("")
 	polygons_changed.emit()
 	selection_changed.emit()
 
@@ -357,7 +368,7 @@ func _on_clear_pressed() -> void:
 	regions.clear()
 	_draft = -1
 	_refresh()
-	_hint.text = ""
+	_set_hint("")
 	polygons_changed.emit()
 	selection_changed.emit()
 
