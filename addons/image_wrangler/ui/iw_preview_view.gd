@@ -54,18 +54,30 @@ const POLYGON_WIDTH := 1.5
 ## Dimmed rather than covered, because the point of the preview is the image and
 ## the point of the overlay is that what you are looking at is one revision out of
 ## date — not that it has gone away.
-const BUSY_SCRIM_ALPHA := 0.35
+const BUSY_SCRIM_ALPHA := 0.3
 const BUSY_BAR_WIDTH := 220.0
 const BUSY_BAR_HEIGHT := 6.0
-const BUSY_BAR_MARGIN := 24.0
 const BUSY_CAPTION := "Processing…"
+
+## The panel the whole overlay sits in, so that a spinner and a caption over busy
+## artwork read as one thing rather than as marks on the image.
+const BUSY_PANEL_ALPHA := 0.72
+const BUSY_PANEL_RADIUS := 10
+const BUSY_PANEL_PADDING := 18.0
+
+## Closest the panel may come to the edge of the view, which is what decides how
+## much room the contents have on a narrow preview column.
+const BUSY_PANEL_MARGIN := 12.0
 
 ## Spinner artwork, used when it is there. Checked for rather than loaded blind,
 ## since asking for a resource that does not exist logs an error — and this is
 ## reached on every frame of a run.
-const BUSY_SPINNER_PATH := "res://addons/image_wrangler/ui/progress_spinner.png"
-const BUSY_SPINNER_SIZE := 26.0
-const BUSY_SPINNER_GAP := 9.0
+const BUSY_SPINNER_PATH := "res://addons/image_wrangler/ui/custom_spinner.png"
+
+## Diameter of the ring drawn when there is no artwork to turn.
+const BUSY_RING_SIZE := 26.0
+
+const BUSY_SPINNER_GAP := 10.0
 
 ## How the spinner turns.
 ##
@@ -152,6 +164,10 @@ var _spin_time := 0.0
 ## Resolved once and remembered, including the answer "there isn't one".
 var _spinner_texture: Texture2D
 var _spinner_looked_up := false
+
+## Built once. A StyleBox is the only way to get a rounded rectangle out of a
+## CanvasItem — draw_rect has square corners and nothing else.
+var _busy_panel: StyleBoxFlat
 
 var _texture: Texture2D
 
@@ -929,19 +945,42 @@ func _draw_busy() -> void:
 	if font != null:
 		caption = font.get_string_size(BUSY_CAPTION, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size)
 
-	var bar_width := minf(BUSY_BAR_WIDTH, maxf(_viewport.x - BUSY_BAR_MARGIN * 2.0, 0.0))
+	# Everything has to fit between the panel's padding and the view's edges, so
+	# the room left for the contents is what is worked out first and everything
+	# below sizes itself against it.
+	var room := Vector2(
+		maxf(_viewport.x - (BUSY_PANEL_MARGIN + BUSY_PANEL_PADDING) * 2.0, 0.0),
+		maxf(_viewport.y - (BUSY_PANEL_MARGIN + BUSY_PANEL_PADDING) * 2.0, 0.0),
+	)
+	if room.x <= 0.0 or room.y <= 0.0:
+		return
+
+	var spinner := _spinner_size(room, caption.y)
+	var bar_width := minf(BUSY_BAR_WIDTH, room.x)
 
 	# Stacked and centred as one group, so a short preview column drops the bar
 	# rather than pushing the spinner off its middle.
-	var stack := BUSY_SPINNER_SIZE
+	var stack := spinner.y
 	if caption.y > 0.0:
 		stack += BUSY_SPINNER_GAP + caption.y
 	if bar_width > 0.0:
 		stack += BUSY_SPINNER_GAP + BUSY_BAR_HEIGHT
-	var top := floorf((_viewport.y - stack) * 0.5)
+	var content := Vector2(maxf(maxf(spinner.x, caption.x), bar_width), stack)
 
-	_draw_spinner(Vector2(floorf(_viewport.x * 0.5), top + BUSY_SPINNER_SIZE * 0.5), accent)
-	top += BUSY_SPINNER_SIZE
+	# The panel first, since everything else is drawn on top of it.
+	var panel := Rect2(
+		Vector2(
+			floorf((_viewport.x - content.x) * 0.5 - BUSY_PANEL_PADDING),
+			floorf((_viewport.y - content.y) * 0.5 - BUSY_PANEL_PADDING),
+		),
+		(content + Vector2(BUSY_PANEL_PADDING, BUSY_PANEL_PADDING) * 2.0).floor(),
+	)
+	_canvas.draw_style_box(_panel_style(), panel)
+
+	var top := floorf((_viewport.y - content.y) * 0.5)
+
+	_draw_spinner(Vector2(floorf(_viewport.x * 0.5), top + spinner.y * 0.5), spinner, accent)
+	top += spinner.y
 
 	if caption.y > 0.0:
 		top += BUSY_SPINNER_GAP
@@ -978,26 +1017,54 @@ func _draw_busy() -> void:
 ## happening. They answer different questions: a bar that has not moved for four
 ## seconds is indistinguishable from one that has hung, and a stage of this
 ## operation can easily take that long.
-func _draw_spinner(center: Vector2, accent: Color) -> void:
+func _draw_spinner(center: Vector2, size: Vector2, accent: Color) -> void:
 	var turns := _spin_time * BUSY_SPIN_TURNS_PER_SECOND \
 			+ BUSY_SPIN_WOBBLE_TURNS * sin(TAU * BUSY_SPIN_WOBBLE_HZ * _spin_time)
 	var angle := TAU * turns
-	var radius := BUSY_SPINNER_SIZE * 0.5
 
 	var texture := _spinner()
 	if texture != null:
-		var half := Vector2(radius, radius)
+		var half := size * 0.5
 		# Rotating about the centre means drawing about the origin and moving the
 		# origin, since the transform is what carries the rotation.
 		_canvas.draw_set_transform(center, angle, Vector2.ONE)
-		_canvas.draw_texture_rect(texture, Rect2(-half, half * 2.0), false)
+		_canvas.draw_texture_rect(texture, Rect2(-half, size), false)
 		_canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		return
 
 	# No artwork: a ring with a bright arc running round it, which is the same
 	# idea and needs nothing on disk.
+	var radius := minf(size.x, size.y) * 0.5
 	_canvas.draw_arc(center, radius, 0.0, TAU, 32, Color(1, 1, 1, 0.18), 3.0, true)
 	_canvas.draw_arc(center, radius, angle, angle + TAU * BUSY_SPIN_SWEEP, 24, accent, 3.0, true)
+
+
+## How big to draw the spinner, given the [param room] the panel has and the
+## [param caption_height] that has to share it.
+##
+## Its own size, and never more. Scaling artwork up is the one way to make a
+## spinner look worse than no spinner at all, so the only thing that shrinks it is
+## running out of room — and then by the same factor on both axes, so it turns
+## round rather than wobbling on an oval.
+func _spinner_size(room: Vector2, caption_height: float) -> Vector2:
+	var texture := _spinner()
+	if texture == null:
+		var ring := minf(BUSY_RING_SIZE, minf(room.x, room.y))
+		return Vector2(ring, ring)
+
+	var native := Vector2(texture.get_size())
+	if native.x <= 0.0 or native.y <= 0.0:
+		return Vector2.ZERO
+
+	# What is left once the caption and the bar have taken their share, so a short
+	# view shrinks the spinner rather than pushing them out of the panel.
+	var spare := room.y - BUSY_BAR_HEIGHT - BUSY_SPINNER_GAP
+	if caption_height > 0.0:
+		spare -= caption_height + BUSY_SPINNER_GAP
+	spare = maxf(spare, 1.0)
+
+	var scale := minf(1.0, minf(room.x / native.x, spare / native.y))
+	return (native * scale).floor()
 
 
 ## The spinner artwork, or null when the file is not there.
@@ -1010,6 +1077,15 @@ func _spinner() -> Texture2D:
 		if ResourceLoader.exists(BUSY_SPINNER_PATH):
 			_spinner_texture = load(BUSY_SPINNER_PATH) as Texture2D
 	return _spinner_texture
+
+
+## The rounded black panel behind the overlay, built on first use.
+func _panel_style() -> StyleBoxFlat:
+	if _busy_panel == null:
+		_busy_panel = StyleBoxFlat.new()
+		_busy_panel.bg_color = Color(0, 0, 0, BUSY_PANEL_ALPHA)
+		_busy_panel.set_corner_radius_all(BUSY_PANEL_RADIUS)
+	return _busy_panel
 
 
 static func _build_checker() -> Texture2D:

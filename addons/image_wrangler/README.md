@@ -64,8 +64,12 @@ exactly like one that has hung, and a single pass can easily take that long. It
 turns at a wobbling rate rather than a constant one, so it reads as something
 working at a thing rather than a wheel freewheeling.
 
-Drop a `progress_spinner.png` in `addons/image_wrangler/ui/` and it is used as the
-spinner artwork; without one, a ring is drawn instead.
+The spinner, caption and bar sit together in a rounded translucent panel, over a
+light scrim across the rest of the view. The artwork is
+`addons/image_wrangler/ui/custom_spinner.png`; without it, a ring is drawn
+instead. It is shown at its own size and never larger — scaling a spinner up is
+the one way to make it look worse than none at all — and shrinks, on both axes
+together, only when the preview column runs out of room for it.
 
 Only one run happens at a time. Changing a setting mid-run queues another rather
 than starting a second thread, and the result of a run whose image was swapped out
