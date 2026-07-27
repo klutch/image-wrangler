@@ -46,10 +46,25 @@ place, where a toggle makes you hold one image in your head while looking at the
 other.
 
 The preview follows settings changes on its own. Above four megapixels it stops
-doing so, since one nudge of a slider would lock the editor for seconds at a
-time, and **Refresh** runs it on demand instead. There is no switch for this: the
-only reason to want automatic preview off is that it has become too slow, and the
-dock can see that for itself.
+doing so, and **Refresh** runs it on demand instead. There is no switch for this:
+the only reason to want automatic preview off is that it has become too slow, and
+the dock can see that for itself.
+
+**Processing runs on a worker thread**, so the editor stays usable while it
+works — you can keep panning, zooming and dragging sliders. A progress bar sits
+over the preview while a run is in flight, dimming the image rather than covering
+it, since what you are looking at is one revision out of date rather than gone.
+It advances unevenly on purpose: the passes report where they have actually got
+to, and they are nothing like equally expensive.
+
+Only one run happens at a time. Changing a setting mid-run queues another rather
+than starting a second thread, and the result of a run whose image was swapped out
+underneath it is thrown away rather than shown. The worker gets its own copy of
+the settings, so nothing you touch while it runs can change the answer it is
+halfway through computing.
+
+**Process All is still synchronous** and will lock the editor for the length of
+the batch.
 
 The three columns are split by draggable dividers.
 
@@ -653,6 +668,13 @@ An operation that does not transform pixels overrides three more:
 re-encoded), `get_output_name()` to name its own output, and `describe_output()`
 to say in the status bar what the preview cannot show. `Rename` is the worked
 example.
+
+`process_image()` may be called on a worker thread, and for anything but a tiny
+image it will be. It must touch nothing but its own settings and the image it was
+handed — no dock state, no shared resources, nothing the editor might be reading
+at the same moment. Call `report_progress()` with a fraction as it goes and the
+preview's bar follows; an operation that reports nothing simply finishes without
+the bar having moved, which is the right answer for one that is instant.
 
 That is the whole job. The dock builds the settings form from the schema and the
 sidecar codec reflects over the settings Resource, so neither the UI nor the

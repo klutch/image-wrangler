@@ -77,6 +77,17 @@ var _operation: IWOperation
 var _sources: PackedStringArray = PackedStringArray()
 var _source_image: Image
 var _result_image: Image
+
+## The worker running a preview, or null when nothing is in flight.
+##
+## One at a time. [Thread] has to be joined before it can be replaced and joining
+## blocks, so a second one would reintroduce exactly the stall the thread exists
+## to remove — [member _preview_pending] queues the next run instead.
+var _preview_thread: Thread
+
+## Whether something asked for a preview while one was already running, which also
+## means whatever comes back from that run is out of date.
+var _preview_pending := false
 var _suffix_is_default := true
 var _pending_outputs: Dictionary = {}
 
@@ -224,8 +235,17 @@ func _unhandled_key_input(event: InputEvent) -> void:
 ## A pending write must not die with the dock: this runs on plugin disable and on
 ## editor shutdown. It deliberately touches only the settings store and the
 ## codec, nothing that needs the panel to still be in the tree.
+##
+## A running worker has to be joined here as well. It holds nothing of the dock's
+## but its own copy of the settings, so waiting is safe — and not waiting means
+## letting the editor tear down a node a live thread is about to call back into.
+## The wait is bounded by whatever one image takes.
 func _exit_tree() -> void:
 	_flush_autosave()
+	_preview_pending = false
+	if _preview_thread != null:
+		_preview_thread.wait_to_finish()
+		_preview_thread = null
 
 
 func _build_operations() -> void:
@@ -696,13 +716,16 @@ func _on_file_selected(index: int) -> void:
 	_apply_settings_for(path)
 
 	_update_controls()
+	# The new source goes up first, whatever happens next. Processing is off on a
+	# worker now, so waiting for it would leave the previous image on screen for
+	# as long as this one takes — and that is exactly backwards.
+	_update_preview_texture()
+	_update_detail_label()
 	if _auto_preview_allowed():
 		_run_preview()
 	else:
-		# Shown as it is, and left to Refresh. Processing a very large image on
-		# every click through the list would make the list unusable.
-		_update_preview_texture()
-		_update_detail_label()
+		# Left to Refresh. Processing a very large image on every click through the
+		# list would make the list unusable.
 		_set_status("%s is large; press Refresh to process it." % path.get_file())
 	# A newly opened image starts fitted, so it arrives filling the frame rather
 	# than as a corner crop or a speck in the middle.
@@ -739,13 +762,13 @@ func _select_operation(index: int) -> void:
 		_suffix_edit.text = _operation.get_output_suffix()
 		_suffix_is_default = true
 
+	# The old operation's result no longer describes anything, so it must not be
+	# left on screen — under a fade it would be presented as this one's, and the
+	# new result is now a worker away rather than immediate.
 	_result_image = null
+	_update_preview_texture()
 	if _auto_preview_allowed():
 		_schedule_preview()
-	else:
-		# The old operation's result no longer describes anything, so it must not
-		# be left on screen under a fade that would present it as this one's.
-		_update_preview_texture()
 
 
 ## Points the swatch at the current operation's key colour, hiding it for
@@ -1136,23 +1159,111 @@ func _on_original_fade_changed(value: float) -> void:
 	_preview.original_fade = value * 0.01
 
 
+## Asks for a preview, starting one now or queueing it behind the run in flight.
+##
+## Only ever one worker at a time. A second [Thread] would have to be joined
+## before it could be replaced, and joining blocks — which is the whole thing this
+## is here to avoid. The pending flag does the same job for nothing.
 func _run_preview() -> void:
 	_debounce.stop()
 	if _source_image == null or _operation == null:
 		return
+	if _preview_thread != null:
+		_preview_pending = true
+		return
+	_start_preview()
+
+
+## Hands the operation to a worker thread and puts the preview into its working
+## state.
+func _start_preview() -> void:
+	_preview_pending = false
+	var worker := _snapshot_operation()
+	if worker == null:
+		return
+
+	# Captured, so the handler can tell whether the answer still describes what is
+	# on screen. Comparing the Image itself is the exact test: selecting another
+	# file replaces the object, and nothing else does.
+	var source := _source_image
+	worker.progress_reporter = func(fraction: float) -> void:
+		# Called from the worker. Nothing on this side of it may touch a control,
+		# so it hands the number to the main thread and returns.
+		_on_preview_progress.call_deferred(fraction)
+
+	_preview.set_busy(true)
+	_preview_thread = Thread.new()
+	_preview_thread.start(_preview_worker.bind(worker, source))
+
+
+## The whole of what runs off the main thread.
+##
+## Touches only the throwaway operation it was handed and the source image, and
+## reports back by deferral. Anything else here would be reaching into state the
+## editor is free to be changing at the same moment.
+func _preview_worker(worker: IWOperation, source: Image) -> void:
 	var started := Time.get_ticks_msec()
-	_result_image = _operation.process_image(_source_image)
-	var elapsed := Time.get_ticks_msec() - started
-	# An operation whose effect is not visible in the pixels — a rename — reports
-	# what it would do instead, so it is still inspectable before being run.
-	var path := _current_path()
-	var note := _operation.describe_output(path, _suffix_edit.text, maxi(_sources.find(path), 0)) if not path.is_empty() else ""
-	if note.is_empty():
-		_set_status("%s in %d ms" % [_operation.get_operation_name(), elapsed])
+	var result := worker.process_image(source)
+	_on_preview_done.call_deferred(source, result, Time.get_ticks_msec() - started)
+
+
+func _on_preview_progress(fraction: float) -> void:
+	_preview.set_progress(fraction)
+
+
+## Takes delivery of a finished run, back on the main thread.
+func _on_preview_done(source: Image, result: Image, elapsed: int) -> void:
+	if _preview_thread != null:
+		# Returns at once — the worker is already done, this is the bookkeeping
+		# Thread insists on before it can be let go.
+		_preview_thread.wait_to_finish()
+		_preview_thread = null
+
+	# Kept only while it still describes what is on screen. A run whose image was
+	# swapped out under it, or one already superseded by another request, is a
+	# picture of something the user has moved on from.
+	if source == _source_image and not _preview_pending:
+		_result_image = result
+		# An operation whose effect is not visible in the pixels — a rename —
+		# reports what it would do instead, so it is still inspectable before being
+		# run.
+		var path := _current_path()
+		var note := _operation.describe_output(path, _suffix_edit.text, maxi(_sources.find(path), 0)) if not path.is_empty() else ""
+		if note.is_empty():
+			_set_status("%s in %d ms" % [_operation.get_operation_name(), elapsed])
+		else:
+			_set_status(note)
+		_update_preview_texture()
+		_update_detail_label()
+
+	# Straight into the next run rather than clearing the overlay first, so a held
+	# slider does not strobe it off and on between every pass.
+	if _preview_pending and _source_image != null and _operation != null:
+		_start_preview()
 	else:
-		_set_status(note)
-	_update_preview_texture()
-	_update_detail_label()
+		_preview_pending = false
+		_preview.set_busy(false)
+
+
+## A private copy of the operation for the worker to use.
+##
+## The dock goes on editing its own settings while the thread runs — that is the
+## point of the thread — and an operation reading them mid-run would see a value
+## change underneath it. So the worker gets its own instance and its own settings,
+## deep-copied through the sidecar codec, which already knows how to walk every
+## nested resource these have.
+func _snapshot_operation() -> IWOperation:
+	var source_script := _operation.get_script()
+	if source_script == null:
+		return null
+	var worker: IWOperation = source_script.new()
+	var live := _operation.get_settings()
+	if live != null:
+		var copy := worker.make_settings()
+		if copy != null:
+			SettingsIO.apply_dict(copy, SettingsIO.to_dict(live))
+			worker.set_settings(copy)
+	return worker
 
 
 ## Hands the preview both images, so the fade slider can move between them

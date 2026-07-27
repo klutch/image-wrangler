@@ -189,6 +189,33 @@ func clamp_settings_to_schema(settings: Resource = null) -> void:
 		settings.set(property, int(value) if type == SettingType.INT else value)
 
 
+## Called with a fraction from 0 to 1 as [method process_image] advances, when
+## something has asked to be told.
+##
+## Deliberately not exported and not part of the settings: it belongs to one run
+## rather than to the image, and the dock sets it on a throwaway copy of the
+## operation before handing that copy to a worker thread.
+##
+## An operation that reports nothing is not broken — it simply finishes without
+## the bar having moved, which is the right answer for one that is instant.
+var progress_reporter := Callable()
+
+
+## Reports [param fraction] complete, if anyone is listening.
+##
+## Called from whichever thread is doing the work, so what is on the other end
+## must expect that — the dock's reporter defers to the main thread rather than
+## touching a control from the worker.
+func report_progress(fraction: float) -> void:
+	if progress_reporter.is_valid():
+		progress_reporter.call(clampf(fraction, 0.0, 1.0))
+
+
 ## Runs the operation. [param source] is left untouched; a new image is returned.
+##
+## May be called on a worker thread, and for anything but a trivial image it will
+## be. It must therefore touch nothing but its own settings and the image it was
+## given — no dock state, no shared resources, nothing the editor might be reading
+## at the same time.
 func process_image(source: Image) -> Image:
 	return source

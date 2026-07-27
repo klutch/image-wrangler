@@ -488,6 +488,12 @@ func process_image(source: Image) -> Image:
 	if pixel_count == 0:
 		return image
 
+	# Fractions along the way, for whatever is drawing the progress bar. Hand-set
+	# rather than evenly spaced, because the passes are nothing like equal: the
+	# flood and the nearest-subject map between them are most of the work, and a
+	# bar that pretended otherwise would crawl and then leap.
+	report_progress(0.02)
+
 	var data := image.get_data()
 	var blacked := _polygon_mask(width, height)
 	var island_seeds := _build_keys(data, width, height)
@@ -505,10 +511,12 @@ func process_image(source: Image) -> Image:
 	# this covers the border flood, which is nearly every background pixel in a
 	# normal image.
 	var key_dist := _distance_map(data, pixel_count)
+	report_progress(0.10)
 
 	var classified := _classify(data, key_dist, island_seeds, width, height)
 	var mask: PackedByteArray = classified[0]
 	var key_of: PackedInt32Array = classified[1]
+	report_progress(0.40)
 
 	# Folded into the mask here rather than into the alpha at the end, so that
 	# everything downstream treats these pixels correctly without being told about
@@ -533,15 +541,20 @@ func process_image(source: Image) -> Image:
 				mask[i] = MASK_SUBJECT
 				key_of[i] = KEY_NONE
 
+	report_progress(0.48)
+
 	var search_radius := maxi(maxi(bleed_radius, edge_width), _MIN_SEARCH_RADIUS)
 	var nearest := _nearest_subject_map(data, mask, key_dist, width, height, search_radius)
+	report_progress(0.62)
 
 	# Alpha is settled for the whole image before any colour work, because the
 	# refinement below is a neighbourhood operation and cannot run a pixel at a
 	# time.
 	var coverage := _coverage_map(data, key_dist, mask, key_of, nearest, width, height)
+	report_progress(0.72)
 	if refine_edges:
 		coverage = _guided_refine(coverage, key_dist, width, height)
+		report_progress(0.80)
 	# Last, so it settles the refinement's leftovers rather than being smoothed
 	# back into a haze by it.
 	if alpha_floor > 0.0 or alpha_ceiling < 1.0:
@@ -551,6 +564,7 @@ func process_image(source: Image) -> Image:
 	# to need restoring, and before the regions below, which are hard on purpose.
 	if _edge_cleanup_enabled():
 		coverage = _restore_edges(data, coverage, key_of, nearest, blacked, width, height)
+	report_progress(0.86)
 
 	# After everything that can move alpha, since a region is an instruction about
 	# the result rather than a suggestion to the keyer. Refinement smooths across
@@ -572,8 +586,11 @@ func process_image(source: Image) -> Image:
 	# Last of all, so the stroke follows the silhouette that actually comes out —
 	# drawn regions and all — rather than the one the keyer alone would have given.
 	var stroke := _stroke_mask(_final_alpha(data, coverage, pixel_count), width, height)
+	report_progress(0.92)
 
-	return _compose(data, coverage, key_of, nearest, stroke, width, height)
+	var composed := _compose(data, coverage, key_of, nearest, stroke, width, height)
+	report_progress(1.0)
+	return composed
 
 
 ## Whether the Edge Cleanup group does anything: its antialiasing restoration and

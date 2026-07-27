@@ -48,6 +48,18 @@ const HANDLE_GRAB := 7.0
 const POLYGON_FILL_ALPHA := 0.22
 const POLYGON_WIDTH := 1.5
 
+## The busy overlay: how far the image behind it is dimmed, and the shape of the
+## bar drawn over it.
+##
+## Dimmed rather than covered, because the point of the preview is the image and
+## the point of the overlay is that what you are looking at is one revision out of
+## date — not that it has gone away.
+const BUSY_SCRIM_ALPHA := 0.35
+const BUSY_BAR_WIDTH := 220.0
+const BUSY_BAR_HEIGHT := 6.0
+const BUSY_BAR_MARGIN := 24.0
+const BUSY_CAPTION := "Processing…"
+
 const MIN_ZOOM := 1.0
 const MAX_ZOOM := 1000.0
 
@@ -104,6 +116,13 @@ var original_fade := 0.0:
 		original_fade = clamped
 		if _canvas != null:
 			_canvas.queue_redraw()
+
+## Whether a run is in flight, and how far along it last said it was.
+##
+## Only ever written from the main thread — the worker reports through the dock,
+## which defers, so nothing here is touched from two threads at once.
+var _busy := false
+var _progress := 0.0
 
 var _texture: Texture2D
 
@@ -260,6 +279,34 @@ func set_polygons(polygons: Array, colors: PackedColorArray, selected: int, draf
 	_draft_polygon = draft
 	if draft < 0:
 		_hover_pixel = Vector2i(-1, -1)
+	_canvas.queue_redraw()
+
+
+## Puts the view into or out of its working state.
+##
+## Starting a run resets the bar, so a second run cannot appear to begin wherever
+## the first one left off.
+func set_busy(active: bool) -> void:
+	if _busy == active:
+		return
+	_busy = active
+	if active:
+		_progress = 0.0
+	_canvas.queue_redraw()
+
+
+## How far along the run says it is, 0 to 1.
+##
+## Never goes backwards within a run. A report out of order — which is easy enough
+## to introduce by reordering the passes that send them — would otherwise show as
+## a bar that stutters, and a bar that stutters is worse than one that is coarse.
+func set_progress(fraction: float) -> void:
+	if not _busy:
+		return
+	var clamped := maxf(_progress, clampf(fraction, 0.0, 1.0))
+	if is_equal_approx(_progress, clamped):
+		return
+	_progress = clamped
 	_canvas.queue_redraw()
 
 
@@ -676,6 +723,8 @@ func _pixel_at_clamped(local_position: Vector2) -> Vector2i:
 func _draw_canvas() -> void:
 	_canvas.draw_texture_rect(_checker, Rect2(Vector2.ZERO, _viewport), true)
 	if _texture == null or _content_size.x <= 0.0 or _content_size.y <= 0.0:
+		# Still worth saying something is happening, even with nothing to dim.
+		_draw_busy()
 		return
 	var frame := Rect2(_content_origin, _content_size)
 	_canvas.draw_texture_rect(_texture, frame, false)
@@ -687,6 +736,9 @@ func _draw_canvas() -> void:
 		_canvas.draw_texture_rect(_original_texture, frame, false, Color(1, 1, 1, original_fade))
 	_draw_markers()
 	_draw_polygons()
+	# Over everything, including the overlays, since it is about the whole view
+	# rather than about anything drawn on it.
+	_draw_busy()
 
 
 func _draw_markers() -> void:
@@ -813,6 +865,55 @@ func _draw_handle(center: Vector2, color: Color, emphasised := false) -> void:
 	var box := Rect2(center - Vector2(half, half), Vector2(half, half) * 2.0)
 	_canvas.draw_rect(box.grow(1.0), Color(0, 0, 0, 0.75), true)
 	_canvas.draw_rect(box, color, true)
+
+
+## Dims the view and draws a progress bar across the middle of it.
+##
+## The bar is the honest shape for this: the passes behind it report where they
+## have got to, so there is a real fraction to draw. It advances unevenly, because
+## the passes are not equally expensive and the reports say so rather than
+## pretending otherwise.
+func _draw_busy() -> void:
+	if not _busy:
+		return
+
+	_canvas.draw_rect(Rect2(Vector2.ZERO, _viewport), Color(0, 0, 0, BUSY_SCRIM_ALPHA), true)
+
+	var bar_width := minf(BUSY_BAR_WIDTH, maxf(_viewport.x - BUSY_BAR_MARGIN * 2.0, 0.0))
+	if bar_width <= 0.0:
+		return
+	var origin := Vector2(
+		floorf((_viewport.x - bar_width) * 0.5),
+		floorf((_viewport.y - BUSY_BAR_HEIGHT) * 0.5),
+	)
+
+	var accent := Color(0.4, 0.6, 1.0)
+	if has_theme_color(&"accent_color", &"Editor"):
+		accent = get_theme_color(&"accent_color", &"Editor")
+
+	# Track first, then the fill over it, so a fraction of zero still reads as a
+	# bar waiting rather than as nothing at all.
+	_canvas.draw_rect(Rect2(origin, Vector2(bar_width, BUSY_BAR_HEIGHT)), Color(0, 0, 0, 0.55), true)
+	if _progress > 0.0:
+		_canvas.draw_rect(
+			Rect2(origin, Vector2(floorf(bar_width * _progress), BUSY_BAR_HEIGHT)), accent, true)
+	_canvas.draw_rect(
+		Rect2(origin, Vector2(bar_width, BUSY_BAR_HEIGHT)), Color(1, 1, 1, 0.25), false, 1.0)
+
+	var font := get_theme_default_font()
+	if font == null:
+		return
+	var size := get_theme_default_font_size()
+	var caption := font.get_string_size(BUSY_CAPTION, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size)
+	_canvas.draw_string(
+		font,
+		Vector2(floorf((_viewport.x - caption.x) * 0.5), origin.y - BUSY_BAR_HEIGHT * 1.5),
+		BUSY_CAPTION,
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1.0,
+		size,
+		Color(1, 1, 1, 0.85),
+	)
 
 
 static func _build_checker() -> Texture2D:
