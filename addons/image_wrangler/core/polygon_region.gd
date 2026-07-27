@@ -1,35 +1,35 @@
 @tool
-class_name BlackoutPolygon
+class_name PolygonRegion
 extends Resource
 
-## One region of an image to force fully transparent, whatever is in it.
+## One region of an image drawn by hand, to force transparent or opaque.
 ##
-## The geometric escape hatch from keying. Everything else [RemoveBackground]
-## does removes background by [i]colour[/i] — even a picked island, which floods
-## from a point and stops wherever the colour changes. A watermark, a scan edge or
-## a stray element in the corner has no colour in common with itself, so nothing
-## colour-based can describe it. A polygon can.
+## The geometric escape hatch from keying. Everything else [RemoveBackground] does
+## works by [i]colour[/i] — even a picked island, which floods from a point and
+## stops wherever the colour changes. A watermark, a scan edge or a stray element
+## in the corner has no colour in common with itself, so nothing colour-based can
+## describe it. A polygon can.
 ##
 ## Vertices are image pixel coordinates, held as [code]Array[Vector2i][/code]
 ## rather than a [PackedVector2Array] so that the sidecar codec round-trips them
 ## with no special case. Sub-pixel vertices would buy nothing: the interior is
-## rasterised to whole pixels and the result is a hard cut either way.
+## rasterised to whole pixels and the result is a hard edge either way.
 
 ## Fewest vertices that enclose any area. Two points are a line and a line has no
 ## interior, so anything below this is discarded rather than stored.
 const MIN_POINTS := 3
 
-## Saturation and value of a new polygon's swatch. Fully saturated and bright, so
+## Saturation and value of a new region's swatch. Fully saturated and bright, so
 ## the outline reads over dark art and light art alike.
 const _SWATCH_SATURATION := 0.75
 const _SWATCH_VALUE := 1.0
 
 @export var points: Array[Vector2i] = []
 
-## Identifies this polygon in the list and on the preview.
+## Identifies this region in the list and on the preview.
 ##
 ## Random, and stored rather than derived from the row index: a colour computed
-## from position would change the moment a polygon above it was removed, and the
+## from position would change the moment a region above it was removed, and the
 ## shape you were looking at on the preview would appear to become a different
 ## one.
 @export var color: Color = Color.WHITE
@@ -44,16 +44,16 @@ const _SWATCH_VALUE := 1.0
 
 
 func _init() -> void:
-	# Assigned here as well as inline, so a polygon duplicated for another image
+	# Assigned here as well as inline, so a region duplicated for another image
 	# cannot end up sharing the array the original was built with.
 	points = []
 
 
-## A polygon with a fresh random swatch.
-static func create() -> BlackoutPolygon:
-	var polygon := BlackoutPolygon.new()
-	polygon.color = Color.from_hsv(randf(), _SWATCH_SATURATION, _SWATCH_VALUE)
-	return polygon
+## A region with a fresh random swatch.
+static func create() -> PolygonRegion:
+	var region := PolygonRegion.new()
+	region.color = Color.from_hsv(randf(), _SWATCH_SATURATION, _SWATCH_VALUE)
+	return region
 
 
 func size() -> int:
@@ -106,9 +106,9 @@ func bounds() -> Rect2i:
 	return Rect2i(minimum, maximum - minimum + Vector2i.ONE)
 
 
-## An independent copy, so two images never share one polygon.
-func duplicate_polygon() -> BlackoutPolygon:
-	var copy := BlackoutPolygon.new()
+## An independent copy, so two images never share one region.
+func duplicate_region() -> PolygonRegion:
+	var copy := PolygonRegion.new()
 	copy.points = points.duplicate()
 	copy.color = color
 	copy.enabled = enabled

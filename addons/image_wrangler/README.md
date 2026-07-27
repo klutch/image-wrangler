@@ -80,9 +80,10 @@ The full derivation is in the header comment of
 ### Settings
 
 The form is split into a **Remove Colors** group, a **Settings** group, an
-**Island Picker** group and a **Blackout** group. Each folds away by clicking its
-heading; **Remove Colors** and **Settings** start open, since all four expanded is
-taller than the dock. Folds are remembered for as long as the editor is open, so
+**Island Picker** group, a **Polygon Edit** group and a **Restore Edges** group.
+Each folds away by clicking its heading; **Remove Colors** and **Settings** start
+open, since all five expanded is taller than the dock. Folds are remembered for as
+long as the editor is open, so
 switching to another operation and back finds the form as you left it — they are
 not saved to a sidecar, being about what you are working on rather than about the
 image.
@@ -95,13 +96,14 @@ image.
 | Crevice Tolerance | 0.5 | How far from the background colour those squeezed-through pixels may be. |
 | Only Outer Background | on | Flood fills from the image border, so background-coloured regions enclosed by the subject — eyes, highlights, the holes in an "o" — stay opaque. Also what confines **Remove Colors** to the border. |
 | Island Picker | empty | Enclosed regions to remove anyway, picked off the preview. Held per image. See below. |
-| Blackout | empty | Regions erased outright, drawn over the preview. The only setting here that does not work by colour. Held per image. See below. |
+| Polygon Edit | empty | Regions drawn over the preview by hand, cut away or forced opaque. The only setting here that does not work by colour. Held per image. See below. |
 | Refine Edges | off | Runs the alpha through a guided filter, snapping it to the edges the image itself has. See below. |
 | Refine Radius | 2 | Window radius for that filter: roughly how far a ragged patch of alpha may sit from a real edge and still be pulled onto it. |
 | Alpha Floor | 0.0 | Alpha at or below this is forced fully clear. Applied last, so it also clears what **Refine Edges** leaves behind. See below. |
 | Alpha Ceiling | 1.0 | Alpha at or above this is forced fully solid, with the range between stretched across the two. |
-| Restore Edges | off | Re-mattes edges that ended up hard, working their coverage back out of the colours either side. See below. |
-| Sample Color Inward | on | Takes the subject colour a step inside the shape when restoring. Only applies while **Restore Edges** is on. |
+| Restore Edges → Enabled | off | Re-mattes edges that ended up hard, working their coverage back out of the colours either side. See below. |
+| Restore Edges → Edge Thickness | 1.0 | How many pixels deep the rebuilt antialiasing may run, either side of the edge. |
+| Restore Edges → Sample Color Inward | 2.0 | How far into the shape to reach for the subject colour, in pixels. 0 uses the nearest opaque pixel instead. |
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
 
@@ -262,30 +264,44 @@ screenshot, art drawn with a hard brush — or an edge that a low **Alpha Ceilin
 flattened on the way past. Those come out with a solid pixel sitting straight
 against a transparent one and nothing in between.
 
-**Restore Edges** is a pass over the finished alpha that looks for exactly that
-and rebuilds the missing coverage. It is off by default: a well-keyed edge has
-nothing here to fix, and the pass costs a scan over the image.
+The **Restore Edges** group is a pass over the finished alpha that looks for
+exactly that and rebuilds the missing coverage. **Enabled** is off by default: a
+well-keyed edge has nothing here to fix, and the pass costs a scan over the image.
 
 It works from the same relation as everything else. An edge pixel is
 `C = a * F + (1 - a) * K`, so its distance from the background is `a` times the
 subject's distance from the background, and dividing one by the other gives back
 `a` with the unknown `F` cancelled out.
 
-**Adjacency is the test**, and it is what stops this undoing good work. Only a
-pixel with the opposite extreme *directly* beside it is touched. A properly
-matted edge has half-covered pixels in between, so neither side can see the other
-and the edge is left exactly as it was. Blackout regions are skipped on both
-sides — a drawn cut is a straight line you asked for, not an edge that lost its
-antialiasing.
+**Adjacency is the test**, and it is what stops this undoing good work. The band
+is seeded only from pixels with the opposite extreme *directly* beside them. A
+properly matted edge has half-covered pixels in between, so neither side can see
+the other, nothing seeds, and the edge is left exactly as it was. Polygon Edit
+regions are skipped on both sides — a drawn cut is a straight line you asked for,
+not an edge that lost its antialiasing.
 
-**Sample Color Inward** decides where `F` comes from. The pixel being restored is
-itself part background — that is what makes it an edge — so measuring it against
-its own colour asks how much of a blend a blend is, and answers "all of it". With
-this on, the subject colour is taken a step or two further into the shape,
-following the direction the alpha around the pixel points. The walk stops at the
-first pixel that is not solid, so it can never cross a gap and come back with a
-colour from the far side. Turn it off for a subject so thin that a step inward
-leaves it altogether; the nearest opaque pixel is used instead.
+**Edge Thickness** is how deep the band grows from those seeds, in pixels, either
+side of the edge. 1 suits an ordinary aliased edge, which is only ever one pixel
+wide. Raise it for something that should have had a soft edge — a glow, a drop
+shadow, a blurred cutout — where the band needing rebuilt is wider than a single
+pixel. The band grows only through pixels that are themselves at an extreme, so
+the first half-covered pixel it meets is a wall and a thick setting cannot run
+away along an edge that already has its matte.
+
+It cannot invent softness that is not in the colours. A pixel deeper in that is
+pure subject measures as fully covered and keeps its alpha, so a wide setting on a
+genuinely hard edge does nothing — it only matters where the colours carry a
+gradient, which is exactly where a soft edge was lost.
+
+**Sample Color Inward** decides where `F` comes from, in pixels of reach. The
+pixel being restored is itself part background — that is what makes it an edge —
+so measuring it against its own colour asks how much of a blend a blend is, and
+answers "all of it". Reaching inward gets past that, following the direction the
+alpha around the pixel points. The walk stops at the first pixel that is not
+solid, so it can never cross a gap and come back with a colour from the far side,
+however far the reach is set. **0 switches it off** and uses the nearest opaque
+pixel instead, which is what a subject too thin to step into needs. Both this and
+the thickness are rounded to whole pixels, since the walks are over pixels.
 
 Where the subject is indistinguishable from the background the division has
 nothing to divide by, and the pixel is left as it was rather than amplified into
@@ -340,7 +356,7 @@ background-coloured pixel already qualifies then. Click the middle of a region
 rather than its edge: an antialiased pixel is a blend, so keying off one keys off
 the blend rather than the region's true colour.
 
-### Blackout
+### Polygon Edit
 
 Everything else here removes background by **colour** — even a picked island,
 which floods from a point and stops wherever the colour changes. That leaves no
@@ -372,7 +388,7 @@ line, not something recovered from the image. Regions are folded into the
 classification as background before any alpha is worked out, so colour bleed
 still fills the RGB underneath them exactly as it does for keyed-out background.
 
-Blackout works with no **Remove Colors** entries at all. Clear the list and the
+Polygon Edit works with no **Remove Colors** entries at all. Clear the list and the
 polygons are still cut; nothing else happens.
 
 Press **H** to hide the regions and the island markers together while judging an
@@ -470,7 +486,7 @@ the processing can never silently disagree.
 
 ### Switching entries off, and Add vs Subtract
 
-Every row in **Remove Colors**, **Island Picker** and **Blackout** carries a
+Every row in **Remove Colors**, **Island Picker** and **Polygon Edit** carries a
 **tick box** on the right. Unticking leaves the entry in the list but out of the
 result — a colour keeps its tolerance, an island keeps its spot, a region keeps
 its shape — so something can be tried and untried without being set up again. A
@@ -478,7 +494,7 @@ switched-off island still shows its marker, drawn hollow; a switched-off region
 still shows its outline, drawn without its fill. Clicking a highlighted row again
 clears the selection.
 
-**Island Picker** and **Blackout** rows also carry a **Subtract / Add** dropdown.
+**Island Picker** and **Polygon Edit** rows also carry a **Subtract / Add** dropdown.
 Subtract is the default and is what both tools have always done: the affected
 area becomes transparent. Add reverses it — the same area is forced **opaque**,
 whatever the keying decided. An Add island floods exactly as a Subtract one does,
@@ -620,7 +636,7 @@ the rest yourself, or a hand-edited file will disagree with its own slider.
 Setting types are `BOOL`, `INT`, `FLOAT`, `STRING`, `ENUM` (which needs an
 `options` list), `ISLAND_PICKER`, `COLOR_LIST` and `POLYGON_LIST`. The last three
 give you the preview-driven lists described above, for an `IslandList`, a
-`RemoveColorList` and a `BlackoutList` property respectively. Give consecutive
+`RemoveColorList` and a `PolygonRegionList` property respectively. Give consecutive
 entries a matching `"group"` and they are boxed under a heading of that name;
 every named group folds, and `"collapsed": true` on the entry that opens one
 starts it folded away.

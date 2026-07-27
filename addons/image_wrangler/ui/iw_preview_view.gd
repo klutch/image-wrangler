@@ -84,7 +84,7 @@ var pick_mode := false:
 		pick_mode = value
 		_update_cursor()
 
-## Whether the overlays — island markers and blackout polygons — are drawn. They
+## Whether the overlays — island markers and drawn regions — are drawn. They
 ## sit right on top of the edges being judged, so being able to blink them away
 ## matters.
 var markers_visible := true:
@@ -121,7 +121,7 @@ var _markers: Array[Vector2i] = []
 var _marker_enabled := PackedByteArray()
 var _selected_marker := -1
 
-## Blackout regions, as an Array of PackedVector2Array in image coordinates.
+## Drawn regions, as an Array of PackedVector2Array in image coordinates.
 var _polygons: Array = []
 var _polygon_colors := PackedColorArray()
 ## A byte per region: zero means it is switched off. It still draws — the shape
@@ -714,7 +714,7 @@ func _draw_markers() -> void:
 			_canvas.draw_circle(center, 1.5, color)
 
 
-## Draws every blackout region: finished ones closed and shaded, the one being
+## Draws every drawn region: finished ones closed and shaded, the one being
 ## drawn as an open path trailing a rubber band to the pointer.
 func _draw_polygons() -> void:
 	if not markers_visible:

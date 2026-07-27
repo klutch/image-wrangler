@@ -125,7 +125,7 @@ var _island_picker: IslandPicker
 ## The current operation's Remove Colors list, when it has one.
 var _color_list: ColorList
 
-## The current operation's Blackout list, when it has one.
+## The current operation's Polygon Edit list, when it has one.
 var _polygon_list: PolygonList
 
 ## Whichever list control currently owns the preview crosshair, or null.
@@ -183,7 +183,7 @@ func _ready() -> void:
 
 ## The dock's keyboard shortcuts: H toggles the overlays, which otherwise sit
 ## right on top of the edges you are trying to judge, and Escape and Backspace
-## close and unwind a blackout region being drawn.
+## close and unwind a drawn region in progress.
 ##
 ## Scoped to the dock rather than bound globally: they only fire while the panel
 ## is on screen and the pointer is inside it, so these keys stay free everywhere
@@ -946,7 +946,7 @@ func _clear_settings_context() -> void:
 	_refreshing = true
 	var current := _operation.get_settings()
 	if current != null and current.has_method("duplicate_for_new_image"):
-		# Islands and blackout regions are the exception: they are coordinates in
+		# Islands and drawn regions are the exception: they are coordinates in
 		# the image that just left, so leaving them on screen would draw markers
 		# and outlines over nothing.
 		_operation.set_settings(current.duplicate_for_new_image())
@@ -1076,7 +1076,7 @@ func _on_islands_changed() -> void:
 	_on_setting_changed()
 
 
-## Pushes both overlays — island markers and blackout regions — at the preview.
+## Pushes both overlays — island markers and drawn regions — at the preview.
 ##
 ## One function rather than two because they are drawn together, hidden together
 ## by H, and every change to either has to leave both correct on screen.

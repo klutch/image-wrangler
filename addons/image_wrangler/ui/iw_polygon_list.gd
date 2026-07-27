@@ -1,7 +1,8 @@
 @tool
 extends VBoxContainer
 
-## The Blackout list: regions the user draws over the preview to erase outright.
+## The Polygon Edit list: regions the user draws over the preview to cut away or
+## force opaque.
 ##
 ## Built on the same shape as the Island Picker, and differing in what a row
 ## holds: an island is one point and is finished the moment it is clicked, where a
@@ -10,7 +11,7 @@ extends VBoxContainer
 ## building lives here — the dock only owns the preview, so it forwards clicks in
 ## and lets this decide what they mean.
 ##
-## The [BlackoutList] it edits is resolved through the operation's settings on
+## The [PolygonRegionList] it edits is resolved through the operation's settings on
 ## every access, so when the dock swaps in another image's settings this control
 ## follows without being told — it only needs a [method refresh] to redraw.
 
@@ -45,7 +46,7 @@ var _hint: Label
 
 ## Row of the polygon currently being drawn, or -1 when no session is open.
 ##
-## Tracked by index rather than by holding the [BlackoutPolygon]: the settings
+## Tracked by index rather than by holding the [PolygonRegion]: the settings
 ## Resource under this control can be swapped for another image mid-draw, and a
 ## held reference would go on collecting points into an object no longer on any
 ## list.
@@ -153,7 +154,7 @@ func get_polygons() -> Array:
 	var regions := _polygon_list()
 	if regions == null:
 		return out
-	for polygon in regions.polygons:
+	for polygon in regions.regions:
 		out.append(polygon.points if polygon != null else ([] as Array[Vector2i]))
 	return out
 
@@ -164,7 +165,7 @@ func get_colors() -> PackedColorArray:
 	var regions := _polygon_list()
 	if regions == null:
 		return out
-	for polygon in regions.polygons:
+	for polygon in regions.regions:
 		out.append(polygon.color if polygon != null else Color.MAGENTA)
 	return out
 
@@ -177,7 +178,7 @@ func get_enabled_flags() -> PackedByteArray:
 	var regions := _polygon_list()
 	if regions == null:
 		return out
-	for polygon in regions.polygons:
+	for polygon in regions.regions:
 		out.append(1 if polygon != null and polygon.enabled else 0)
 	return out
 
@@ -211,7 +212,7 @@ func add_vertex(at: Vector2i) -> bool:
 	# Clicking the first corner again closes the shape, but only once there is a
 	# shape to close — otherwise the second click of a double-click on the first
 	# corner would end the polygon before it began.
-	if polygon.size() >= BlackoutPolygon.MIN_POINTS and polygon.points[0] == at:
+	if polygon.size() >= PolygonRegion.MIN_POINTS and polygon.points[0] == at:
 		return true
 	# A corner placed exactly on the previous one is a double-click or a jitter,
 	# not a request for a zero-length edge.
@@ -251,7 +252,7 @@ func finish_polygon() -> void:
 		_discard_draft()
 		# Said rather than left silent: a shape vanishing on close looks like a
 		# bug unless the reason is on screen.
-		_set_hint("Needs at least %d corners — region discarded." % BlackoutPolygon.MIN_POINTS)
+		_set_hint("Needs at least %d corners — region discarded." % PolygonRegion.MIN_POINTS)
 		return
 
 	var finished := _draft
@@ -283,16 +284,16 @@ func move_vertex(polygon_index: int, vertex: int, to: Vector2i) -> void:
 
 ## The list this control edits, resolved through the operation every time so that
 ## swapping the settings Resource for another image needs no re-pointing here.
-func _polygon_list() -> BlackoutList:
+func _polygon_list() -> PolygonRegionList:
 	if _operation == null:
 		return null
 	var settings := _operation.get_settings()
 	if settings == null:
 		return null
-	return settings.get(_property) as BlackoutList
+	return settings.get(_property) as PolygonRegionList
 
 
-func _draft_polygon() -> BlackoutPolygon:
+func _draft_polygon() -> PolygonRegion:
 	var regions := _polygon_list()
 	return regions.get_at(_draft) if regions != null else null
 
@@ -398,7 +399,7 @@ func _redraw_row(index: int) -> void:
 
 
 ## Numbered from one, since the row number is the only name a region has.
-func _row_data(index: int, polygon: BlackoutPolygon) -> Dictionary:
+func _row_data(index: int, polygon: PolygonRegion) -> Dictionary:
 	if polygon == null:
 		return {"color": Color.MAGENTA, "text": "Region %d" % (index + 1), "enabled": false}
 	var count := polygon.size()

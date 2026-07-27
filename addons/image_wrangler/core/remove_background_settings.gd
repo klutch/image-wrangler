@@ -73,13 +73,13 @@ extends Resource
 ## different image, where a coordinate simply would not.
 @export var islands: IslandList
 
-## Regions forced fully transparent whatever is in them. See [BlackoutPolygon].
+## Hand-drawn regions forced transparent or opaque. See [PolygonRegion].
 ##
-## The one part of this operation that does not remove background by colour, and
-## so the only way to describe something that has no colour in common with itself
-## — a watermark, a scan edge, a stray element in a corner. Coordinates, like
+## The one part of this operation that does not work by colour, and so the only
+## way to describe something that has no colour in common with itself — a
+## watermark, a scan edge, a stray element in a corner. Coordinates, like
 ## [member islands], and just as meaningless applied to another image.
-@export var blackout: BlackoutList
+@export var polygons: PolygonRegionList
 
 ## Un-blend the background out of partially transparent pixels.
 @export var decontaminate: bool = true
@@ -119,19 +119,32 @@ extends Resource
 ## setting elsewhere flattened.
 @export var restore_edges: bool = false
 
-## Take the subject colour from a step further into the opaque shape rather than
-## from the nearest opaque pixel.
+## How many pixels deep the rebuilt antialiasing may run, either side of the edge.
+##
+## One suits an ordinary aliased edge, which is only ever a pixel wide. Wider is
+## for something that should have had a soft edge — a glow, a drop shadow — where
+## the band needing rebuilt is more than one pixel across.
+##
+## Self-limiting rather than a blur radius: a pixel further in that is pure subject
+## measures as fully covered and keeps its alpha, so widening this on a genuinely
+## hard edge changes nothing.
+@export var restore_thickness: float = 1.0
+
+## How far into the opaque shape to reach for the subject colour, in pixels.
 ##
 ## The pixel on the boundary is itself part background, which is the whole reason
 ## it is being restored. Measuring against it asks how much of a blend a blend is
-## and answers "all of it". A step inward gets past the contamination to something
-## that is only subject.
-@export var sample_color_inward: bool = true
+## and answers "all of it". Reaching inward gets past the contamination to
+## something that is only subject.
+##
+## Zero switches the reach off and falls back to the nearest opaque pixel, which
+## is what a subject too thin to step into needs.
+@export var sample_inward_distance: float = 2.0
 
 
 func _init() -> void:
 	islands = IslandList.new()
-	blackout = BlackoutList.new()
+	polygons = PolygonRegionList.new()
 	# One white entry rather than none, so a fresh image starts where the single
 	# Remove Color swatch used to: keying out white at 0.02.
 	remove_colors = RemoveColorList.new()
@@ -146,13 +159,13 @@ func _init() -> void:
 ## cannot, since the image they were placed in is gone.
 ##
 ## [method Resource.duplicate] copies the *references* held in [member islands],
-## [member blackout] and [member remove_colors], so without the replacements
+## [member polygons] and [member remove_colors], so without the replacements
 ## below the copy would share all three with the original and editing either
 ## would silently edit both.
 func duplicate_for_new_image() -> RemoveBackgroundSettings:
 	var copy: RemoveBackgroundSettings = duplicate()
 	copy.islands = IslandList.new()
-	copy.blackout = BlackoutList.new()
+	copy.polygons = PolygonRegionList.new()
 	copy.remove_colors = remove_colors.duplicate_colors()
 	return copy
 

@@ -72,7 +72,7 @@ extends IWOperation
 ## [b]What colour cannot describe.[/b] Everything above removes background by
 ## colour, which leaves no way to say "this region goes, whatever is in it" — a
 ## watermark, a scan edge, a stray element in a corner. [member
-## RemoveBackgroundSettings.blackout] is the geometric escape hatch: polygons
+## RemoveBackgroundSettings.polygons] is the geometric escape hatch: regions
 ## drawn over the preview whose interiors are forced transparent. They are folded
 ## into the classification as background before any alpha is computed, so the rest
 ## of the pipeline needs no knowledge of them, and they grow no edge band, since a
@@ -134,10 +134,10 @@ const MASK_SUBJECT := 2
 const KEY_NONE := -1
 const KEY_CLEAR := -2
 
-## Values in the mask [method _blackout_mask] builds.
-const BLACKOUT_NONE := 0
-const BLACKOUT_CUT := 1
-const BLACKOUT_KEEP := 2
+## Values in the mask [method _polygon_mask] builds.
+const REGION_NONE := 0
+const REGION_CUT := 1
+const REGION_KEEP := 2
 
 ## Guards divisions where the denominator can legitimately collapse to zero.
 const _EPSILON := 0.0001
@@ -159,10 +159,6 @@ const _MIN_SEARCH_RADIUS := 2
 const _RESTORE_SOLID := 0.995
 const _RESTORE_CLEAR := 0.005
 
-## How many pixels [method _restore_edges] may step inward looking for a subject
-## colour. Two, because from a clear pixel the first step only reaches the
-## boundary — which is the contaminated pixel being stepped past.
-const _RESTORE_INWARD_MAX := 2
 
 ## Regularisation for [method _guided_refine]. Small enough that the filter
 ## follows any real silhouette rather than averaging across it, large enough that
@@ -361,17 +357,31 @@ func get_settings_schema() -> Array[Dictionary]:
 		},
 		{
 			"property": &"restore_edges",
-			"label": "Restore Edges",
-			"group": "Settings",
+			"label": "Enabled",
+			"group": "Restore Edges",
+			"collapsed": true,
 			"type": SettingType.BOOL,
-			"tooltip": "Finds edges that ended up hard — solid pixels sitting straight against\ntransparent ones, with no half-covered pixels between — and works out what\ntheir coverage should have been from the colors either side.\n\nOff by default, because a well-keyed edge already has its antialiasing and\nthere is nothing here to fix. Turn it on for a source that was aliased\nbefore it arrived, or an edge that Alpha Floor or a hard cutoff flattened.\n\nBlackout regions are left alone: those edges are hard on purpose.",
+			"tooltip": "Finds edges that ended up hard — solid pixels sitting straight against\ntransparent ones, with no half-covered pixels between — and works out what\ntheir coverage should have been from the colors either side.\n\nOff by default, because a well-keyed edge already has its antialiasing and\nthere is nothing here to fix. Turn it on for a source that was aliased\nbefore it arrived, or an edge that Alpha Floor or a hard cutoff flattened.\n\nPolygon Edit regions are left alone: those edges are hard on purpose.",
 		},
 		{
-			"property": &"sample_color_inward",
+			"property": &"restore_thickness",
+			"label": "Edge Thickness",
+			"group": "Restore Edges",
+			"type": SettingType.FLOAT,
+			"min": 1.0,
+			"max": 8.0,
+			"step": 0.5,
+			"tooltip": "How many pixels deep the rebuilt antialiasing may run, either side of the\nedge. 1 suits an ordinary aliased edge, which is only ever one pixel wide.\n\nRaise it for something that should have had a soft edge — a glow, a drop\nshadow, a blurred cutout — where the band that needs rebuilding is wider\nthan a single pixel.\n\nIt cannot invent softness that is not in the colors: a pixel further in\nthat is pure subject measures as fully covered and stays solid, so a wide\nsetting on a genuinely hard edge does nothing.",
+		},
+		{
+			"property": &"sample_inward_distance",
 			"label": "Sample Color Inward",
-			"group": "Settings",
-			"type": SettingType.BOOL,
-			"tooltip": "Take the subject color from a step inside the opaque shape rather than from\nthe nearest opaque pixel.\n\nThe pixel being restored is itself part background — that is what makes it\nan edge — so measuring it against its own color asks how much of a blend a\nblend is, and answers \"all of it\". A step inward gets past that.\n\nTurn it off for a subject so thin that a step inward leaves it altogether.\nOnly applies while Restore Edges is on.",
+			"group": "Restore Edges",
+			"type": SettingType.FLOAT,
+			"min": 0.0,
+			"max": 10.0,
+			"step": 0.5,
+			"tooltip": "How far into the opaque shape to reach for the subject color, in pixels.\n\nThe pixel being restored is itself part background — that is what makes it\nan edge — so measuring it against its own color asks how much of a blend a\nblend is, and answers \"all of it\". Reaching inward gets past that.\n\n0 switches the reach off and uses the nearest opaque pixel instead, which\nis what a subject too thin to step into needs. Rounded to whole pixels,\nsince the walk is over pixels.",
 		},
 		{
 			"property": &"islands",
@@ -381,11 +391,11 @@ func get_settings_schema() -> Array[Dictionary]:
 			"tooltip": "Enclosed regions to remove anyway, picked off the preview.\nEach one keys out the color of the pixel you clicked at the default\ntolerance, so an island need not match anything in Remove Colors.\nOnly applies while \"Only Outer Background\" is on.",
 		},
 		{
-			"property": &"blackout",
-			"group": "Blackout",
+			"property": &"polygons",
+			"group": "Polygon Edit",
 			"collapsed": true,
 			"type": SettingType.POLYGON_LIST,
-			"tooltip": "Regions to erase outright, drawn over the preview. Everything inside a\npolygon is made fully transparent whatever color it is.\n\nThis is the one thing here that does not work by color, so it is the way\nto remove something that has no color in common with itself — a watermark,\na scan edge, a stray element in a corner. Shapes may be concave.\n\nThe cut is hard: no antialiasing is rebuilt along a polygon edge, since\nthere is no background there to have blended with.",
+			"tooltip": "Regions drawn over the preview by hand. Subtract makes the inside fully\ntransparent whatever color it is; Add makes it fully opaque.\n\nThis is the one thing here that does not work by color, so it is the way\nto edit something that has no color in common with itself — a watermark,\na scan edge, a stray element in a corner. Shapes may be concave.\n\nThe edge is hard: no antialiasing is rebuilt along it, since there is no\nbackground there to have blended with.",
 		},
 	]
 
@@ -440,7 +450,7 @@ func process_image(source: Image) -> Image:
 		return image
 
 	var data := image.get_data()
-	var blacked := _blackout_mask(width, height)
+	var blacked := _polygon_mask(width, height)
 	var island_seeds := _build_keys(data, width, height)
 	# No colours and no Subtract islands is a coherent request for no keying, and
 	# every map below would otherwise have to defend itself against having no key
@@ -467,20 +477,20 @@ func process_image(source: Image) -> Image:
 	# picks its bleed sources from it, and compose follows.
 	#
 	# KEY_CLEAR on a cut, because the band pass skips a pixel with no key: a
-	# blackout is a hard cut and must not be matted. Applied after _classify for
+	# drawn cut is a hard edge and must not be matted. Applied after _classify for
 	# the same reason — a band already grown into the region is overwritten rather
 	# than left as a soft rim inside a hard edge.
 	var protect := _protect_mask(data, width, height)
 	if not blacked.is_empty():
 		for i in pixel_count:
-			if blacked[i] == BLACKOUT_CUT:
+			if blacked[i] == REGION_CUT:
 				mask[i] = MASK_BACKGROUND
 				key_of[i] = KEY_CLEAR
 	# Second, and over the top of the cut above, because Add wins every overlap.
 	if not protect.is_empty() or not blacked.is_empty():
 		for i in pixel_count:
 			if (not protect.is_empty() and protect[i] != 0) \
-					or (not blacked.is_empty() and blacked[i] == BLACKOUT_KEEP):
+					or (not blacked.is_empty() and blacked[i] == REGION_KEEP):
 				mask[i] = MASK_SUBJECT
 				key_of[i] = KEY_NONE
 
@@ -511,9 +521,9 @@ func process_image(source: Image) -> Image:
 	# is what survives — the same precedence the mask above was given.
 	if not blacked.is_empty():
 		for i in pixel_count:
-			if blacked[i] == BLACKOUT_CUT:
+			if blacked[i] == REGION_CUT:
 				coverage[i] = 0.0
-			elif blacked[i] == BLACKOUT_KEEP:
+			elif blacked[i] == REGION_KEEP:
 				coverage[i] = 1.0
 	if not protect.is_empty():
 		for i in pixel_count:
@@ -523,10 +533,10 @@ func process_image(source: Image) -> Image:
 	return _compose(data, coverage, key_of, nearest, width, height)
 
 
-## One byte per pixel marking what the blackout regions do there, or an empty
+## One byte per pixel marking what the drawn regions do there, or an empty
 ## array when no region is both drawn and switched on.
 ##
-## [constant BLACKOUT_CUT] for a Subtract region, [constant BLACKOUT_KEEP] for an
+## [constant REGION_CUT] for a Subtract region, [constant REGION_KEEP] for an
 ## Add one. Add writes over anything, Subtract only over untouched pixels, so Add
 ## wins every overlap whatever order the rows are in — protection is an override
 ## rather than another layer of paint, which is what lets the list stay a set of
@@ -542,23 +552,23 @@ func process_image(source: Image) -> Image:
 ##
 ## Cost is one pass over each polygon's own bounding box rather than the image, so
 ## a small cut-out on a large image is cheap.
-func _blackout_mask(width: int, height: int) -> PackedByteArray:
+func _polygon_mask(width: int, height: int) -> PackedByteArray:
 	var empty := PackedByteArray()
-	if settings.blackout == null or not settings.blackout.has_active():
+	if settings.polygons == null or not settings.polygons.has_active():
 		return empty
 
 	var marked := PackedByteArray()
 	marked.resize(width * height)
 	var filled_any := false
 
-	for polygon in settings.blackout.polygons:
-		if polygon == null or not polygon.is_active():
+	for region in settings.polygons.regions:
+		if region == null or not region.is_active():
 			continue
-		var adding := polygon.mode == IWAlphaMode.Mode.ADD
-		var value := BLACKOUT_KEEP if adding else BLACKOUT_CUT
-		var points := polygon.points
+		var adding := region.mode == IWAlphaMode.Mode.ADD
+		var value := REGION_KEEP if adding else REGION_CUT
+		var points := region.points
 		var count := points.size()
-		var box := polygon.bounds()
+		var box := region.bounds()
 		var first_row := maxi(box.position.y, 0)
 		var last_row := mini(box.position.y + box.size.y - 1, height - 1)
 
@@ -591,7 +601,7 @@ func _blackout_mask(width: int, height: int) -> PackedByteArray:
 				for x in range(from_x, to_x + 1):
 					# Add overwrites whatever is there; Subtract yields to an Add
 					# already written. One pass, and row order stops mattering.
-					if adding or marked[row + x] != BLACKOUT_KEEP:
+					if adding or marked[row + x] != REGION_KEEP:
 						marked[row + x] = value
 					filled_any = true
 				pair += 2
@@ -699,9 +709,9 @@ func _regions_only(image: Image, data: PackedByteArray, blacked: PackedByteArray
 	for i in pixel_count:
 		var offset := i * 4 + 3
 		if not blacked.is_empty():
-			if blacked[i] == BLACKOUT_CUT:
+			if blacked[i] == REGION_CUT:
 				out[offset] = 0
-			elif blacked[i] == BLACKOUT_KEEP:
+			elif blacked[i] == REGION_KEEP:
 				out[offset] = 255
 		if not protect.is_empty() and protect[i] != 0:
 			out[offset] = 255
@@ -785,16 +795,26 @@ func _coverage_map(data: PackedByteArray, key_dist: PackedFloat32Array, mask: Pa
 ## [code]F[/code] and [code]K[/code] for a pixel the classifier has already
 ## finished with.
 ##
-## [b]Adjacency is the test.[/b] Only a pixel with the opposite extreme directly
-## beside it is touched. A properly matted edge has half-covered pixels in
-## between, so neither side can see the other and the edge is left exactly as it
-## was — which is what keeps this from undoing the good work of the edge band.
+## [b]Adjacency is the test.[/b] The band starts at pixels with the opposite
+## extreme directly beside them and grows inwards from there by
+## [member RemoveBackgroundSettings.restore_thickness]. A properly matted edge has
+## half-covered pixels in between, so neither side can see the other, nothing
+## seeds, and the edge is left exactly as it was — which is what keeps this from
+## undoing the good work of the edge band.
 ##
-## Hard by intent is left hard: a pixel in or against a blackout region is skipped,
+## Thickness cannot invent softness. A pixel deeper into the band that is pure
+## subject measures as fully covered and keeps its alpha, so a wide setting on a
+## genuinely hard edge changes nothing; it only matters where the colours carry a
+## gradient, which is exactly where a soft edge was lost.
+##
+## Hard by intent is left hard: a pixel in or against a drawn region is skipped,
 ## since a drawn cut is a straight line the user asked for rather than an edge
 ## that lost its antialiasing.
 func _restore_edges(data: PackedByteArray, coverage: PackedFloat32Array, key_of: PackedInt32Array, nearest: PackedInt32Array, blacked: PackedByteArray, width: int, height: int) -> PackedFloat32Array:
-	var inward := settings.sample_color_inward
+	# Rounded to whole pixels, since the band is grown a pixel at a time. At least
+	# one, so an enabled pass always does something.
+	var thickness := maxi(roundi(settings.restore_thickness), 1)
+	var reach := 0 if settings.sample_inward_distance <= 0.0 else maxi(roundi(settings.sample_inward_distance), 1)
 	var has_regions := not blacked.is_empty()
 	var fallback_key: Color = _keys[0]
 	var pixel_count := width * height
@@ -802,40 +822,33 @@ func _restore_edges(data: PackedByteArray, coverage: PackedFloat32Array, key_of:
 	# the evidence that its neighbour needs restoring too.
 	var out := coverage.duplicate()
 
+	var band := _restore_band(coverage, blacked, thickness, width, height)
+	if band.is_empty():
+		return out
+
 	for i in pixel_count:
-		if has_regions and blacked[i] != BLACKOUT_NONE:
-			continue
-		var here := coverage[i]
-		var solid := here >= _RESTORE_SOLID
-		if not solid and here > _RESTORE_CLEAR:
+		if band[i] == 0:
 			continue
 
 		var x := i % width
 		@warning_ignore("integer_division")
 		var y := i / width
 
-		# The opposite extreme, if it is right there. Anything softer between the
-		# two means this edge already has its matte.
-		var facing := -1
-		if x > 0 and _restore_opposes(coverage, i - 1, solid):
-			facing = i - 1
-		elif x < width - 1 and _restore_opposes(coverage, i + 1, solid):
-			facing = i + 1
-		elif y > 0 and _restore_opposes(coverage, i - width, solid):
-			facing = i - width
-		elif y < height - 1 and _restore_opposes(coverage, i + width, solid):
-			facing = i + width
-		if facing < 0:
-			continue
-		if has_regions and blacked[facing] != BLACKOUT_NONE:
-			continue
-
-		# The background this edge is against. Taken from whichever of the two
-		# sides the flood actually claimed, since that is the one that knows.
-		var claimed := key_of[facing] if key_of[facing] >= 0 else key_of[i]
+		# The background this edge is against, taken from whichever neighbour the
+		# flood actually claimed — that is the one that knows which key it was.
+		var claimed := key_of[i]
+		if claimed < 0:
+			if x > 0 and key_of[i - 1] >= 0:
+				claimed = key_of[i - 1]
+			elif x < width - 1 and key_of[i + 1] >= 0:
+				claimed = key_of[i + 1]
+			elif y > 0 and key_of[i - width] >= 0:
+				claimed = key_of[i - width]
+			elif y < height - 1 and key_of[i + width] >= 0:
+				claimed = key_of[i + width]
 		var key: Color = _keys[claimed] if claimed >= 0 else fallback_key
 
-		var subject := _restore_subject(coverage, x, y, width, height) if inward else -1
+		var subject := _restore_subject(coverage, x, y, reach, width, height) if reach > 0 else -1
 		if subject < 0:
 			subject = nearest[i]
 		if subject < 0:
@@ -851,19 +864,128 @@ func _restore_edges(data: PackedByteArray, coverage: PackedFloat32Array, key_of:
 	return out
 
 
+## A byte per pixel marking the band to re-matte, or an empty array when no hard
+## edge was found.
+##
+## Seeded from every pixel that is at one extreme with the other extreme directly
+## beside it, then grown [param thickness] steps outwards through pixels that are
+## themselves at an extreme. Growing only through extremes is what stops the band
+## leaking along an edge that already has a matte — the first half-covered pixel
+## it meets is a wall.
+func _restore_band(coverage: PackedFloat32Array, blacked: PackedByteArray, thickness: int, width: int, height: int) -> PackedByteArray:
+	var empty := PackedByteArray()
+	var has_regions := not blacked.is_empty()
+	var pixel_count := width * height
+
+	var band := PackedByteArray()
+	band.resize(pixel_count)
+	var queue := PackedInt32Array()
+	queue.resize(pixel_count)
+	var depth := PackedInt32Array()
+	depth.resize(pixel_count)
+	var head := 0
+	var tail := 0
+
+	for i in pixel_count:
+		if has_regions and blacked[i] != REGION_NONE:
+			continue
+		var here := coverage[i]
+		var solid := here >= _RESTORE_SOLID
+		if not solid and here > _RESTORE_CLEAR:
+			continue
+		var x := i % width
+		@warning_ignore("integer_division")
+		var y := i / width
+		var touching := false
+		if x > 0 and _restore_opposes(coverage, i - 1, solid):
+			touching = true
+		elif x < width - 1 and _restore_opposes(coverage, i + 1, solid):
+			touching = true
+		elif y > 0 and _restore_opposes(coverage, i - width, solid):
+			touching = true
+		elif y < height - 1 and _restore_opposes(coverage, i + width, solid):
+			touching = true
+		if not touching:
+			continue
+		band[i] = 1
+		queue[tail] = i
+		tail += 1
+
+	if tail == 0:
+		return empty
+
+	# Written out four times rather than through a helper, the same way the other
+	# floods here are: the marking has to land in these arrays, and handing a
+	# Packed array to a function to be written through is the sort of thing that
+	# depends on which side of a copy-on-write you end up on.
+	while head < tail:
+		var index := queue[head]
+		head += 1
+		var step := depth[index] + 1
+		if step >= thickness:
+			continue
+		var x := index % width
+		@warning_ignore("integer_division")
+		var y := index / width
+		if x > 0:
+			var left := index - 1
+			if band[left] == 0 and _restore_extends(coverage, blacked, has_regions, left):
+				band[left] = 1
+				depth[left] = step
+				queue[tail] = left
+				tail += 1
+		if x < width - 1:
+			var right := index + 1
+			if band[right] == 0 and _restore_extends(coverage, blacked, has_regions, right):
+				band[right] = 1
+				depth[right] = step
+				queue[tail] = right
+				tail += 1
+		if y > 0:
+			var up := index - width
+			if band[up] == 0 and _restore_extends(coverage, blacked, has_regions, up):
+				band[up] = 1
+				depth[up] = step
+				queue[tail] = up
+				tail += 1
+		if y < height - 1:
+			var down := index + width
+			if band[down] == 0 and _restore_extends(coverage, blacked, has_regions, down):
+				band[down] = 1
+				depth[down] = step
+				queue[tail] = down
+				tail += 1
+
+	return band
+
+
+## Whether the band may grow onto [param index].
+##
+## Only through pixels still at an extreme. The first half-covered pixel the band
+## meets is a wall, which is what stops a thick setting running away along an edge
+## that already has its matte.
+func _restore_extends(coverage: PackedFloat32Array, blacked: PackedByteArray, has_regions: bool, index: int) -> bool:
+	if has_regions and blacked[index] != REGION_NONE:
+		return false
+	var here := coverage[index]
+	return here >= _RESTORE_SOLID or here <= _RESTORE_CLEAR
+
+
 ## Whether [param index] sits at the opposite extreme to a pixel that is
 ## [param solid].
 func _restore_opposes(coverage: PackedFloat32Array, index: int, solid: bool) -> bool:
 	return coverage[index] <= _RESTORE_CLEAR if solid else coverage[index] >= _RESTORE_SOLID
 
 
-## A pixel a step or two into the opaque shape from ([param x], [param y]), or -1.
+## A pixel up to [param reach] steps into the opaque shape from ([param x],
+## [param y]), or -1 when the walk found nothing solid.
 ##
 ## The direction comes from the alpha around the pixel — every neighbour pulls
 ## towards itself in proportion to how opaque it is, so the sum points the way the
 ## shape lies. Walking it stops at the first pixel that is not solid, so a step
-## can never cross a gap and come back with a colour from the far side.
-func _restore_subject(coverage: PackedFloat32Array, x: int, y: int, width: int, height: int) -> int:
+## can never cross a gap and come back with a colour from the far side, however
+## far the reach is set.
+func _restore_subject(coverage: PackedFloat32Array, x: int, y: int, reach: int, width: int, height: int) -> int:
 	var dx := 0.0
 	var dy := 0.0
 	for oy in [-1, 0, 1]:
@@ -885,7 +1007,7 @@ func _restore_subject(coverage: PackedFloat32Array, x: int, y: int, width: int, 
 	dy /= length
 
 	var found := -1
-	for step in range(1, _RESTORE_INWARD_MAX + 1):
+	for step in range(1, reach + 1):
 		var sx := x + roundi(dx * step)
 		var sy := y + roundi(dy * step)
 		if sx < 0 or sy < 0 or sx >= width or sy >= height:

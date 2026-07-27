@@ -317,13 +317,13 @@ static func self_test(operation: IWOperation) -> bool:
 					colors.clear()
 					colors.add(Color(0.25, 0.5, 0.75), 0.011)
 					colors.add(Color(0.9, 0.1, 0.2), 0.333)
-				elif nested is BlackoutList:
+				elif nested is PolygonRegionList:
 					# The deepest nesting this codec has to survive: a typed array
 					# of Vector2i inside a Resource inside a typed array of
-					# Resources. Two polygons of different lengths, so a decoder
+					# Resources. Two regions of different lengths, so a decoder
 					# that reused one instance or one point array shows up as a
 					# length mismatch rather than needing the values compared.
-					var regions := nested as BlackoutList
+					var regions := nested as PolygonRegionList
 					regions.clear()
 					var triangle := regions.add()
 					triangle.points = [Vector2i(3, 4), Vector2i(90, 12), Vector2i(40, 77)]
