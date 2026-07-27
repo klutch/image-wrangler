@@ -447,7 +447,7 @@ func _build_output_section() -> Control:
 	suffix_row.add_child(suffix_label)
 	_suffix_edit = LineEdit.new()
 	_suffix_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_suffix_edit.tooltip_text = "Appended to the file name. Results are always written as PNG.\nSuggests a name when saving one image, and names them all when\nprocessing the whole list."
+	_suffix_edit.tooltip_text = "Goes on the end of the output name, before the extension —\nflower.png with \"_nobg\" becomes flower_nobg.png.\n\nProcess Current Only just suggests it, so you can still rename the\nfile in the Save As dialog. Process All applies it to every file\nwithout asking again, which makes the suffix the only thing keeping\nthe results apart from the sources.\n\nSo take care when it is blank: each output then keeps its source's\nown name, and pointing Process All at the folder the sources are in\nwill overwrite the originals in place. You are asked to confirm, but\nthe prompt only says those files already exist — not that they are\nthe images you are processing. There is no undo.\n\nAnything that rewrites pixels is saved as PNG. Rename copies the\nfile untouched, so it keeps whatever format it already had."
 	_suffix_edit.text_changed.connect(func(_text: String) -> void: _suffix_is_default = false)
 	suffix_row.add_child(_suffix_edit)
 
