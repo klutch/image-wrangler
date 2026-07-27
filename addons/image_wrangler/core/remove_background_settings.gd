@@ -37,6 +37,33 @@ extends Resource
 ## the subject (eyes, speech bubbles, specular highlights) stay opaque.
 @export var contiguous: bool = true
 
+## How far the flood may stray from a keying colour to squeeze through a gap too
+## narrow to hold a single clean background pixel. Only has an effect while
+## [member crevice_reach] is above zero.
+##
+## One number for every key, unlike [member RemoveColorEntry.color_tolerance]. This is
+## not a description of a background — it is how far the flood may leave one behind to
+## get somewhere, and that is a property of the geometry it is squeezing through rather
+## than of the colour it started from.
+##
+## It belongs to the flood, and so it belongs here: the rule is applied against the
+## tolerance of whichever entry the flood is carrying at that moment, and every entry
+## keeps its own. A gap off a tightly toleranced colour must not open up on a loosely
+## toleranced one's terms.
+@export var crevice_tolerance: float = 0.5
+
+## How many near-background pixels in a row the flood may cross before it needs solid
+## background again, so it must be at least as long as the constriction it has to
+## squeeze through. Zero disables the mechanism, leaving the flood strictly within each
+## key's own tolerance.
+##
+## Setting it generously is safer than it sounds. Somewhere the flood reaches only by
+## straying is reclassified as edge rather than background, so it is matted by the
+## usual coverage maths instead of being cut out — and genuine subject measures as
+## fully covered there, so it keeps its alpha. Straying too far wastes work rather than
+## eating the subject.
+@export var crevice_reach: int = 0
+
 ## Un-blend the background out of partially transparent pixels.
 @export var decontaminate: bool = true
 

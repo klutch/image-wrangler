@@ -125,6 +125,20 @@ var decontaminate := false
 var search_radius := MIN_SEARCH_RADIUS
 var stroke_color := Color(0, 0, 0, 0)
 
+## How far a flood may stray from its key to squeeze through a gap, and how many
+## such pixels it may cross in a row. Set by the keying stage; see
+## [method flood_key_for].
+##
+## On the context rather than read from one operation's settings, because every flood
+## in a run has to obey the same rule — an island squeezing into a gap on different
+## terms from the border flood beside it would be arbitrary.
+var crevice_reach := 0
+var crevice_tolerance := 0.0
+
+## Weak-step count [method flood_key_for] wants recorded for the pixel it just
+## accepted. An out-parameter; see that method.
+var flood_weak := 0
+
 ## Whether any stage has established keys to measure against. Stages that can only
 ## work relative to a background check this and stand down.
 var has_keying := false
@@ -232,21 +246,53 @@ func claiming_key(index: int) -> int:
 ## afresh. That is what lets a background reach a region walled off by a hole,
 ## which is the normal shape of an image this pipeline has already run over once.
 ##
+## [b]The crevice rule is Canny's double threshold applied to region growing[/b]
+## rather than to edge linking. A pixel within its key's own tolerance is solid
+## background and resets the count; one merely within [member crevice_tolerance] may
+## still be crossed, but only [member crevice_reach] of them in a row before solid
+## background is needed again. That is what gets into a nook whose neck is nothing but
+## the antialiasing of the two walls meeting, while stopping the flood wandering off
+## across a pale subject, which an unbounded weak threshold would do.
+##
+## It comes last, after the whole list has been asked, so a pixel another entry claims
+## outright is never taken by the weaker rule instead. Straying is for getting through
+## a gap, not for choosing a key. And it is measured against the [i]arriving[/i] key's
+## own tolerance, which is why it has to live in the flood: every entry keeps its own
+## idea of how far background reaches, and a gap off a tightly toleranced colour must
+## not open up on a loosely toleranced one's terms.
+##
+## The weak-step count to record is left in [member flood_weak], as an out-parameter,
+## because returning it alongside the key would mean allocating an Array four times
+## per background pixel.
+##
 ## Shared by every flood here, so an island reaches as far through mixed background
-## as the border flood does.
-func flood_key_for(to: int, from_key: int) -> int:
+## as the border flood does, and squeezes through the same gaps.
+func flood_key_for(to: int, from_key: int, from_weak: int = 0) -> int:
+	flood_weak = 0
 	if is_clear(to):
 		return KEY_CLEAR
 	if from_key == KEY_CLEAR:
 		return claiming_key(to)
-	if key_distance(to, from_key) <= key_tolerances[from_key]:
+
+	var distance := key_distance(to, from_key)
+	var tolerance: float = key_tolerances[from_key]
+	if distance <= tolerance:
 		return from_key
+
 	# The arriving key does not want it, so the rest of the list is asked before
 	# giving up. Two flat backgrounds meeting — a white plate around a green stem —
 	# are one region to the eye and have to be one to the flood, or the second
 	# colour would only ever work where it independently touched the image border,
 	# which is almost never.
-	return claiming_key(to)
+	var claimed := claiming_key(to)
+	if claimed != KEY_NONE:
+		return claimed
+
+	if crevice_reach > 0 and from_weak < crevice_reach \
+			and distance <= maxf(crevice_tolerance, tolerance):
+		flood_weak = from_weak + 1
+		return from_key
+	return KEY_NONE
 
 
 ## Highest distance from [param key] within [param radius] of [param index].

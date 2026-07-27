@@ -27,7 +27,7 @@ right to remove it.
 Every entry also has a tick. Unticking it stops that operation running while
 keeping everything dialled into it, which removing the entry would not.
 
-A fresh image starts with the six that between them do what the old single
+A fresh image starts with the five that between them do what the old single
 operation did:
 
 | Operation | What it does |
@@ -35,7 +35,6 @@ operation did:
 | **Polygon Edit** | Shapes drawn by hand, forced transparent or opaque |
 | **Remove Background** | Keys out flat background colours and mattes the edge |
 | **Island Picker** | Regions picked off the preview, removed or protected |
-| **Remove Crevice** | Reaches into nooks too narrow for the flood |
 | **Refine Edges** | Tidies the alpha, then clips its extremes |
 | **Edge Cleanup** | Restores hard edges and draws an outline |
 
@@ -44,12 +43,10 @@ independent sets of shapes. A second Remove Background adds its colours to the
 keys the first registered rather than starting again. Refine Edges above Edge
 Cleanup smooths before the outline is measured; below it, after.
 
-Each one leaves a complete result for the next, and works out for itself anything
-it needs that is not already there — Remove Crevice will classify an image from its
-alpha and read the background colour back off the source rather than insisting on a
-Remove Background above it. Where an operation genuinely cannot do its job from
-what it has been handed, its entry says so on its own face rather than failing, so
-a half-built stack is a normal state to be in.
+Each one leaves a complete result for the next. Where an operation genuinely cannot
+do its job from what it has been handed — there is no coverage to refine until
+something has keyed — its entry says so on its own face rather than failing, so a
+half-built stack is a normal state to be in.
 
 Rename is deliberately **not** in the stack. It does not touch pixels, and its
 settings describe the whole batch rather than any one image, so it has a
@@ -169,18 +166,12 @@ the image — and two entries of the same operation fold independently.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Remove Colors | one white entry at 0.02 | The background colours to key out, each with a tolerance of its own. Only takes where the colour reaches the image border. See below. |
-| Edge Width | 2 | How many pixels of antialiasing to rebuild. 2 suits ordinary antialiasing; raise it for soft edges, glows and drop shadows; 0 gives a hard cutout. Remove Crevice and Island Picker take their band width from here too, so every edge is matted to the same depth. |
+| Edge Width | 2 | How many pixels of antialiasing to rebuild. 2 suits ordinary antialiasing; raise it for soft edges, glows and drop shadows; 0 gives a hard cutout. The crevice rule and Island Picker matte what they open to this same depth, so every edge in the image agrees. |
+| Crevice Reach | 0 (off) | Lets the flood squeeze into nooks whose opening is nothing but the antialiasing of the two walls meeting. This is how many such pixels it may cross in a row. See below. |
+| Crevice Tolerance | 0.5 | How far from the background colour those squeezed-through pixels may be. Only applies while Crevice Reach is above zero. |
 | Only Outer Background | on | Flood fills from the image border, so background-coloured regions enclosed by the subject — eyes, highlights, the holes in an "o" — stay opaque. Also what confines **Remove Colors** to the border. |
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
-
-**Remove Crevice**
-
-| Setting | Default | What it does |
-| --- | --- | --- |
-| Crevice Reach | 2 | How many near-background pixels may be crossed in a row before solid background is needed again. 0 does nothing at all. See below. |
-| Edge Width | 2 | How many pixels of antialiasing to rebuild around whatever it opens. Its own, so this works wherever you put it — usually worth matching to Remove Background's. |
-| Crevice Tolerance | 0.5 | How far from the background colour those squeezed-through pixels may be. |
 
 **Refine Edges**
 
@@ -284,19 +275,6 @@ by islands alone. With no colours *and* no islands the image comes back untouche
 
 ### Nooks and crannies
 
-Remove Crevice runs on its own. Given a classification from a Remove Background
-above it, it grows that; given none, it reads the alpha instead — what is already
-transparent is background, what is solid is subject, what is between them is the
-band — and recovers the background colour from the source, which still holds it
-wherever an operation above did the removing. It carries its own **Edge Width** for
-the band it rebuilds, so it mattes what it opens without borrowing a number from
-somewhere else in the stack.
-
-The one thing it cannot recover is a background that was gone before the file was
-opened. There is nothing in the source to read, and the colour sitting in its place
-is the previous run's colour bleed — subject colour wearing a background's
-position. On a source like that it does nothing rather than guess.
-
 Background sometimes survives in a tight concave corner. The usual cause is not
 the edge handling but **reachability**: where two walls nearly meet, their
 antialiasing overlaps and no pixel in the gap is close enough to the background
@@ -309,6 +287,14 @@ solid background and resets the count; one merely within **Crevice Tolerance**
 may still be crossed, but only this many in a row before solid background is
 needed again. That squeezes through a constriction while stopping the flood
 wandering off across a pale subject, which an unbounded loose threshold would do.
+
+It is part of the flood rather than an operation of its own, and has to be: the
+rule is applied against the tolerance of whichever entry the flood is carrying at
+that moment, so it runs once per colour in the list and each one squeezes on its
+own terms. A gap off a tightly toleranced colour does not open up on a loosely
+toleranced one's. Pulled out into a pass over the finished result it could only
+work against one tolerance for the whole image, which is the wrong answer for any
+list longer than one.
 
 Set it to at least the length of the constriction it has to get through — a
 narrow slot 8px long needs roughly that much reach. It is off by default because

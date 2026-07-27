@@ -44,10 +44,20 @@ const _V1_ORDER := [
 	&"polygon_edit",
 	&"remove_background",
 	&"island_picker",
-	&"remove_crevice",
 	&"refine_edges",
 	&"edge_cleanup",
 ]
+
+## Operation ids that existed in a saved file but no longer name an operation.
+##
+## Dropped without a warning, unlike an id nobody recognises: these were ours, and the
+## settings they carried have a home to go to. See [method _absorb_retired].
+const _RETIRED_IDS := {
+	# The crevice rule is part of the background flood again, because it has to be
+	# applied against the tolerance of whichever colour the flood is carrying — which
+	# means running inside it, once per entry, rather than as a pass afterwards.
+	&"remove_crevice": &"remove_background",
+}
 
 
 ## Sidecar path for a source image: the same path with its extension replaced.
@@ -169,11 +179,17 @@ static func load_stack(source_path: String, registry: Dictionary) -> Array:
 		return _stack_from_v1(envelope, registry)
 
 	var stack := []
+	var retired := []
 	for element: Variant in envelope.get("stack", []):
 		if not (element is Dictionary):
 			continue
 		var entry: Dictionary = element
 		var id := StringName(entry.get("id", ""))
+		if _RETIRED_IDS.has(id):
+			# Held rather than dropped: its settings belong to whatever absorbed it, and
+			# that entry may not have been read yet.
+			retired.append(entry)
+			continue
 		if not registry.has(id):
 			push_warning("Image Wrangler: %s names an unknown operation \"%s\"; skipping it."
 					% [path.get_file(), id])
@@ -191,7 +207,31 @@ static func load_stack(source_path: String, registry: Dictionary) -> Array:
 			"enabled": bool(entry.get("enabled", true)),
 			"settings": settings,
 		})
+
+	_absorb_retired(stack, retired)
 	return stack
+
+
+## Folds a retired operation's settings into whichever one took its job over.
+##
+## Applied straight onto the target's settings Resource, which works because the
+## properties kept their names when they moved — the codec would have refused them on
+## the way in, since the settings object they were read into no longer has them.
+##
+## A retired entry that was switched off contributes nothing, and one whose target is
+## not in the stack has nowhere to go; both are dropped.
+static func _absorb_retired(stack: Array, retired: Array) -> void:
+	for entry: Dictionary in retired:
+		if not bool(entry.get("enabled", true)):
+			continue
+		var target: StringName = _RETIRED_IDS[StringName(entry.get("id", ""))]
+		var stored: Variant = entry.get("settings", {})
+		if not (stored is Dictionary):
+			continue
+		for record: Dictionary in stack:
+			if record["id"] == target:
+				apply_dict(record["settings"], stored)
+				break
 
 
 ## Writes [param stack] into [param source_path]'s sidecar, leaving anything else in
@@ -280,9 +320,6 @@ static func _v1_wants(id: StringName, old: _LegacyV1Settings) -> bool:
 			return old.polygons != null and not old.polygons.regions.is_empty()
 		&"island_picker":
 			return old.islands != null and not old.islands.entries.is_empty()
-		&"remove_crevice":
-			# Its own off switch in version 1.
-			return old.crevice_reach > 0
 		&"refine_edges":
 			# The clip was usable without the filter, so either one counts.
 			return old.refine_edges or old.alpha_floor > 0.0 or old.alpha_ceiling < 1.0
@@ -298,15 +335,14 @@ static func _v1_fill(id: StringName, old: _LegacyV1Settings, into: Resource) -> 
 			into.remove_colors = old.remove_colors
 			into.edge_width = old.edge_width
 			into.contiguous = old.contiguous
+			into.crevice_reach = old.crevice_reach
+			into.crevice_tolerance = old.crevice_tolerance
 			into.decontaminate = old.decontaminate
 			into.bleed_radius = old.bleed_radius
 		&"polygon_edit":
 			into.polygons = old.polygons
 		&"island_picker":
 			into.islands = old.islands
-		&"remove_crevice":
-			into.crevice_reach = old.crevice_reach
-			into.crevice_tolerance = old.crevice_tolerance
 		&"refine_edges":
 			# A radius of zero is what "the filter was off" became, so a file that
 			# only wanted the clip keeps only the clip.

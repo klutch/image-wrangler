@@ -70,11 +70,16 @@ extends IWStackOperation
 ## background, and the flood dies at the frame. Crossing a hole also re-offers the far
 ## side to the whole Remove Colors list, since transparency carries no key to inherit.
 ##
-## [b]What the other stages do.[/b] Getting into a nook too narrow to flood is
-## [RemoveCrevice]; tidying the alpha afterwards is [RefineEdges]; picking a region by
-## hand is [IslandPickerOp] or [PolygonEditOp]; restoring a hard edge and outlining
-## the result is [EdgeCleanup]. Placing a second one of these below another adds its
-## colours to the keys already registered rather than starting again.
+## [b]Getting into a nook too narrow to flood[/b] is
+## [member RemoveBackgroundSettings.crevice_reach], and it lives here rather than in an
+## operation of its own because it is a rule inside the flood: it is applied against
+## the tolerance of whichever entry the flood is carrying at that moment, so it runs
+## once per colour in the list and each one squeezes on its own terms.
+##
+## [b]What the other stages do.[/b] Tidying the alpha afterwards is [RefineEdges];
+## picking a region by hand is [IslandPickerOp] or [PolygonEditOp]; restoring a hard
+## edge and outlining the result is [EdgeCleanup]. Placing a second one of these below
+## another adds its colours to the keys already registered rather than starting again.
 
 ## This operation's tunables. Swapped by the dock for the image on screen; see
 ## [RemoveBackgroundSettings].
@@ -137,6 +142,11 @@ func process_context(ctx: IWPipelineContext) -> void:
 	ctx.edge_width = maxi(ctx.edge_width, settings.edge_width)
 	ctx.bleed_radius = maxi(ctx.bleed_radius, settings.bleed_radius)
 	ctx.decontaminate = ctx.decontaminate or settings.decontaminate
+	# On the context because every flood in the run obeys it, not just this one's:
+	# an island squeezing through a gap on different terms from the border flood
+	# beside it would be arbitrary.
+	ctx.crevice_reach = maxi(ctx.crevice_reach, settings.crevice_reach)
+	ctx.crevice_tolerance = maxf(ctx.crevice_tolerance, settings.crevice_tolerance)
 	ctx.search_radius = maxi(
 			maxi(ctx.bleed_radius, ctx.edge_width), IWPipelineContext.MIN_SEARCH_RADIUS)
 
@@ -246,6 +256,10 @@ func _classify(ctx: IWPipelineContext, first_key: int) -> void:
 	queue.resize(pixel_count)
 	var head := 0
 	var tail := 0
+	# How many weak pixels in a row the flood crossed to reach each pixel; zero on
+	# anything solidly background. See [method IWPipelineContext.flood_key_for].
+	var weak_steps := PackedInt32Array()
+	weak_steps.resize(pixel_count)
 
 	if contiguous:
 		# Every border pixel is offered to the whole Remove Colors list, so a frame
@@ -303,43 +317,48 @@ func _classify(ctx: IWPipelineContext, first_key: int) -> void:
 			var index := queue[head]
 			head += 1
 			var claimed_by := key_of[index]
+			var weak_here := weak_steps[index]
 			var x := index % width
 			@warning_ignore("integer_division")
 			var y := index / width
 			if x > 0:
 				var left := index - 1
 				if mask[left] != background:
-					var took := ctx.flood_key_for(left, claimed_by)
+					var took := ctx.flood_key_for(left, claimed_by, weak_here)
 					if took != key_none:
 						mask[left] = background
 						key_of[left] = took
+						weak_steps[left] = ctx.flood_weak
 						queue[tail] = left
 						tail += 1
 			if x < width - 1:
 				var right := index + 1
 				if mask[right] != background:
-					var took := ctx.flood_key_for(right, claimed_by)
+					var took := ctx.flood_key_for(right, claimed_by, weak_here)
 					if took != key_none:
 						mask[right] = background
 						key_of[right] = took
+						weak_steps[right] = ctx.flood_weak
 						queue[tail] = right
 						tail += 1
 			if y > 0:
 				var up := index - width
 				if mask[up] != background:
-					var took := ctx.flood_key_for(up, claimed_by)
+					var took := ctx.flood_key_for(up, claimed_by, weak_here)
 					if took != key_none:
 						mask[up] = background
 						key_of[up] = took
+						weak_steps[up] = ctx.flood_weak
 						queue[tail] = up
 						tail += 1
 			if y < height - 1:
 				var down := index + width
 				if mask[down] != background:
-					var took := ctx.flood_key_for(down, claimed_by)
+					var took := ctx.flood_key_for(down, claimed_by, weak_here)
 					if took != key_none:
 						mask[down] = background
 						key_of[down] = took
+						weak_steps[down] = ctx.flood_weak
 						queue[tail] = down
 						tail += 1
 	else:
@@ -365,6 +384,16 @@ func _classify(ctx: IWPipelineContext, first_key: int) -> void:
 			if mask[i] != background and ctx.is_clear(i):
 				mask[i] = background
 				key_of[i] = key_clear
+
+	# A pixel the flood only squeezed through is not background — it is the
+	# antialiasing of the two walls it passed between, so it is part subject. Handing
+	# it to the band gives it partial alpha from the usual coverage maths, where
+	# calling it background would cut a hard notch out of the crevice mouth. It stays
+	# in the queue, so the band still grows from it.
+	if settings.crevice_reach > 0:
+		for i in pixel_count:
+			if mask[i] == background and weak_steps[i] > 0:
+				mask[i] = IWPipelineContext.MASK_EDGE
 
 	ctx.mask = mask
 	ctx.key_of = key_of
@@ -419,6 +448,24 @@ subject (eyes, highlights, gaps in lettering) stay opaque.
 This is also what makes Remove Colors border-only: an entry seeds the flood
 where its color meets the border, and nowhere else. Turn it off and every
 listed color is removed wherever it appears — enclosed regions included.",
+		},
+		{
+			"property": &"crevice_reach",
+			"label": "Crevice Reach",
+			"type": SettingType.INT,
+			"min": 0,
+			"max": 32,
+			"step": 1,
+			"tooltip": "Lets the flood squeeze into nooks whose opening is nothing but the\nantialiasing of the two walls meeting, which it would otherwise stop at.\nThis is how many such pixels it may cross in a row, so it needs to be at\nleast as long as the constriction it has to get through. 0 switches it off.\n\nPart of the flood, so it runs for every color in the list above, each\nagainst its own tolerance.",
+		},
+		{
+			"property": &"crevice_tolerance",
+			"label": "Crevice Tolerance",
+			"type": SettingType.FLOAT,
+			"min": 0.0,
+			"max": 1.0,
+			"step": 0.01,
+			"tooltip": "How far from the background color those squeezed-through pixels may be.\nOnly applies while Crevice Reach is above zero.",
 		},
 		{
 			"property": &"decontaminate",

@@ -152,6 +152,10 @@ func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 	var key_of := ctx.key_of
 	var queue := PackedInt32Array()
 	queue.resize(pixel_count)
+	# The same double threshold the border flood obeys; see
+	# [method IWPipelineContext.flood_key_for].
+	var weak_steps := PackedInt32Array()
+	weak_steps.resize(pixel_count)
 
 	for entry in settings.islands.entries:
 		if entry == null or not entry.enabled or entry.mode != IWAlphaMode.Mode.SUBTRACT:
@@ -171,6 +175,7 @@ func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 		var key := ctx.add_key(ctx.color_at(seed), entry.color_tolerance, true)
 		var head := 0
 		var tail := 0
+		weak_steps.fill(0)
 		mask[seed] = IWPipelineContext.MASK_BACKGROUND
 		key_of[seed] = key
 		touched.append(seed)
@@ -179,51 +184,56 @@ func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 
 		# 4-connected on purpose: 8-connectivity leaks through diagonal hairlines in
 		# thin subjects such as lettering or wire-frame art. Written out four times
-		# for the reason given in [method RemoveCrevice._grow].
+		# for the reason given in [method RemoveBackground._classify].
 		while head < tail:
 			var index := queue[head]
 			head += 1
 			var claimed_by := key_of[index]
+			var weak_here := weak_steps[index]
 			var x := index % width
 			@warning_ignore("integer_division")
 			var y := index / width
 			if x > 0:
 				var left := index - 1
 				if mask[left] != IWPipelineContext.MASK_BACKGROUND:
-					var took := ctx.flood_key_for(left, claimed_by)
+					var took := ctx.flood_key_for(left, claimed_by, weak_here)
 					if took != IWPipelineContext.KEY_NONE:
 						mask[left] = IWPipelineContext.MASK_BACKGROUND
 						key_of[left] = took
+						weak_steps[left] = ctx.flood_weak
 						touched.append(left)
 						queue[tail] = left
 						tail += 1
 			if x < width - 1:
 				var right := index + 1
 				if mask[right] != IWPipelineContext.MASK_BACKGROUND:
-					var took := ctx.flood_key_for(right, claimed_by)
+					var took := ctx.flood_key_for(right, claimed_by, weak_here)
 					if took != IWPipelineContext.KEY_NONE:
 						mask[right] = IWPipelineContext.MASK_BACKGROUND
 						key_of[right] = took
+						weak_steps[right] = ctx.flood_weak
 						touched.append(right)
 						queue[tail] = right
 						tail += 1
 			if y > 0:
 				var up := index - width
 				if mask[up] != IWPipelineContext.MASK_BACKGROUND:
-					var took := ctx.flood_key_for(up, claimed_by)
+					var took := ctx.flood_key_for(up, claimed_by, weak_here)
 					if took != IWPipelineContext.KEY_NONE:
 						mask[up] = IWPipelineContext.MASK_BACKGROUND
 						key_of[up] = took
+						weak_steps[up] = ctx.flood_weak
 						touched.append(up)
 						queue[tail] = up
 						tail += 1
 			if y < height - 1:
 				var down := index + width
 				if mask[down] != IWPipelineContext.MASK_BACKGROUND:
-					var took := ctx.flood_key_for(down, claimed_by)
+					var took := ctx.flood_key_for(down, claimed_by, weak_here)
 					if took != IWPipelineContext.KEY_NONE:
 						mask[down] = IWPipelineContext.MASK_BACKGROUND
 						key_of[down] = took
+						weak_steps[down] = ctx.flood_weak
 						touched.append(down)
 						queue[tail] = down
 						tail += 1
@@ -232,6 +242,13 @@ func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 	ctx.key_of = key_of
 	if touched.is_empty():
 		return touched
+	# What the flood only squeezed through is edge, not background, exactly as in the
+	# border flood.
+	if ctx.crevice_reach > 0:
+		for i in touched:
+			if mask[i] == IWPipelineContext.MASK_BACKGROUND and weak_steps[i] > 0:
+				mask[i] = IWPipelineContext.MASK_EDGE
+		ctx.mask = mask
 	# The band has to grow from what this opened, or an island region would have a
 	# hard rim where every other edge in the image has a matte.
 	touched.append_array(ctx.grow_edge_band(touched, ctx.edge_width))
