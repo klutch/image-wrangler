@@ -54,11 +54,11 @@ func clear() -> void:
 	polygons.clear()
 
 
-## Whether anything here encloses an area. An empty list, or one holding only
-## half-drawn polygons, rasterises to nothing.
-func has_drawable() -> bool:
+## Whether anything here would change the image. An empty list, or one holding
+## only half-drawn or switched-off polygons, rasterises to nothing.
+func has_active() -> bool:
 	for polygon in polygons:
-		if polygon != null and polygon.is_drawable():
+		if polygon != null and polygon.is_active():
 			return true
 	return false
 

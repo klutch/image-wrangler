@@ -1058,7 +1058,11 @@ func _update_overlays() -> void:
 		var empty: Array[Vector2i] = []
 		_preview.set_markers(empty, -1)
 	else:
-		_preview.set_markers(_island_picker.get_islands(), _island_picker.selected_index())
+		_preview.set_markers(
+			_island_picker.get_islands(),
+			_island_picker.selected_index(),
+			_island_picker.get_enabled_flags(),
+		)
 
 	if _polygon_list == null:
 		_preview.set_polygons([], PackedColorArray(), -1, -1)
@@ -1068,6 +1072,7 @@ func _update_overlays() -> void:
 			_polygon_list.get_colors(),
 			_polygon_list.selected_index(),
 			_polygon_list.draft_index(),
+			_polygon_list.get_enabled_flags(),
 		)
 
 

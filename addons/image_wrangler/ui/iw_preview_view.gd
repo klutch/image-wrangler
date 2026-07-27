@@ -99,11 +99,16 @@ var _texture: Texture2D
 var _checker: Texture2D
 var _image_size := Vector2i.ZERO
 var _markers: Array[Vector2i] = []
+## A byte per marker: zero means the island is switched off and draws hollow.
+var _marker_enabled := PackedByteArray()
 var _selected_marker := -1
 
 ## Blackout regions, as an Array of PackedVector2Array in image coordinates.
 var _polygons: Array = []
 var _polygon_colors := PackedColorArray()
+## A byte per region: zero means it is switched off. It still draws — the shape
+## took work to make — but without the fill, since nothing is being cut.
+var _polygon_enabled := PackedByteArray()
 ## Row highlighted in the list. Its corners get grab handles.
 var _selected_polygon := -1
 ## Row being drawn, or -1. Drawn as an open path with a rubber band rather than
@@ -190,10 +195,15 @@ func set_image(image: Image) -> void:
 
 
 ## Marks [param markers] on the image, emphasising [param selected].
-func set_markers(markers: Array[Vector2i], selected: int) -> void:
+##
+## [param enabled] runs alongside, a byte per marker. A switched-off island keeps
+## its marker rather than vanishing — where it is remains worth seeing while it is
+## set aside — but is drawn hollow so the list and the image agree.
+func set_markers(markers: Array[Vector2i], selected: int, enabled := PackedByteArray()) -> void:
 	# Copied, not aliased: the caller's array belongs to the operation and can
 	# change underneath us without a redraw being requested.
 	_markers = markers.duplicate()
+	_marker_enabled = enabled.duplicate()
 	_selected_marker = selected
 	_canvas.queue_redraw()
 
@@ -202,7 +212,7 @@ func set_markers(markers: Array[Vector2i], selected: int) -> void:
 ##
 ## [param selected] gets grab handles on its corners, [param draft] is drawn as an
 ## open path still being placed. Pass -1 for either when there is none.
-func set_polygons(polygons: Array, colors: PackedColorArray, selected: int, draft: int) -> void:
+func set_polygons(polygons: Array, colors: PackedColorArray, selected: int, draft: int, enabled := PackedByteArray()) -> void:
 	# Converted to float points once here rather than per redraw, and copied for
 	# the same reason the markers are: the caller's arrays belong to the operation
 	# and can change underneath us without a redraw being asked for.
@@ -213,6 +223,7 @@ func set_polygons(polygons: Array, colors: PackedColorArray, selected: int, draf
 			converted.append(Vector2(point))
 		_polygons.append(converted)
 	_polygon_colors = colors.duplicate()
+	_polygon_enabled = enabled.duplicate()
 	_selected_polygon = selected
 	_draft_polygon = draft
 	if draft < 0:
@@ -650,12 +661,18 @@ func _draw_markers() -> void:
 			continue
 		var center := _content_origin + (Vector2(point) + Vector2(0.5, 0.5)) * scale
 		var selected := i == _selected_marker
+		var on := i >= _marker_enabled.size() or _marker_enabled[i] != 0
 		var color := MARKER_SELECTED_COLOR if selected else MARKER_COLOR
+		if not on:
+			color = Color(color, 0.45)
 		var radius := MARKER_RADIUS + (1.0 if selected else 0.0)
 		# Dark ring underneath so the marker reads against light and dark art.
 		_canvas.draw_arc(center, radius + 1.0, 0.0, TAU, 24, Color(0, 0, 0, 0.75), 3.0)
 		_canvas.draw_arc(center, radius, 0.0, TAU, 24, color, 1.5)
-		_canvas.draw_circle(center, 1.5, color)
+		# Hollow when switched off, so a marker that is only a reminder cannot be
+		# mistaken for one that is doing something.
+		if on:
+			_canvas.draw_circle(center, 1.5, color)
 
 
 ## Draws every blackout region: finished ones closed and shaded, the one being
@@ -668,11 +685,12 @@ func _draw_polygons() -> void:
 		if points.is_empty():
 			continue
 		var color := _polygon_colors[i] if i < _polygon_colors.size() else Color.MAGENTA
+		var on := i >= _polygon_enabled.size() or _polygon_enabled[i] != 0
 		var screen := _to_screen(points)
 		if i == _draft_polygon:
 			_draw_draft(screen, color)
 		else:
-			_draw_finished(screen, color, i == _selected_polygon)
+			_draw_finished(screen, color, i == _selected_polygon, on)
 
 
 ## Image-space points as canvas positions, taken from pixel centres so a corner
@@ -685,7 +703,21 @@ func _to_screen(points: PackedVector2Array) -> PackedVector2Array:
 	return out
 
 
-func _draw_finished(screen: PackedVector2Array, color: Color, selected: bool) -> void:
+func _draw_finished(screen: PackedVector2Array, color: Color, selected: bool, enabled: bool) -> void:
+	if not enabled:
+		# Outline only. The fill is what says "this area is being taken out", so a
+		# region that is switched off must not have one — but the shape stays, since
+		# it was built corner by corner and is only set aside.
+		var dimmed := Color(color, 0.5)
+		var outline := screen.duplicate()
+		outline.append(screen[0])
+		_canvas.draw_polyline(outline, Color(0, 0, 0, 0.5), POLYGON_WIDTH + 2.0)
+		_canvas.draw_polyline(outline, dimmed, POLYGON_WIDTH)
+		if selected:
+			for point in screen:
+				_draw_handle(point, dimmed)
+		return
+
 	# Triangulated rather than handed straight to draw_colored_polygon, which
 	# fans from the first vertex and so fills the wrong area for a concave shape —
 	# and concave is the whole point of this tool.

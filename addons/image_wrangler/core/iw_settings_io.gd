@@ -74,6 +74,12 @@ static func load_settings(source_path: String, operation: IWOperation) -> Resour
 	if settings == null:
 		return null
 	apply_dict(settings, operations[id])
+	# Everything above is shape-agnostic, which is what makes the codec generic —
+	# and also what leaves it unable to notice that a property changed shape
+	# between versions. This is the one place a settings Resource gets to look at
+	# what it just loaded and put an older file's values where they now live.
+	if settings.has_method("migrate_loaded"):
+		settings.call("migrate_loaded")
 	return settings
 
 
@@ -295,7 +301,14 @@ static func self_test(operation: IWOperation) -> bool:
 			TYPE_OBJECT:
 				var nested := original.get(name)
 				if nested is IslandList:
-					(nested as IslandList).points = [Vector2i(128, 64), Vector2i(3, 900)]
+					var islands := nested as IslandList
+					islands.clear()
+					islands.add(Vector2i(128, 64))
+					# Driven off the defaults on both counts, so an entry that
+					# failed to round-trip cannot coincidentally match.
+					var picked := islands.add(Vector2i(3, 900))
+					picked.enabled = false
+					picked.mode = IWAlphaMode.Mode.ADD
 				elif nested is RemoveColorList:
 					# Two entries with different tolerances, because one would not
 					# catch a decoder that returned the same instance for every
@@ -318,6 +331,8 @@ static func self_test(operation: IWOperation) -> bool:
 					var quad := regions.add()
 					quad.points = [Vector2i(0, 0), Vector2i(8, 0), Vector2i(8, 8), Vector2i(0, 8)]
 					quad.color = Color(0.8, 0.2, 0.6, 1.0)
+					quad.enabled = false
+					quad.mode = IWAlphaMode.Mode.ADD
 
 	var round_tripped: Variant = JSON.parse_string(JSON.stringify(to_dict(original)))
 	if not (round_tripped is Dictionary):

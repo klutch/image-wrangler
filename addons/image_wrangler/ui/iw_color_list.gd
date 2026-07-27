@@ -26,13 +26,8 @@ signal pick_toggled(enabled: bool)
 ## the preview and save the settings against the current image.
 signal colors_changed
 
-const PickIcon := preload("res://addons/image_wrangler/ui/iw_pick_icon.gd")
-
-const SWATCH_SIZE := 14
-
-## Floor for the rows box, which [member ItemList.auto_height] otherwise lets
-## collapse to nothing while the list is empty.
-const LIST_EMPTY_HEIGHT := 24
+const ToolButton := preload("res://addons/image_wrangler/ui/iw_tool_button.gd")
+const EntryList := preload("res://addons/image_wrangler/ui/iw_entry_list.gd")
 
 ## Caption width for the editor row, matching [code]iw_settings_builder.gd[/code]
 ## so the tolerance slider lines up with the sliders above and below it.
@@ -41,7 +36,7 @@ const LABEL_WIDTH := 92
 var _operation: IWOperation
 var _property: StringName
 
-var _list: ItemList
+var _list: EntryList
 var _pick_button: Button
 var _add_button: Button
 var _remove_button: Button
@@ -100,13 +95,14 @@ func _build() -> void:
 	_clear_button.pressed.connect(_on_clear_pressed)
 	buttons.add_child(_clear_button)
 
-	_list = ItemList.new()
-	# Grows with its contents rather than reserving a block of the dock whether
-	# or not anything is in it.
-	_list.auto_height = true
-	_list.custom_minimum_size = Vector2(0, LIST_EMPTY_HEIGHT)
+	_list = EntryList.new()
+	# No mode dropdown: a colour describes what background *is*, where add and
+	# subtract describe what to do with an area. There is nothing for a colour to
+	# add.
+	_list.configure(false)
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.item_selected.connect(_on_item_selected)
+	_list.row_selected.connect(_on_row_selected)
+	_list.enabled_toggled.connect(_on_enabled_toggled)
 	add_child(_list)
 
 	_editor = HBoxContainer.new()
@@ -150,7 +146,8 @@ func _notification(what: int) -> void:
 	# The editor theme is only reachable once the control is in the tree, and the
 	# icon depends on it, so it is resolved here rather than at construction.
 	if what == NOTIFICATION_THEME_CHANGED and _pick_button != null:
-		PickIcon.apply_to(_pick_button)
+		ToolButton.apply_pick_icon(_pick_button)
+		ToolButton.style_armed(_pick_button)
 
 
 # --- Public API ---------------------------------------------------------
@@ -206,8 +203,7 @@ func _color_list() -> RemoveColorList:
 
 
 func _selected_index() -> int:
-	var selection := _list.get_selected_items()
-	return selection[0] if not selection.is_empty() else -1
+	return _list.selected_index()
 
 
 func _selected_entry() -> RemoveColorEntry:
@@ -215,9 +211,20 @@ func _selected_entry() -> RemoveColorEntry:
 	return colors.get_at(_selected_index()) if colors != null else null
 
 
-func _on_item_selected(_index: int) -> void:
+func _on_row_selected(_index: int) -> void:
 	_load_editor()
 	_update_buttons()
+
+
+func _on_enabled_toggled(index: int, on: bool) -> void:
+	var colors := _color_list()
+	var entry := colors.get_at(index) if colors != null else null
+	if entry == null:
+		return
+	entry.enabled = on
+	_list.update_row(index, _row_data(index, entry))
+	_set_hint("")
+	colors_changed.emit()
 
 
 ## Adds an entry at the default colour for the user to set by hand.
@@ -243,8 +250,8 @@ func _on_remove_pressed() -> void:
 		return
 	colors.remove_at(index)
 	_refresh()
-	if _list.item_count > 0:
-		_select(mini(index, _list.item_count - 1))
+	if _list.count() > 0:
+		_select(mini(index, _list.count() - 1))
 	else:
 		_load_editor()
 	_set_hint("")
@@ -287,8 +294,6 @@ func _on_tolerance_changed(value: float) -> void:
 
 
 func _select(index: int) -> void:
-	if index < 0 or index >= _list.item_count:
-		return
 	_list.select(index)
 	_load_editor()
 	_update_buttons()
@@ -310,21 +315,20 @@ func _load_editor() -> void:
 	_loading_editor = false
 
 
-## Rebuilds every row, dropping the selection with them.
+## Rebuilds every row.
 ##
 ## Editing a row does not come through here — [method _redraw_row] rewrites one in
-## place, precisely so that changing a colour or a tolerance does not deselect the
-## row being edited out from under the editor.
+## place, precisely so that changing a colour or a tolerance does not disturb the
+## row the editor below is pointing at.
 func _refresh() -> void:
 	if _list == null:
 		return
 	var colors := _color_list()
-	_list.clear()
+	var rows := []
 	if colors != null:
 		for i in colors.size():
-			var entry := colors.get_at(i)
-			_list.add_item(_row_text(entry))
-			_list.set_item_icon(i, _swatch(entry))
+			rows.append(_row_data(i, colors.get_at(i)))
+	_list.set_rows(rows)
 	_load_editor()
 	_update_buttons()
 
@@ -332,30 +336,24 @@ func _refresh() -> void:
 ## Rewrites one row in place, leaving the selection alone.
 func _redraw_row(index: int) -> void:
 	var colors := _color_list()
-	if colors == null or index < 0 or index >= _list.item_count:
+	var entry := colors.get_at(index) if colors != null else null
+	if entry == null:
 		return
-	var entry := colors.get_at(index)
-	_list.set_item_text(index, _row_text(entry))
-	_list.set_item_icon(index, _swatch(entry))
+	_list.update_row(index, _row_data(index, entry))
 
 
 ## Hex rather than floats: it is what a colour is written as everywhere else the
 ## user meets one, and it fits a narrow dock column where three decimals do not.
-static func _row_text(entry: RemoveColorEntry) -> String:
+func _row_data(index: int, entry: RemoveColorEntry) -> Dictionary:
 	if entry == null:
-		return "—"
-	return "#%s    %.3f" % [entry.color.to_html(false), entry.color_tolerance]
+		return {"color": Color.MAGENTA, "text": "%d.  —" % (index + 1), "enabled": false}
+	return {
+		"color": entry.color,
+		"text": "%d.  #%s   %.3f" % [index + 1, entry.color.to_html(false), entry.color_tolerance],
+		"enabled": entry.enabled,
+	}
 
 
 func _update_buttons() -> void:
 	_remove_button.disabled = _selected_index() < 0
-	_clear_button.disabled = _list.item_count == 0
-
-
-## Small bordered colour chip, so a white entry is still visible on the row.
-static func _swatch(entry: RemoveColorEntry) -> Texture2D:
-	var color := entry.color if entry != null else Color.MAGENTA
-	var image := Image.create_empty(SWATCH_SIZE, SWATCH_SIZE, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0, 0, 0, 1))
-	image.fill_rect(Rect2i(1, 1, SWATCH_SIZE - 2, SWATCH_SIZE - 2), color)
-	return ImageTexture.create_from_image(image)
+	_clear_button.disabled = _list.count() == 0

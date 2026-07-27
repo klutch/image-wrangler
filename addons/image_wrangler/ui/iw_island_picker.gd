@@ -24,14 +24,8 @@ signal islands_changed
 ## Emitted when a different row is highlighted, so the matching marker can be.
 signal selection_changed
 
-const PickIcon := preload("res://addons/image_wrangler/ui/iw_pick_icon.gd")
-
-const SWATCH_SIZE := 14
-
-## Floor for the rows box, which [member ItemList.auto_height] otherwise lets
-## collapse to nothing while the list is empty. About one row: enough to read as
-## a field waiting for entries rather than as a gap in the form.
-const LIST_EMPTY_HEIGHT := 24
+const ToolButton := preload("res://addons/image_wrangler/ui/iw_tool_button.gd")
+const EntryList := preload("res://addons/image_wrangler/ui/iw_entry_list.gd")
 
 var _operation: IWOperation
 var _property: StringName
@@ -42,7 +36,7 @@ var _property: StringName
 ## remover the swatch is not decoration, it is the colour that island keys out.
 var _color_provider := Callable()
 
-var _list: ItemList
+var _list: EntryList
 var _pick_button: Button
 var _remove_button: Button
 var _clear_button: Button
@@ -83,13 +77,12 @@ func _build() -> void:
 	_clear_button.pressed.connect(_on_clear_pressed)
 	buttons.add_child(_clear_button)
 
-	_list = ItemList.new()
-	# Grows with its contents rather than reserving a block of the dock whether
-	# or not anything is in it.
-	_list.auto_height = true
-	_list.custom_minimum_size = Vector2(0, LIST_EMPTY_HEIGHT)
+	_list = EntryList.new()
+	_list.configure(true)
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.item_selected.connect(_on_item_selected)
+	_list.row_selected.connect(_on_row_selected)
+	_list.enabled_toggled.connect(_on_enabled_toggled)
+	_list.mode_changed.connect(_on_mode_changed)
 	add_child(_list)
 
 	_hint = Label.new()
@@ -111,7 +104,8 @@ func _set_hint(text: String) -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED and _pick_button != null:
-		PickIcon.apply_to(_pick_button)
+		ToolButton.apply_pick_icon(_pick_button)
+		ToolButton.style_armed(_pick_button)
 
 
 # --- Public API ---------------------------------------------------------
@@ -127,9 +121,10 @@ func add_island(at: Vector2i) -> void:
 	var islands := _island_list()
 	if islands == null:
 		return
-	if islands.has(at):
+	var existing := islands.find(at)
+	if existing >= 0:
 		_set_hint("That position is already in the list.")
-		_select(islands.find(at))
+		_select(existing)
 		return
 
 	islands.add(at)
@@ -139,9 +134,27 @@ func add_island(at: Vector2i) -> void:
 	islands_changed.emit()
 
 
+## Every island's position, for the dock to mark on the preview.
 func get_islands() -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
 	var islands := _island_list()
-	return islands.points if islands != null else ([] as Array[Vector2i])
+	if islands == null:
+		return out
+	for entry in islands.entries:
+		out.append(entry.point if entry != null else Vector2i(-1, -1))
+	return out
+
+
+## Whether each island is switched on, in the same order, so the dock can draw a
+## disabled one differently rather than hiding it.
+func get_enabled_flags() -> PackedByteArray:
+	var out := PackedByteArray()
+	var islands := _island_list()
+	if islands == null:
+		return out
+	for entry in islands.entries:
+		out.append(1 if entry != null and entry.enabled else 0)
+	return out
 
 
 ## Redraws the rows from whatever list the operation now points at. Called when
@@ -153,8 +166,7 @@ func refresh() -> void:
 
 ## Row currently highlighted, or -1. Drives which marker is emphasised.
 func selected_index() -> int:
-	var selection := _list.get_selected_items()
-	return selection[0] if not selection.is_empty() else -1
+	return _list.selected_index()
 
 
 ## Lets the dock switch picking off without echoing back a [signal pick_toggled].
@@ -175,9 +187,32 @@ func _island_list() -> IslandList:
 	return settings.get(_property) as IslandList
 
 
-func _on_item_selected(_index: int) -> void:
+func _on_row_selected(_index: int) -> void:
 	_update_buttons()
 	selection_changed.emit()
+
+
+func _on_enabled_toggled(index: int, on: bool) -> void:
+	var islands := _island_list()
+	var entry := islands.get_at(index) if islands != null else null
+	if entry == null:
+		return
+	entry.enabled = on
+	_list.update_row(index, _row_data(index, entry))
+	_set_hint("")
+	islands_changed.emit()
+	selection_changed.emit()
+
+
+func _on_mode_changed(index: int, mode: int) -> void:
+	var islands := _island_list()
+	var entry := islands.get_at(index) if islands != null else null
+	if entry == null:
+		return
+	entry.mode = IWAlphaMode.sanitise(mode)
+	_list.update_row(index, _row_data(index, entry))
+	_set_hint("")
+	islands_changed.emit()
 
 
 func _on_remove_pressed() -> void:
@@ -187,8 +222,8 @@ func _on_remove_pressed() -> void:
 		return
 	islands.remove_at(index)
 	_refresh()
-	if _list.item_count > 0:
-		_select(mini(index, _list.item_count - 1))
+	if _list.count() > 0:
+		_select(mini(index, _list.count() - 1))
 	_set_hint("")
 	islands_changed.emit()
 	selection_changed.emit()
@@ -206,36 +241,38 @@ func _on_clear_pressed() -> void:
 
 
 func _select(index: int) -> void:
-	if index < 0 or index >= _list.item_count:
-		return
 	_list.select(index)
 	_update_buttons()
 	selection_changed.emit()
+
+
+## One row's worth of display data. The swatch is sampled through the dock rather
+## than stored, so it always shows the colour this island would actually key out.
+func _row_data(index: int, entry: IslandEntry) -> Dictionary:
+	var point := entry.point if entry != null else Vector2i(-1, -1)
+	var color := Color.MAGENTA
+	if _color_provider.is_valid():
+		color = _color_provider.call(point)
+	return {
+		"color": color,
+		"text": "%d.  (%d, %d)" % [index + 1, point.x, point.y],
+		"enabled": entry != null and entry.enabled,
+		"mode": entry.mode if entry != null else IWAlphaMode.Mode.SUBTRACT,
+	}
 
 
 func _refresh() -> void:
 	if _list == null:
 		return
 	var islands := _island_list()
-	_list.clear()
-	if islands == null:
-		_update_buttons()
-		return
-	for at in islands.points:
-		var index := _list.add_item("(%d, %d)" % [at.x, at.y])
-		if _color_provider.is_valid():
-			_list.set_item_icon(index, _swatch(_color_provider.call(at)))
+	var rows := []
+	if islands != null:
+		for i in islands.size():
+			rows.append(_row_data(i, islands.get_at(i)))
+	_list.set_rows(rows)
 	_update_buttons()
 
 
 func _update_buttons() -> void:
 	_remove_button.disabled = selected_index() < 0
-	_clear_button.disabled = _list.item_count == 0
-
-
-## Small bordered colour chip, so a white pick is still visible on the row.
-static func _swatch(color: Color) -> Texture2D:
-	var image := Image.create_empty(SWATCH_SIZE, SWATCH_SIZE, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0, 0, 0, 1))
-	image.fill_rect(Rect2i(1, 1, SWATCH_SIZE - 2, SWATCH_SIZE - 2), color)
-	return ImageTexture.create_from_image(image)
+	_clear_button.disabled = _list.count() == 0

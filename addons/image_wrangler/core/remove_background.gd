@@ -125,6 +125,11 @@ const MASK_SUBJECT := 2
 const KEY_NONE := -1
 const KEY_CLEAR := -2
 
+## Values in the mask [method _blackout_mask] builds.
+const BLACKOUT_NONE := 0
+const BLACKOUT_CUT := 1
+const BLACKOUT_KEEP := 2
+
 ## Guards divisions where the denominator can legitimately collapse to zero.
 const _EPSILON := 0.0001
 
@@ -197,11 +202,15 @@ func _snapshot_settings() -> void:
 ##
 ## The returned order matters — island [code]i[/code] owns key
 ## [code]_color_count + i[/code], which is what saves carrying a second array.
+##
+## Only Subtract islands are here. An Add island floods too, but to protect
+## rather than to remove, so it has nothing to contribute to a background key and
+## is handled on its own afterwards by [method _protect_mask].
 func _build_keys(data: PackedByteArray, width: int, height: int) -> PackedInt32Array:
 	_keys = []
 	_key_tolerances = []
 	for entry in settings.remove_colors.entries:
-		if entry == null:
+		if entry == null or not entry.enabled:
 			continue
 		_keys.append(entry.color)
 		_key_tolerances.append(entry.color_tolerance)
@@ -212,7 +221,10 @@ func _build_keys(data: PackedByteArray, width: int, height: int) -> PackedInt32A
 	# meaning: every pixel matching a Remove Color already qualifies.
 	if not settings.contiguous:
 		return seeds
-	for point in settings.islands.points:
+	for entry in settings.islands.entries:
+		if entry == null or not entry.enabled or entry.mode != IWAlphaMode.Mode.SUBTRACT:
+			continue
+		var point := entry.point
 		if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
 			continue
 		var index := point.y * width + point.x
@@ -394,14 +406,15 @@ func process_image(source: Image) -> Image:
 	var data := image.get_data()
 	var blacked := _blackout_mask(width, height)
 	var island_seeds := _build_keys(data, width, height)
-	# No colours and no islands is a coherent request for nothing to happen, and
+	# No colours and no Subtract islands is a coherent request for no keying, and
 	# every map below would otherwise have to defend itself against having no key
-	# to measure against. A blackout still has to land, though — it is geometry
-	# and owes nothing to the keying that is being skipped.
+	# to measure against. The regions still have to land, though — they are
+	# geometry and owe nothing to the keying that is being skipped.
 	if _keys.is_empty():
-		if blacked.is_empty():
+		var regions := _protect_mask(data, width, height)
+		if blacked.is_empty() and regions.is_empty():
 			return image
-		return _blackout_only(image, data, blacked, pixel_count)
+		return _regions_only(image, data, blacked, regions, pixel_count)
 
 	# Distances against the first key. Every other one is measured on demand, but
 	# this covers the border flood, which is nearly every background pixel in a
@@ -413,23 +426,27 @@ func process_image(source: Image) -> Image:
 	var key_of: PackedInt32Array = classified[1]
 
 	# Folded into the mask here rather than into the alpha at the end, so that
-	# everything downstream treats a blacked-out pixel correctly without being
-	# told about blackouts at all: coverage gives it zero alpha, the nearest-
-	# subject map stops offering it as a bleed source, and compose bleeds
-	# neighbouring colour into it like any other transparent pixel.
+	# everything downstream treats these pixels correctly without being told about
+	# regions at all: coverage reads them off the mask, the nearest-subject map
+	# picks its bleed sources from it, and compose follows.
 	#
-	# KEY_CLEAR rather than a real key, because the band pass skips a pixel with
-	# no key: a blackout is a hard cut and must not be matted. Applied after
-	# _classify for the same reason — a band already grown into the region is
-	# overwritten rather than left as a soft rim inside a hard edge.
-	#
-	# Inline rather than in a helper: mask and key_of are Packed arrays, so a
-	# function mutating them through a parameter would write to its own copy.
+	# KEY_CLEAR on a cut, because the band pass skips a pixel with no key: a
+	# blackout is a hard cut and must not be matted. Applied after _classify for
+	# the same reason — a band already grown into the region is overwritten rather
+	# than left as a soft rim inside a hard edge.
+	var protect := _protect_mask(data, width, height)
 	if not blacked.is_empty():
 		for i in pixel_count:
-			if blacked[i] != 0:
+			if blacked[i] == BLACKOUT_CUT:
 				mask[i] = MASK_BACKGROUND
 				key_of[i] = KEY_CLEAR
+	# Second, and over the top of the cut above, because Add wins every overlap.
+	if not protect.is_empty() or not blacked.is_empty():
+		for i in pixel_count:
+			if (not protect.is_empty() and protect[i] != 0) \
+					or (not blacked.is_empty() and blacked[i] == BLACKOUT_KEEP):
+				mask[i] = MASK_SUBJECT
+				key_of[i] = KEY_NONE
 
 	var search_radius := maxi(maxi(bleed_radius, edge_width), _MIN_SEARCH_RADIUS)
 	var nearest := _nearest_subject_map(data, mask, key_dist, width, height, search_radius)
@@ -445,11 +462,34 @@ func process_image(source: Image) -> Image:
 	if alpha_floor > 0.0 or alpha_ceiling < 1.0:
 		_clip_alpha(coverage)
 
+	# After everything that can move alpha, since a region is an instruction about
+	# the result rather than a suggestion to the keyer. Refinement smooths across
+	# a hard region edge and the alpha clip drags values around; both would leave a
+	# drawn shape not quite doing what it says.
+	# Cuts first and protection second, so that where the two meet the protection
+	# is what survives — the same precedence the mask above was given.
+	if not blacked.is_empty():
+		for i in pixel_count:
+			if blacked[i] == BLACKOUT_CUT:
+				coverage[i] = 0.0
+			elif blacked[i] == BLACKOUT_KEEP:
+				coverage[i] = 1.0
+	if not protect.is_empty():
+		for i in pixel_count:
+			if protect[i] != 0:
+				coverage[i] = 1.0
+
 	return _compose(data, coverage, key_of, nearest, width, height)
 
 
-## One byte per pixel marking the union of every drawn blackout polygon, or an
-## empty array when nothing is drawable.
+## One byte per pixel marking what the blackout regions do there, or an empty
+## array when no region is both drawn and switched on.
+##
+## [constant BLACKOUT_CUT] for a Subtract region, [constant BLACKOUT_KEEP] for an
+## Add one. Add writes over anything, Subtract only over untouched pixels, so Add
+## wins every overlap whatever order the rows are in — protection is an override
+## rather than another layer of paint, which is what lets the list stay a set of
+## rules with no way to reorder it.
 ##
 ## Scanline fill under the even-odd rule, not a point-in-polygon test per pixel.
 ## For each row, the x where every edge crosses that row's centre line is
@@ -463,7 +503,7 @@ func process_image(source: Image) -> Image:
 ## a small cut-out on a large image is cheap.
 func _blackout_mask(width: int, height: int) -> PackedByteArray:
 	var empty := PackedByteArray()
-	if settings.blackout == null or not settings.blackout.has_drawable():
+	if settings.blackout == null or not settings.blackout.has_active():
 		return empty
 
 	var marked := PackedByteArray()
@@ -471,8 +511,10 @@ func _blackout_mask(width: int, height: int) -> PackedByteArray:
 	var filled_any := false
 
 	for polygon in settings.blackout.polygons:
-		if polygon == null or not polygon.is_drawable():
+		if polygon == null or not polygon.is_active():
 			continue
+		var adding := polygon.mode == IWAlphaMode.Mode.ADD
+		var value := BLACKOUT_KEEP if adding else BLACKOUT_CUT
 		var points := polygon.points
 		var count := points.size()
 		var box := polygon.bounds()
@@ -506,26 +548,124 @@ func _blackout_mask(width: int, height: int) -> PackedByteArray:
 				var from_x := maxi(ceili(crossings[pair] - 0.5), 0)
 				var to_x := mini(floori(crossings[pair + 1] - 0.5), width - 1)
 				for x in range(from_x, to_x + 1):
-					marked[row + x] = 1
+					# Add overwrites whatever is there; Subtract yields to an Add
+					# already written. One pass, and row order stops mattering.
+					if adding or marked[row + x] != BLACKOUT_KEEP:
+						marked[row + x] = value
 					filled_any = true
 				pair += 2
 
 	return marked if filled_any else empty
 
 
-## Applies the blackout to [param image] and nothing else.
+## One byte per pixel marking what every Add island protects, or an empty array
+## when there are none.
 ##
-## Reached when there is no colour and no island to key from, which leaves the
-## whole classification pipeline with no key to measure against. The polygons are
-## geometry and owe that pipeline nothing, so they are written straight to alpha.
-func _blackout_only(image: Image, data: PackedByteArray, blacked: PackedByteArray, pixel_count: int) -> Image:
+## An Add island floods exactly as a Subtract one does — outwards from the clicked
+## pixel, through anything within [constant RemoveColorEntry.DEFAULT_TOLERANCE] of
+## the colour it landed on — and then forces that region opaque instead of
+## removing it. So the two are the same gesture pointed the other way: click a
+## region a loose tolerance ate and it comes back, bounded by the same edges that
+## would have bounded its removal.
+##
+## Its own flood rather than a mode inside [method _classify], because the two
+## cannot share a queue. The background flood claims pixels once and never
+## revisits them; this one has to be free to reach pixels that flood already took,
+## since those are precisely the ones worth protecting.
+func _protect_mask(data: PackedByteArray, width: int, height: int) -> PackedByteArray:
+	var empty := PackedByteArray()
+	if settings.islands == null or not settings.contiguous:
+		return empty
+
+	var seeds := PackedInt32Array()
+	var seed_keys: Array[Color] = []
+	for entry in settings.islands.entries:
+		if entry == null or not entry.enabled or entry.mode != IWAlphaMode.Mode.ADD:
+			continue
+		var point := entry.point
+		if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
+			continue
+		var index := point.y * width + point.x
+		seeds.append(index)
+		seed_keys.append(_color_at(data, index))
+	if seeds.is_empty():
+		return empty
+
+	var pixel_count := width * height
+	var protect := PackedByteArray()
+	protect.resize(pixel_count)
+	var queue := PackedInt32Array()
+	queue.resize(pixel_count)
+
+	# Written out four times rather than through a helper, the same way the
+	# background flood is: the marking has to land in this array, and handing a
+	# Packed array to a function to be written through is the sort of thing that
+	# depends on which side of a copy-on-write you end up on.
+	var tolerance := RemoveColorEntry.DEFAULT_TOLERANCE
+	for s in seeds.size():
+		var key: Color = seed_keys[s]
+		var head := 0
+		var tail := 0
+		if protect[seeds[s]] == 0:
+			protect[seeds[s]] = 1
+			queue[tail] = seeds[s]
+			tail += 1
+		# 4-connected, matching the background flood, so a diagonal hairline is no
+		# more of a bridge here than it is there.
+		while head < tail:
+			var index := queue[head]
+			head += 1
+			var x := index % width
+			@warning_ignore("integer_division")
+			var y := index / width
+			if x > 0:
+				var left := index - 1
+				if protect[left] == 0 and _distance_at(data, left, key) <= tolerance:
+					protect[left] = 1
+					queue[tail] = left
+					tail += 1
+			if x < width - 1:
+				var right := index + 1
+				if protect[right] == 0 and _distance_at(data, right, key) <= tolerance:
+					protect[right] = 1
+					queue[tail] = right
+					tail += 1
+			if y > 0:
+				var up := index - width
+				if protect[up] == 0 and _distance_at(data, up, key) <= tolerance:
+					protect[up] = 1
+					queue[tail] = up
+					tail += 1
+			if y < height - 1:
+				var down := index + width
+				if protect[down] == 0 and _distance_at(data, down, key) <= tolerance:
+					protect[down] = 1
+					queue[tail] = down
+					tail += 1
+
+	return protect
+
+
+## Applies the drawn and picked regions to [param image] and nothing else.
+##
+## Reached when there is no colour and no Subtract island to key from, which
+## leaves the whole classification pipeline with no key to measure against. The
+## regions owe that pipeline nothing, so they are written straight to alpha.
+##
+## Protection is applied after the cuts, so an Add still wins where the two meet.
+func _regions_only(image: Image, data: PackedByteArray, blacked: PackedByteArray, protect: PackedByteArray, pixel_count: int) -> Image:
 	var out := data.duplicate()
 	for i in pixel_count:
-		if blacked[i] != 0:
-			out[i * 4 + 3] = 0
-	var result := Image.create_from_data(
+		var offset := i * 4 + 3
+		if not blacked.is_empty():
+			if blacked[i] == BLACKOUT_CUT:
+				out[offset] = 0
+			elif blacked[i] == BLACKOUT_KEEP:
+				out[offset] = 255
+		if not protect.is_empty() and protect[i] != 0:
+			out[offset] = 255
+	return Image.create_from_data(
 			image.get_width(), image.get_height(), false, Image.FORMAT_RGBA8, out)
-	return result
 
 
 ## Stretches alpha so [member alpha_floor] and below lands on clear and

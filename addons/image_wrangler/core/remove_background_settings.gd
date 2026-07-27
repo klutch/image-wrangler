@@ -137,3 +137,15 @@ func duplicate_for_new_image() -> RemoveBackgroundSettings:
 	copy.blackout = BlackoutList.new()
 	copy.remove_colors = remove_colors.duplicate_colors()
 	return copy
+
+
+## Called by [method IWSettingsIO.load_settings] once a sidecar has been decoded.
+##
+## Islands used to be bare coordinates and are now entries carrying a switch and
+## a mode. A file written before that change still has the old array, and the
+## codec cannot tell that the two describe the same thing — so without this every
+## island anyone had picked would quietly vanish the first time they reopened an
+## image.
+func migrate_loaded() -> void:
+	if islands != null:
+		islands.migrate_legacy()

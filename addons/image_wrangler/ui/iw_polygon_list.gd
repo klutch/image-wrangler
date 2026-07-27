@@ -26,21 +26,18 @@ signal polygons_changed
 ## dock can redraw the overlay.
 signal selection_changed
 
-const SWATCH_SIZE := 14
-
-## Floor for the rows box, which [member ItemList.auto_height] otherwise lets
-## collapse to nothing while the list is empty.
-const LIST_EMPTY_HEIGHT := 24
+const ToolButton := preload("res://addons/image_wrangler/ui/iw_tool_button.gd")
+const EntryList := preload("res://addons/image_wrangler/ui/iw_entry_list.gd")
 
 ## Editor icon for the draw button. Every Node class has one, so this is always
-## present, and editor icons already answer to the theme — none of the inversion
-## [code]iw_pick_icon.gd[/code] does for the eyedropper artwork is needed.
+## present — though its colour has to be taken out first, since node icons are
+## colour-coded and a blue one reads as permanently armed.
 const DRAW_ICON := &"Polygon2D"
 
 var _operation: IWOperation
 var _property: StringName
 
-var _list: ItemList
+var _list: EntryList
 var _draw_button: Button
 var _remove_button: Button
 var _clear_button: Button
@@ -89,13 +86,12 @@ func _build() -> void:
 	_clear_button.pressed.connect(_on_clear_pressed)
 	buttons.add_child(_clear_button)
 
-	_list = ItemList.new()
-	# Grows with its contents rather than reserving a block of the dock whether
-	# or not anything is in it.
-	_list.auto_height = true
-	_list.custom_minimum_size = Vector2(0, LIST_EMPTY_HEIGHT)
+	_list = EntryList.new()
+	_list.configure(true)
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.item_selected.connect(_on_item_selected)
+	_list.row_selected.connect(_on_row_selected)
+	_list.enabled_toggled.connect(_on_enabled_toggled)
+	_list.mode_changed.connect(_on_mode_changed)
 	add_child(_list)
 
 	_hint = Label.new()
@@ -119,45 +115,8 @@ func _notification(what: int) -> void:
 	# The editor theme is only reachable once the control is in the tree, and the
 	# icon comes out of it, so it is resolved here rather than at construction.
 	if what == NOTIFICATION_THEME_CHANGED and _draw_button != null:
-		if has_theme_icon(DRAW_ICON, &"EditorIcons"):
-			_draw_button.icon = _drained(get_theme_icon(DRAW_ICON, &"EditorIcons"))
-
-
-## [param source] with its colour taken out, leaving grey at the same lightness.
-##
-## Godot's node icons are colour-coded by category, so the Polygon2D artwork
-## arrives blue and reads as permanently switched on. Tinting cannot fix that:
-## modulation multiplies, so it can deepen a blue but never drain it. The pixels
-## have to be rewritten.
-##
-## Draining rather than flattening to a silhouette, so the shape keeps its
-## interior lines. What is left is neutral enough for the theme to colour: the
-## button's own pressed tint is the editor accent, so an armed picker still goes
-## blue, and now that means something.
-static func _drained(source: Texture2D) -> Texture2D:
-	if source == null:
-		return null
-	var image := source.get_image()
-	if image == null:
-		return null
-
-	image = image.duplicate()
-	if image.is_compressed():
-		image.decompress()
-	if image.get_format() != Image.FORMAT_RGBA8:
-		image.convert(Image.FORMAT_RGBA8)
-
-	# Rec. 709 luma, so a saturated blue lands as dark as it looks rather than as
-	# the mid grey a flat channel average would give.
-	var data := image.get_data()
-	for i in range(0, data.size(), 4):
-		var luma := roundi(0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2])
-		data[i] = luma
-		data[i + 1] = luma
-		data[i + 2] = luma
-	# Alpha is left alone, so the silhouette is unchanged.
-	return ImageTexture.create_from_image(
-			Image.create_from_data(image.get_width(), image.get_height(), false, Image.FORMAT_RGBA8, data))
+		ToolButton.apply_theme_icon(_draw_button, DRAW_ICON)
+		ToolButton.style_armed(_draw_button)
 
 
 # --- Public API ---------------------------------------------------------
@@ -185,8 +144,7 @@ func draft_index() -> int:
 
 
 func selected_index() -> int:
-	var selection := _list.get_selected_items()
-	return selection[0] if not selection.is_empty() else -1
+	return _list.selected_index()
 
 
 ## Every polygon's points, for the dock to hand to the preview.
@@ -208,6 +166,19 @@ func get_colors() -> PackedColorArray:
 		return out
 	for polygon in regions.polygons:
 		out.append(polygon.color if polygon != null else Color.MAGENTA)
+	return out
+
+
+## Whether each region is switched on, in the same order. A region that is off
+## still draws — the shape took work to make and is worth seeing while it is set
+## aside — so the preview needs to know which to draw as inert.
+func get_enabled_flags() -> PackedByteArray:
+	var out := PackedByteArray()
+	var regions := _polygon_list()
+	if regions == null:
+		return out
+	for polygon in regions.polygons:
+		out.append(1 if polygon != null and polygon.enabled else 0)
 	return out
 
 
@@ -336,9 +307,34 @@ func _discard_draft() -> void:
 	selection_changed.emit()
 
 
-func _on_item_selected(_index: int) -> void:
+func _on_row_selected(_index: int) -> void:
 	_update_buttons()
 	selection_changed.emit()
+
+
+func _on_enabled_toggled(index: int, on: bool) -> void:
+	var regions := _polygon_list()
+	var polygon := regions.get_at(index) if regions != null else null
+	if polygon == null:
+		return
+	polygon.enabled = on
+	_redraw_row(index)
+	_set_hint("")
+	polygons_changed.emit()
+	# The preview draws a switched-off region differently, so the overlay has to
+	# be told even though no geometry moved.
+	selection_changed.emit()
+
+
+func _on_mode_changed(index: int, mode: int) -> void:
+	var regions := _polygon_list()
+	var polygon := regions.get_at(index) if regions != null else null
+	if polygon == null:
+		return
+	polygon.mode = IWAlphaMode.sanitise(mode)
+	_redraw_row(index)
+	_set_hint("")
+	polygons_changed.emit()
 
 
 func _on_remove_pressed() -> void:
@@ -354,8 +350,8 @@ func _on_remove_pressed() -> void:
 		_draft -= 1
 	regions.remove_at(index)
 	_refresh()
-	if _list.item_count > 0:
-		_select(mini(index, _list.item_count - 1))
+	if _list.count() > 0:
+		_select(mini(index, _list.count() - 1))
 	_set_hint("")
 	polygons_changed.emit()
 	selection_changed.emit()
@@ -374,8 +370,6 @@ func _on_clear_pressed() -> void:
 
 
 func _select(index: int) -> void:
-	if index < 0 or index >= _list.item_count:
-		return
 	_list.select(index)
 	_update_buttons()
 	selection_changed.emit()
@@ -385,12 +379,11 @@ func _refresh() -> void:
 	if _list == null:
 		return
 	var regions := _polygon_list()
-	_list.clear()
+	var rows := []
 	if regions != null:
 		for i in regions.size():
-			var polygon := regions.get_at(i)
-			_list.add_item(_row_text(i, polygon))
-			_list.set_item_icon(i, _swatch(polygon))
+			rows.append(_row_data(i, regions.get_at(i)))
+	_list.set_rows(rows)
 	_update_buttons()
 
 
@@ -398,30 +391,25 @@ func _refresh() -> void:
 ## corner be added without the row being drawn losing its highlight.
 func _redraw_row(index: int) -> void:
 	var regions := _polygon_list()
-	if regions == null or index < 0 or index >= _list.item_count:
+	var polygon := regions.get_at(index) if regions != null else null
+	if polygon == null:
 		return
-	var polygon := regions.get_at(index)
-	_list.set_item_text(index, _row_text(index, polygon))
-	_list.set_item_icon(index, _swatch(polygon))
+	_list.update_row(index, _row_data(index, polygon))
 
 
 ## Numbered from one, since the row number is the only name a region has.
-static func _row_text(index: int, polygon: BlackoutPolygon) -> String:
+func _row_data(index: int, polygon: BlackoutPolygon) -> Dictionary:
 	if polygon == null:
-		return "Region %d" % (index + 1)
+		return {"color": Color.MAGENTA, "text": "Region %d" % (index + 1), "enabled": false}
 	var count := polygon.size()
-	return "Region %d  (%d corner%s)" % [index + 1, count, "" if count == 1 else "s"]
+	return {
+		"color": polygon.color,
+		"text": "%d.  %d corner%s" % [index + 1, count, "" if count == 1 else "s"],
+		"enabled": polygon.enabled,
+		"mode": polygon.mode,
+	}
 
 
 func _update_buttons() -> void:
 	_remove_button.disabled = selected_index() < 0
-	_clear_button.disabled = _list.item_count == 0
-
-
-## Small bordered colour chip, matching the island picker's rows.
-static func _swatch(polygon: BlackoutPolygon) -> Texture2D:
-	var color := polygon.color if polygon != null else Color.MAGENTA
-	var image := Image.create_empty(SWATCH_SIZE, SWATCH_SIZE, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0, 0, 0, 1))
-	image.fill_rect(Rect2i(1, 1, SWATCH_SIZE - 2, SWATCH_SIZE - 2), color)
-	return ImageTexture.create_from_image(image)
+	_clear_button.disabled = _list.count() == 0

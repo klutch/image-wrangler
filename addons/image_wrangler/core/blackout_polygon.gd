@@ -34,6 +34,14 @@ const _SWATCH_VALUE := 1.0
 ## one.
 @export var color: Color = Color.WHITE
 
+## Off excludes this region from the run without losing its shape. It still draws
+## on the preview, so a region can be tried and untried without being redrawn —
+## which for something built corner by corner is the whole point.
+@export var enabled: bool = true
+
+## See [IWAlphaMode]. Subtract cuts the interior away; Add forces it opaque.
+@export var mode: int = IWAlphaMode.Mode.SUBTRACT
+
 
 func _init() -> void:
 	# Assigned here as well as inline, so a polygon duplicated for another image
@@ -56,9 +64,15 @@ func is_empty() -> bool:
 	return points.is_empty()
 
 
-## Whether this encloses any area, and so is worth rasterising or storing.
+## Whether this encloses any area, and so is worth drawing or storing.
 func is_drawable() -> bool:
 	return points.size() >= MIN_POINTS
+
+
+## Whether this should affect the image. Drawable and switched on — a region that
+## is off still shows on the preview but is left out of the rasterisation.
+func is_active() -> bool:
+	return enabled and is_drawable()
 
 
 func add(at: Vector2i) -> void:
@@ -97,4 +111,6 @@ func duplicate_polygon() -> BlackoutPolygon:
 	var copy := BlackoutPolygon.new()
 	copy.points = points.duplicate()
 	copy.color = color
+	copy.enabled = enabled
+	copy.mode = mode
 	return copy

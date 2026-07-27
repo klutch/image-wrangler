@@ -415,6 +415,35 @@ Values outside the range their slider allows — from a hand edit, or a file
 written by a later version — are pulled back inside it on load, so the form and
 the processing can never silently disagree.
 
+### Switching entries off, and Add vs Subtract
+
+Every row in **Remove Colors**, **Island Picker** and **Blackout** carries a
+**tick box** on the right. Unticking leaves the entry in the list but out of the
+result — a colour keeps its tolerance, an island keeps its spot, a region keeps
+its shape — so something can be tried and untried without being set up again. A
+switched-off island still shows its marker, drawn hollow; a switched-off region
+still shows its outline, drawn without its fill. Clicking a highlighted row again
+clears the selection.
+
+**Island Picker** and **Blackout** rows also carry a **Subtract / Add** dropdown.
+Subtract is the default and is what both tools have always done: the affected
+area becomes transparent. Add reverses it — the same area is forced **opaque**,
+whatever the keying decided. An Add island floods exactly as a Subtract one does,
+outwards from the pixel you clicked through anything close to its colour, so
+clicking a region a loose tolerance ate brings it back bounded by the same edges
+that would have bounded its removal.
+
+**Add wins wherever the two overlap**, whatever order the rows are in. Protection
+is an override rather than another layer of paint, which is what lets the list
+stay a set of rules with nothing to reorder. The practical shape of that: a
+Subtract region over a corner with an Add island on a logo inside it keeps the
+logo and cuts the rest. The reverse — a Subtract hole inside an Add region — is
+not expressible.
+
+Remove Colors has no dropdown. A colour describes what background *is*, where add
+and subtract describe what to do with an area, and there is nothing for a colour
+to add.
+
 ## Rename
 
 Writes each source out under a new name, leaving its pixels alone. It is the odd

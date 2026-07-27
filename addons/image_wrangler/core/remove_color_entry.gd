@@ -28,10 +28,15 @@ const MAX_TOLERANCE := 0.5
 ## background.
 @export var color_tolerance: float = DEFAULT_TOLERANCE
 
+## Off excludes this colour from the run without losing it, so a tolerance worth
+## keeping can be set aside and brought back rather than retyped.
+@export var enabled: bool = true
+
 
 ## An independent copy, so two images never share one entry.
 func duplicate_entry() -> RemoveColorEntry:
 	var copy := RemoveColorEntry.new()
 	copy.color = color
 	copy.color_tolerance = color_tolerance
+	copy.enabled = enabled
 	return copy
