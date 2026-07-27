@@ -103,6 +103,7 @@ working on rather than about the image.
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
 | Edge Cleanup → Stroke Width | 0.0 (off) | Width of the inside stroke in pixels, antialiased, and the switch for the whole group. See below. |
+| Edge Cleanup → Stroke Softness | 0.75 | How soft the stroke's inner edge is. 0 is a hard step, 0.5 a one-pixel falloff, 1 the softest. |
 | Edge Cleanup → Stroke Color | opaque black | Colour of the inside stroke. Its alpha is blend strength, not result transparency. |
 
 ### Remove Colors
@@ -301,6 +302,19 @@ shallow diagonal — where the nearest empty pixel stays directly below for a lo
 run — they quantise into a staircase, which is the one artefact a stroke must not
 have. Fractional widths are therefore worth having: both edges of the stroke fall
 between pixels.
+
+**Stroke Softness** sets how wide that falloff is. 0 is a hard step with no
+antialiasing at all, 0.5 falls off over one pixel — the width a real antialiased
+edge has, and what the stroke did before this was adjustable — and 1 is the
+softest, at two pixels. The middle of the slider is the natural look, which leaves
+the top half for softer than natural, which is mostly what it is wanted for.
+
+It feathers the **inner** edge only. The outer edge is the silhouette, and its
+softness is already in the image's own alpha; feathering that too would let the
+stroke bleed past the shape, which is the one thing an inside stroke must not do.
+The falloff is centred on the width you asked for, so softening blurs the edge in
+place rather than walking the stroke inwards — though a wide feather on a narrow
+stroke will spread it past its own width, since half the falloff sits outside.
 
 **Stroke Color**'s alpha is blend strength, not result transparency. At half
 alpha the stroke tints the art beneath it; it does not make the silhouette

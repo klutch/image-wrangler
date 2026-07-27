@@ -110,6 +110,14 @@ extends Resource
 ## Alpha at or above this is forced solid. See [member alpha_floor].
 @export var alpha_ceiling: float = 1.0
 
+## How soft the stroke's inner edge is, from a hard step at zero to the widest
+## feather at one.
+##
+## Only the inner edge. The outer one is the silhouette itself, and its softness
+## belongs to the image's own alpha — feathering it would let the stroke bleed
+## past the shape, which is the one thing an inside stroke must not do.
+@export var stroke_softness: float = 0.75
+
 ## Colour of the inside stroke, alpha included.
 ##
 ## The alpha is how strongly it is laid over what is already there rather than

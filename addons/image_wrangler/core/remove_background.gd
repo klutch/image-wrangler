@@ -176,6 +176,14 @@ const _RESTORE_CLEAR := 0.005
 ## boundary — which is the contaminated pixel being stepped past.
 const _RESTORE_INWARD_MAX := 2
 
+## Feather on the stroke's inner edge at full softness, in pixels.
+##
+## Two, so that the middle of the slider lands on a one-pixel falloff — the width
+## a real antialiased edge has, and what the stroke did before it was adjustable.
+## That leaves the top half of the range for softer than natural, which is what
+## the setting is mostly wanted for.
+const _STROKE_MAX_FEATHER := 2.0
+
 
 ## Regularisation for [method _guided_refine]. Small enough that the filter
 ## follows any real silhouette rather than averaging across it, large enough that
@@ -396,6 +404,16 @@ func get_settings_schema() -> Array[Dictionary]:
 			"max": 5.0,
 			"step": 0.25,
 			"tooltip": "Width of the inside stroke in pixels, and the switch for this whole group.\n0 does nothing at all.\n\nInside: the stroke is drawn within the silhouette of everything visible and\nnever extends it, so it follows the holes in a shape as well as its outer\ncontour, and leaves the alpha channel exactly as it found it.\n\nIt is antialiased, so fractional widths are worth having — both its edges\nfall between pixels rather than stepping along them.\n\nAbove 0 this also restores the antialiasing on edges that ended up hard,\nwhich is what gives the stroke a soft silhouette to measure its own edge\nagainst. Polygon Edit regions are left out of that: those edges are hard on\npurpose.",
+		},
+		{
+			"property": &"stroke_softness",
+			"label": "Stroke Softness",
+			"group": "Edge Cleanup",
+			"type": SettingType.FLOAT,
+			"min": 0.0,
+			"max": 1.0,
+			"step": 0.05,
+			"tooltip": "How soft the stroke's inner edge is. 0 is a hard step with no antialiasing\nat all; 0.5 falls off over one pixel, which is what a real antialiased edge\ndoes; 1 is the softest.\n\nOnly the inner edge. The outer one is the silhouette itself, and its\nsoftness comes from the image's own alpha — feathering that would let the\nstroke bleed past the shape, which is the one thing an inside stroke must\nnot do.\n\nA wide feather on a narrow stroke spreads it past its own width, since the\nfalloff is centred on the edge rather than tucked inside it.",
 		},
 		{
 			"property": &"stroke_color",
@@ -1003,6 +1021,15 @@ func _restore_subject(coverage: PackedFloat32Array, x: int, y: int, width: int, 
 ## nearer — one comparison, no extra seeds, and a shape running off the edge is
 ## stroked along it like any other contour.
 ##
+## [b]The inner edge is feathered, the outer one is not.[/b] The outer edge is the
+## silhouette, and its softness is already in the image's own alpha — the stroke
+## covers those pixels outright and lets that alpha do the fading. Feathering it
+## as well would let the stroke bleed past the shape, which is the one thing an
+## inside stroke must not do. So
+## [member RemoveBackgroundSettings.stroke_softness] widens the falloff on the
+## inside only, centred on the requested width so that softening blurs the edge in
+## place rather than walking the stroke inwards.
+##
 ## [param alpha] is the alpha the image actually ends up with, 0 to 1 — not the
 ## coverage, which is only half of it, since [method _compose] multiplies coverage
 ## by the alpha the source arrived with.
@@ -1012,6 +1039,7 @@ func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedF
 		return empty
 	var stroke_width := settings.stroke_width
 	var strength := settings.stroke_color.a
+	var feather := clampf(settings.stroke_softness, 0.0, 1.0) * _STROKE_MAX_FEATHER
 
 	var pixel_count := width * height
 	var source := PackedInt32Array()
@@ -1034,9 +1062,10 @@ func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedF
 			queue[tail] = i
 			tail += 1
 
-	# One further than the widest the stroke can be, so the falloff has a real
-	# distance to work from rather than running out mid-fade.
-	var reach := ceili(stroke_width) + 1
+	# Far enough to cover the whole falloff and one more, so a pixel that should
+	# still be faintly stroked is never left unreached and reading as empty. The
+	# feather counts here: it pushes the fade out past the requested width.
+	var reach := ceili(stroke_width + feather * 0.5) + 1
 	while head < tail:
 		var index := queue[head]
 		head += 1
@@ -1103,9 +1132,13 @@ func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedF
 				# stepping with the seed positions.
 				distance = minf(distance, span + (alpha[seed_index] - 0.5))
 
-		# Linear over the last pixel, from a distance measured to the contour
-		# itself: half a pixel in is the outermost the stroke can be.
-		var band := clampf(stroke_width - distance + 0.5, 0.0, 1.0)
+		# Falls off across the requested width rather than up to it, so softening
+		# blurs the inner edge in place instead of moving the stroke inwards.
+		var band := 0.0
+		if feather <= _EPSILON:
+			band = 1.0 if distance <= stroke_width else 0.0
+		else:
+			band = clampf((stroke_width + feather * 0.5 - distance) / feather, 0.0, 1.0)
 		if band <= 0.0:
 			continue
 		mask[i] = band * strength
