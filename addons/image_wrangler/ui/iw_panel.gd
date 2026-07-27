@@ -34,6 +34,29 @@ const _ZOOM_MATCH := 0.01
 ## disk write must not happen seven times a second while a slider is dragged.
 const AUTOSAVE_DEBOUNCE := 0.75
 
+## Shared by the Suffix field and its label, so hovering either explains the
+## setting — and so the warning in it cannot end up on only one of them.
+##
+## Long for a tooltip, because a blank suffix is the one setting here that can
+## destroy the files being worked on, and the confirmation it leads to does not
+## say so.
+const SUFFIX_TOOLTIP := """Goes on the end of the output name, before the extension —
+flower.png with "_nobg" becomes flower_nobg.png.
+
+Process Current Only just suggests it, so you can still rename the
+file in the Save As dialog. Process All applies it to every file
+without asking again, which makes the suffix the only thing keeping
+the results apart from the sources.
+
+So take care when it is blank: each output then keeps its source's
+own name, and pointing Process All at the folder the sources are in
+will overwrite the originals in place. You are asked to confirm, but
+the prompt only says those files already exist — not that they are
+the images you are processing. There is no undo.
+
+Anything that rewrites pixels is saved as PNG. Rename copies the
+file untouched, so it keeps whatever format it already had."""
+
 var _operations: Array[IWOperation] = []
 var _operation: IWOperation
 var _sources: PackedStringArray = PackedStringArray()
@@ -444,10 +467,15 @@ func _build_output_section() -> Control:
 	section.add_child(suffix_row)
 	var suffix_label := Label.new()
 	suffix_label.text = "Suffix"
+	suffix_label.tooltip_text = SUFFIX_TOOLTIP
+	# A Label ignores the mouse by default, which would swallow the tooltip along
+	# with everything else. Pass rather than stop, so the label reports the hover
+	# without claiming clicks it has no use for.
+	suffix_label.mouse_filter = Control.MOUSE_FILTER_PASS
 	suffix_row.add_child(suffix_label)
 	_suffix_edit = LineEdit.new()
 	_suffix_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_suffix_edit.tooltip_text = "Goes on the end of the output name, before the extension —\nflower.png with \"_nobg\" becomes flower_nobg.png.\n\nProcess Current Only just suggests it, so you can still rename the\nfile in the Save As dialog. Process All applies it to every file\nwithout asking again, which makes the suffix the only thing keeping\nthe results apart from the sources.\n\nSo take care when it is blank: each output then keeps its source's\nown name, and pointing Process All at the folder the sources are in\nwill overwrite the originals in place. You are asked to confirm, but\nthe prompt only says those files already exist — not that they are\nthe images you are processing. There is no undo.\n\nAnything that rewrites pixels is saved as PNG. Rename copies the\nfile untouched, so it keeps whatever format it already had."
+	_suffix_edit.tooltip_text = SUFFIX_TOOLTIP
 	_suffix_edit.text_changed.connect(func(_text: String) -> void: _suffix_is_default = false)
 	suffix_row.add_child(_suffix_edit)
 
