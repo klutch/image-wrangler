@@ -327,7 +327,7 @@ func _row_data(index: int, entry: IslandEntry) -> Dictionary:
 	var color := Color.MAGENTA
 	if _color_provider.is_valid():
 		color = _color_provider.call(point)
-	var tolerance := entry.color_tolerance if entry != null else RemoveColorEntry.DEFAULT_TOLERANCE
+	var tolerance := entry.color_tolerance if entry != null else IslandEntry.DEFAULT_TOLERANCE
 	return {
 		"color": color,
 		"text": "%d.  (%d, %d)   %.3f" % [index + 1, point.x, point.y, tolerance],

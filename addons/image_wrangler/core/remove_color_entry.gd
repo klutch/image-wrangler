@@ -11,10 +11,12 @@ extends Resource
 ## same image needs a tight one or it eats into the subject. Sharing one number
 ## between them means tuning for whichever is worse and accepting the other.
 
-## Tolerance a new entry starts at, and the one picked islands key out with.
+## Tolerance a new entry starts at.
 ##
-## Named rather than written twice: an island samples its colour from the image
-## and has no row of its own to carry a tolerance on, so it borrows this.
+## Tight, because a Remove Color is a colour the user chose and can see: it should take
+## what was asked for and no more, and widening it is a deliberate act. An island
+## starts much looser and for a different reason; see
+## [constant IslandEntry.DEFAULT_TOLERANCE].
 const DEFAULT_TOLERANCE := 0.02
 
 ## Widest tolerance offered. The max-channel metric this is compared against

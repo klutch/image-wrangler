@@ -18,6 +18,22 @@ extends Resource
 ## and forces it opaque instead.
 @export var mode: int = IWAlphaMode.Mode.SUBTRACT
 
+## Tolerance a freshly picked island starts at.
+##
+## Its own number rather than the one a Remove Color starts at, and a much looser one,
+## because the two are aimed at different things. A Remove Color is a colour the user
+## chose and can see; it starts tight so it takes only what was asked for. An island is
+## a spot the user pointed at, and what they meant was the [i]region[/i] under the
+## pointer — so it has to swallow that region's own variation without being told what
+## that variation is. Starting tight means every island comes out as a handful of
+## pixels and has to be widened by hand, which is the wrong default for a control
+## whose whole point is one click.
+##
+## Loose is also the safer direction here. An island only floods where it is put, so
+## overreaching costs the region it is in rather than the image; and anywhere it
+## reaches by straying is matted by the ordinary coverage maths rather than cut out.
+const DEFAULT_TOLERANCE := 0.2
+
 ## How far a pixel may drift from the colour under this island and still be part
 ## of the region it floods.
 ##
@@ -25,7 +41,7 @@ extends Resource
 ## pointed at one region of one image, and how clean that region is has nothing to
 ## do with how clean the one next to it is — a speckled patch wants a loose
 ## tolerance where the flat panel beside it would be eaten by the same number.
-@export var color_tolerance: float = RemoveColorEntry.DEFAULT_TOLERANCE
+@export var color_tolerance: float = DEFAULT_TOLERANCE
 
 
 ## An independent copy, so two images never share one entry.

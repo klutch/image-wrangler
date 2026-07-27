@@ -491,6 +491,14 @@ whichever row is highlighted. How clean one region is says nothing about the one
 beside it — a speckled patch wants a loose tolerance where the flat panel next to
 it would be eaten by the same number.
 
+It starts at **0.2**, much looser than a **Remove Colors** entry's 0.02, because the
+two are aimed at different things. A Remove Color is a colour you chose and can see,
+so it starts tight and takes only what you asked for. An island is a spot you pointed
+at, and what you meant was the region under the pointer — so it has to swallow that
+region's own variation without being told what it is. Starting tight would make every
+island a handful of pixels you then had to widen by hand, which is the wrong default
+for a control whose whole point is one click.
+
 Loosening a **Remove Colors** entry does not loosen the islands, and never did:
 the entries there describe colours an island by definition is not, or the border
 flood would have reached it already.
