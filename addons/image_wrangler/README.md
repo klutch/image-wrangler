@@ -18,10 +18,11 @@ exactly what happened to the edge pixels.
 
 ## The operation stack
 
-The right-hand column is a **stack**: a list of operations run top to bottom, each
-working on what the ones above it left. Pick one from the dropdown and press
-**Create** to add it to the bottom; grab the **≡** handle on the left of any entry
-to drag it somewhere else; press the red **✕** to remove it.
+The right-hand column has two tabs. **Operations** is a **stack**: a list of
+operations run top to bottom, each working on what the ones above it left. Pick one
+from the dropdown and press **Create** to add it to the bottom; grab the **≡**
+handle on the left of any entry to drag it somewhere else; press the **✕** on the
+right to remove it.
 
 Every entry also has a tick. Unticking it stops that operation running while
 keeping everything dialled into it, which removing the entry would not.
@@ -49,8 +50,8 @@ entry in that position says so on its own face rather than failing, so a
 half-built stack is a normal state to be in.
 
 Rename is deliberately **not** in the stack. It does not touch pixels, and its
-settings describe the whole batch rather than any one image, so it sits behind the
-**Image** / **Rename** switch above the stack instead.
+settings describe the whole batch rather than any one image, so it has a
+**Rename** tab of its own beside **Operations** instead.
 
 ### Preview and zoom
 
@@ -819,6 +820,6 @@ Three things worth knowing about the context:
 **A file operation** — something that changes where the pixels go, not what they
 are. Subclass `IWOperation` directly, return `false` from `transforms_pixels()`,
 and expect to be wired into the dock by hand: `Rename` is the only one, and it sits
-behind the **Image** / **Rename** switch rather than in the stack, because its
+under its own tab rather than in the stack, because its
 settings describe the batch rather than any one image.
 

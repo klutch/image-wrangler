@@ -14,6 +14,13 @@ extends VBoxContainer
 
 const StackEntry := preload("res://addons/image_wrangler/ui/iw_stack_entry.gd")
 
+## Room around the column of entries, and between one entry and the next.
+##
+## The gap is what makes the drop indicator legible: a line drawn on the edge of an
+## entry needs somewhere to be that is not already the next entry's edge.
+const ENTRY_MARGIN := 4
+const ENTRY_GAP := 4
+
 ## Emitted when the stack's contents or order changed, so the preview is stale.
 signal stack_changed
 
@@ -64,9 +71,18 @@ func _build() -> void:
 	create.pressed.connect(_on_create)
 	add_row.add_child(create)
 
+	# The entries are cards standing off the panel, so they need room around them to
+	# read as separate things rather than as one block with lines in it.
+	var inset := MarginContainer.new()
+	inset.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		inset.add_theme_constant_override(side, ENTRY_MARGIN)
+	add_child(inset)
+
 	_list = VBoxContainer.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	add_child(_list)
+	_list.add_theme_constant_override("separation", ENTRY_GAP)
+	inset.add_child(_list)
 
 	_refresh_selector()
 

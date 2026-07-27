@@ -35,6 +35,17 @@ const INDENT := 8
 ## Thickness of the line drawn where a dragged entry would land.
 const DROP_LINE := 2.0
 
+## How much lighter than the panel behind it an entry sits, and how round its
+## corners are.
+##
+## Lifted rather than outlined, because the stack is a column of things that can be
+## picked up and moved — and a raised card says that where a border only says the
+## contents are related. Slight on purpose: six of these down a narrow dock at any
+## more contrast would read as six separate panels rather than one list.
+const PANEL_LIGHTEN := 0.06
+const PANEL_RADIUS := 5
+const PANEL_PADDING := 4
+
 ## The operation this entry stands for. Its settings are the live ones.
 var stage: IWStackOperation
 
@@ -99,7 +110,25 @@ func _collect(node: Node, into: Array[Control]) -> void:
 		_collect(child, into)
 
 
+## Paints the entry as a card standing slightly off the panel behind it.
+##
+## Asked for rather than assumed: reading a theme colour that is not there logs an
+## error, and outside the editor there is no Editor theme type at all.
+func _apply_panel_style() -> void:
+	var base := Color(0.19, 0.20, 0.23)
+	if has_theme_color(&"base_color", &"Editor"):
+		base = get_theme_color(&"base_color", &"Editor")
+
+	var box := StyleBoxFlat.new()
+	box.bg_color = base.lightened(PANEL_LIGHTEN)
+	box.set_corner_radius_all(PANEL_RADIUS)
+	box.set_content_margin_all(PANEL_PADDING)
+	add_theme_stylebox_override(&"panel", box)
+
+
 func _build() -> void:
+	_apply_panel_style()
+
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 0)
 	add_child(column)
@@ -148,14 +177,19 @@ func _build() -> void:
 	_title.theme_changed.connect(_apply_fold_arrow)
 	header.add_child(_title)
 
-	# Text rather than the editor's Remove icon: that one is colour-coded by the
-	# theme, and this has to read as red whatever the theme thinks.
+	# Text rather than the editor's Remove icon: that one is colour-coded by the theme
+	# and would arrive tinted.
+	#
+	# Grey rather than red, and brighter on hover. Six red crosses down a column read
+	# as six warnings; the button only becomes the loudest thing on the entry at the
+	# moment the pointer is on it, which is the moment it matters.
 	var close := Button.new()
 	close.flat = true
 	close.focus_mode = Control.FOCUS_NONE
 	close.text = "✕"
-	close.add_theme_color_override(&"font_color", Color(0.95, 0.35, 0.35))
-	close.add_theme_color_override(&"font_hover_color", Color(1.0, 0.55, 0.55))
+	close.add_theme_color_override(&"font_color", Color(0.62, 0.62, 0.62))
+	close.add_theme_color_override(&"font_hover_color", Color(0.92, 0.92, 0.92))
+	close.add_theme_color_override(&"font_pressed_color", Color(1.0, 1.0, 1.0))
 	close.tooltip_text = "Remove this operation from the stack.\nIts settings go with it."
 	close.pressed.connect(func() -> void: remove_requested.emit(self))
 	header.add_child(close)
@@ -239,6 +273,11 @@ func _drop_data(at_position: Vector2, data: Variant) -> void:
 
 
 func _notification(what: int) -> void:
+	# The card is mixed from a theme colour, so it has to be mixed again when the
+	# theme changes or a light editor would keep a dark entry.
+	if what == NOTIFICATION_THEME_CHANGED and _title != null:
+		_apply_panel_style()
+		return
 	# The indicator has to come down when the drag leaves or ends anywhere, not only
 	# when it is dropped here — _can_drop_data stops being called and nothing else
 	# would clear it.

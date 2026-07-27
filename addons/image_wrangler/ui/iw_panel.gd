@@ -198,8 +198,10 @@ var _overlay_owner: Control
 var _status_label: Label
 var _detail_label: Label
 var _stack_view: Control
-var _mode_image: Button
-var _mode_rename: Button
+
+## The Operations / Rename tabs. Tab order is [enum Mode] order, so the index the
+## container reports is the mode itself.
+var _modes: TabContainer
 
 ## Rename's form, built into its own box and hidden while the stack is showing.
 var _rename_box: VBoxContainer
@@ -526,39 +528,22 @@ func _build_operation_column() -> Control:
 	var column := VBoxContainer.new()
 	column.custom_minimum_size = Vector2(220, 0)
 
-	# Two toggles rather than a dropdown: there are exactly two answers and they are
-	# not variations on a theme — one rewrites pixels and the other rewrites names.
-	var modes := HBoxContainer.new()
-	modes.add_theme_constant_override("separation", 0)
-	column.add_child(modes)
+	# Tabs rather than toggles, because the two are not settings of one thing: one
+	# rewrites pixels and the other rewrites names, and only one of them is ever what
+	# a Process button is about to do. A tab says "you are in here" in a way two
+	# pressed-looking buttons do not.
+	_modes = TabContainer.new()
+	_modes.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_modes.tab_changed.connect(_on_tab_changed)
+	column.add_child(_modes)
 
-	_mode_image = Button.new()
-	_mode_image.text = "Image"
-	_mode_image.toggle_mode = true
-	_mode_image.button_pressed = true
-	_mode_image.focus_mode = Control.FOCUS_NONE
-	_mode_image.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_mode_image.tooltip_text = "Build a stack of operations that rewrite the pixels."
-	_mode_image.pressed.connect(_select_mode.bind(Mode.IMAGE))
-	modes.add_child(_mode_image)
-
-	_mode_rename = Button.new()
-	_mode_rename.text = "Rename"
-	_mode_rename.toggle_mode = true
-	_mode_rename.focus_mode = Control.FOCUS_NONE
-	_mode_rename.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_mode_rename.tooltip_text = "Write the files out under new names, pixels untouched.\nDescribes the whole batch rather than one image, so it is not part of the stack."
-	_mode_rename.pressed.connect(_select_mode.bind(Mode.RENAME))
-	modes.add_child(_mode_rename)
-
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	column.add_child(scroll)
-
-	var scrolled := VBoxContainer.new()
-	scrolled.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(scrolled)
+	# Each tab gets its own scroll, so switching does not carry the other one's
+	# scroll position across.
+	var stack_page := ScrollContainer.new()
+	# The tab strip takes its label from the node's name.
+	stack_page.name = "Operations"
+	stack_page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_modes.add_child(stack_page)
 
 	_stack_view = StackView.new()
 	_stack_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -568,12 +553,20 @@ func _build_operation_column() -> Control:
 	_stack_view.stack_changed.connect(_on_stack_changed)
 	_stack_view.setting_changed.connect(_on_setting_changed)
 	_stack_view.entries_rebuilt.connect(_on_entries_rebuilt)
-	scrolled.add_child(_stack_view)
+	stack_page.add_child(_stack_view)
+
+	var rename_page := ScrollContainer.new()
+	rename_page.name = "Rename"
+	rename_page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_modes.add_child(rename_page)
 
 	_rename_box = VBoxContainer.new()
 	_rename_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rename_box.visible = false
-	scrolled.add_child(_rename_box)
+	rename_page.add_child(_rename_box)
+
+	_modes.set_tab_tooltip(Mode.IMAGE, "Build a stack of operations that rewrite the pixels.")
+	_modes.set_tab_tooltip(Mode.RENAME,
+			"Write the files out under new names, pixels untouched.\nDescribes the whole batch rather than one image, so it is not part of the stack.")
 
 	column.add_child(HSeparator.new())
 	column.add_child(_build_output_section())
@@ -589,15 +582,17 @@ func _build_entry_form(stage: IWStackOperation, box: VBoxContainer, entry: Contr
 
 
 ## Switches between the stack and the file operation.
+##
+## Setting the tab is what shows the right page; everything below is what has to
+## follow from having switched. Assigning a tab that is already current raises no
+## signal, so calling this from [method _on_tab_changed] cannot loop.
 func _select_mode(mode: int) -> void:
 	# Any pending write belongs to whatever was showing, and the flush resolves it
 	# against the current mode — so it has to go first.
 	_flush_autosave()
 	_mode = mode
-	_mode_image.button_pressed = mode == Mode.IMAGE
-	_mode_rename.button_pressed = mode == Mode.RENAME
-	_stack_view.visible = mode == Mode.IMAGE
-	_rename_box.visible = mode == Mode.RENAME
+	if _modes != null and _modes.current_tab != mode:
+		_modes.current_tab = mode
 
 	# Rename has nothing to pick off the preview, and leaving a crosshair armed over a
 	# form that is no longer showing would be a click nobody could explain.
@@ -612,6 +607,10 @@ func _select_mode(mode: int) -> void:
 	_update_detail_label()
 	if mode == Mode.IMAGE and _auto_preview_allowed():
 		_schedule_preview()
+
+
+func _on_tab_changed(tab: int) -> void:
+	_select_mode(tab)
 
 
 func _build_output_section() -> Control:
