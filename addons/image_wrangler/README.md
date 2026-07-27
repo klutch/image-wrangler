@@ -94,22 +94,51 @@ Hit **Pick** and click the preview to sample a colour off the image, or **Add**
 for an entry to set by hand with the swatch. **Remove** and **Clear** take
 entries back out.
 
-**An entry only takes where its colour reaches the image border.** This is the
-one thing to know about the list, and it catches everyone once. Every border
-pixel is offered to the whole list — so a frame with one background down one edge
-and another down the opposite edge floods from both — but the border is the only
-place a flood may start while **Only Outer Background** is on. Listing a colour is
-not the same as removing every pixel of it.
+**An entry takes where it is reachable from the image border**, while **Only
+Outer Background** is on. This is the one thing to know about the list.
 
-So a grey panel sitting *inside* the subject is not removed by adding grey to the
-list, however exactly you match it. That region is what the **Island Picker** is
-for: click it and it floods from there, keying out against its own colour. The
-rule of thumb is that the list describes the colours around your subject and the
-picker describes the holes in it.
+Reachable means a path exists to it through colours the list already covers — not
+that the colour touches the border itself. The flood spreads through the
+background as a whole: a pixel one entry refuses is offered to the rest of the
+list, and takes whichever entry claims it. So a white plate around a green stem
+needs *both* white and green listed, and then the flood crosses the white to reach
+the green and carries on at green's tolerance. It also passes through anything
+already transparent (see below). What stops it is opaque subject that no entry
+claims.
+
+The consequence worth remembering: **removing an entry can strand the others.**
+Take white off that list and the flood has no way in from the border any more, so
+green stops working too — not because green is wrong, but because nothing gets it
+there. If a colour that looks right clears nothing at all, this is usually why.
+
+So a grey panel walled off by *opaque subject* is not removed by adding grey to
+the list, however exactly you match it — there is no path to it. That region is
+what the **Island Picker** is for: click it and it floods from there, keying out
+against its own colour. The rule of thumb is that the list describes background
+the flood can walk to, and the picker describes background it cannot.
 
 Turning **Only Outer Background** off removes every listed colour wherever it
 appears, enclosed regions included — which is also why it takes the eye
 highlights with it.
+
+**Transparency does not count as a wall.** A pixel that arrives fully transparent
+is already removed, so the flood crosses it freely and picks up whatever it finds
+on the far side. That is what makes a second pass work: process a plant on white,
+then swap white for the green of its stem, and the flood reaches the stem through
+the transparent background rather than stopping at the frame. Crossing a hole also
+re-offers the far side to the whole list, since transparency carries no colour to
+inherit.
+
+This matters more than it sounds, because of **Color Bleed**. Where this operation
+makes a pixel transparent it fills the RGB underneath with the nearest subject
+colour — invisible at alpha zero, but there to stop filtering dragging the
+background back in later. So the transparent border of an already-processed image
+holds plant green, not white. Matching that against your list would be reading a
+value put there for a completely different purpose, so alpha is checked first and
+the colour ignored.
+
+A partly transparent pixel is *not* treated this way. It is a real antialiased
+edge carrying real coverage, and only exactly zero counts as empty.
 
 **Each entry carries its own tolerance**, and that is the point of the list. One
 global number has to be tuned for the worst background in the image: loose enough

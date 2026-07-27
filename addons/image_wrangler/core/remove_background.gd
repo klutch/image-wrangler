@@ -59,6 +59,16 @@ extends IWOperation
 ## Their alpha is zero, but bilinear filtering and mipmaps still sample their
 ## RGB, which is how the background creeps back into an edge that looked clean in
 ## the file.
+##
+## [b]Running it twice.[/b] A source pixel that arrives fully transparent is
+## treated as open ground: it is already removed, so every flood crosses it, it
+## grows no edge band, and it stays transparent whether or not the flood reached
+## it. Without that, a second pass over this operation's own output would be
+## fenced in by the first — the bleed above leaves subject colour in the RGB of
+## every transparent pixel, so the border of a processed image reads as plant
+## green or skin tone rather than as background, and the flood dies at the frame.
+## Crossing a hole also re-offers the far side to the whole Remove Colors list,
+## since transparency carries no key to inherit.
 
 ## This operation's tunables. Swapped by the dock for the image on screen; see
 ## [RemoveBackgroundSettings].
@@ -67,12 +77,17 @@ var settings: RemoveBackgroundSettings
 ## Settings the flood fill reads from inside its per-pixel loop, snapshotted once
 ## per run by [method _snapshot_settings].
 ##
-## [method _flood_step] is called four times per background pixel and cannot see
+## [method _flood_take] is called four times per background pixel and cannot see
 ## the locals its caller hoisted, so these would otherwise be resolved through the
 ## settings Resource millions of times. Every other method reads what it needs
 ## into a local at the top instead.
 var _crevice_reach: int
 var _crevice_tolerance: float
+
+## Weak-step count [method _flood_take] wants recorded for the pixel it just
+## accepted. An out-parameter, because returning it alongside the key would mean
+## allocating an Array four times per background pixel.
+var _flood_weak := 0
 
 ## Every background colour in play this run, and the tolerance belonging to each.
 ## Built by [method _build_keys]: the Remove Colors list first, in the order the
@@ -92,6 +107,14 @@ var _color_count := 0
 const MASK_BACKGROUND := 0
 const MASK_EDGE := 1
 const MASK_SUBJECT := 2
+
+## Values of [code]key_of[/code] that are not indices into [member _keys].
+##
+## [constant KEY_CLEAR] marks a pixel that arrived fully transparent. It is
+## background, but it was not keyed out by anything and has no colour to un-blend
+## against, so it must not be confused with a pixel some entry claimed.
+const KEY_NONE := -1
+const KEY_CLEAR := -2
 
 ## Guards divisions where the denominator can legitimately collapse to zero.
 const _EPSILON := 0.0001
@@ -200,7 +223,7 @@ func get_settings_schema() -> Array[Dictionary]:
 			"property": &"remove_colors",
 			"group": "Remove Colors",
 			"type": SettingType.COLOR_LIST,
-			"tooltip": "The background colors to key out, each with its own tolerance.\nPick them off the preview, or add one and set it by hand. An image with\ntwo flat backgrounds needs two entries: one tolerance loose enough for a\nspeckled one would eat into the subject beside the clean one.\n\nWhile \"Only Outer Background\" is on, an entry only takes where its color\nreaches the image border. A region enclosed by the subject is not removed\nby listing its color — pick it with the Island Picker instead.\n\nWhere two entries could both claim a pixel, the higher one wins.",
+			"tooltip": "The background colors to key out, each with its own tolerance.\nPick them off the preview, or add one and set it by hand. An image with\ntwo flat backgrounds needs two entries: one tolerance loose enough for a\nspeckled one would eat into the subject beside the clean one.\n\nThe flood spreads through every listed color, so entries work together —\na white plate around a green stem needs both listed, and taking white out\nstops green working too, because nothing reaches it from the border.\n\nBackground walled off by opaque subject is never reached, whatever you\nlist. Pick that with the Island Picker instead.\n\nWhere two entries could both claim a pixel, the higher one wins.",
 		},
 		{
 			"property": &"edge_width",
@@ -641,6 +664,16 @@ func _color_at(data: PackedByteArray, index: int) -> Color:
 	return Color(data[offset] * to_unit, data[offset + 1] * to_unit, data[offset + 2] * to_unit)
 
 
+## Whether a source pixel arrived fully transparent, and so is already removed.
+##
+## Exactly zero rather than a threshold. A partly transparent pixel is a real
+## antialiased edge carrying real coverage, and treating it as empty would eat the
+## soft edge of anything processed twice. Zero is what this operation itself
+## writes for background, so a second pass recognises its own first pass.
+func _is_clear(data: PackedByteArray, index: int) -> bool:
+	return data[index * 4 + 3] == 0
+
+
 ## Distance from a pixel to key [param k], taking the precomputed map for the
 ## first key and measuring the rest on demand.
 func _key_distance(data: PackedByteArray, key_dist: PackedFloat32Array, index: int, k: int) -> float:
@@ -663,13 +696,25 @@ func _key_distance(data: PackedByteArray, key_dist: PackedFloat32Array, index: i
 ## an array lookup and a compare rather than a nested call per pixel.
 func _claiming_key(data: PackedByteArray, key_dist: PackedFloat32Array, index: int) -> int:
 	if _color_count == 0:
-		return -1
+		return KEY_NONE
 	if key_dist[index] <= _key_tolerances[0]:
 		return 0
 	for k in range(1, _color_count):
 		if _distance_at(data, index, _keys[k]) <= _key_tolerances[k]:
 			return k
-	return -1
+	return KEY_NONE
+
+
+## The key a border pixel starts the flood with, or [constant KEY_NONE].
+##
+## Transparency is checked before colour, because a transparent pixel's RGB is
+## not a colour anyone chose. This operation bleeds subject colour into what it
+## makes transparent, so the border of an image it has already processed is full
+## of plant green or skin tone — matching that against the Remove Colors list
+## would be reading a value that is there to stop filtering artefacts, not to
+## describe a background.
+func _border_key(data: PackedByteArray, key_dist: PackedFloat32Array, index: int) -> int:
+	return KEY_CLEAR if _is_clear(data, index) else _claiming_key(data, key_dist, index)
 
 
 ## Sorts every pixel into background, antialiased edge, or subject, and records
@@ -710,7 +755,7 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, island_seeds
 	var tail := 0
 
 	# How many weak pixels in a row the flood crossed to reach each pixel; zero
-	# on anything solidly background. See [method _flood_step].
+	# on anything solidly background. See [method _flood_take].
 	var weak_steps := PackedInt32Array()
 	weak_steps.resize(pixel_count)
 
@@ -721,16 +766,16 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, island_seeds
 		for x in width:
 			var top := x
 			if mask[top] != MASK_BACKGROUND:
-				var top_key := _claiming_key(data, key_dist, top)
-				if top_key >= 0:
+				var top_key := _border_key(data, key_dist, top)
+				if top_key != KEY_NONE:
 					mask[top] = MASK_BACKGROUND
 					key_of[top] = top_key
 					queue[tail] = top
 					tail += 1
 			var bottom := (height - 1) * width + x
 			if mask[bottom] != MASK_BACKGROUND:
-				var bottom_key := _claiming_key(data, key_dist, bottom)
-				if bottom_key >= 0:
+				var bottom_key := _border_key(data, key_dist, bottom)
+				if bottom_key != KEY_NONE:
 					mask[bottom] = MASK_BACKGROUND
 					key_of[bottom] = bottom_key
 					queue[tail] = bottom
@@ -738,16 +783,16 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, island_seeds
 		for y in height:
 			var row_start := y * width
 			if mask[row_start] != MASK_BACKGROUND:
-				var start_key := _claiming_key(data, key_dist, row_start)
-				if start_key >= 0:
+				var start_key := _border_key(data, key_dist, row_start)
+				if start_key != KEY_NONE:
 					mask[row_start] = MASK_BACKGROUND
 					key_of[row_start] = start_key
 					queue[tail] = row_start
 					tail += 1
 			var row_end := row_start + width - 1
 			if mask[row_end] != MASK_BACKGROUND:
-				var end_key := _claiming_key(data, key_dist, row_end)
-				if end_key >= 0:
+				var end_key := _border_key(data, key_dist, row_end)
+				if end_key != KEY_NONE:
 					mask[row_end] = MASK_BACKGROUND
 					key_of[row_end] = end_key
 					queue[tail] = row_end
@@ -781,41 +826,41 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, island_seeds
 			if x > 0:
 				var left := index - 1
 				if mask[left] != MASK_BACKGROUND:
-					var step := _flood_step(data, key_dist, left, claimed_by, weak_here)
-					if step >= 0:
+					var took := _flood_take(data, key_dist, left, claimed_by, weak_here)
+					if took != KEY_NONE:
 						mask[left] = MASK_BACKGROUND
-						key_of[left] = claimed_by
-						weak_steps[left] = step
+						key_of[left] = took
+						weak_steps[left] = _flood_weak
 						queue[tail] = left
 						tail += 1
 			if x < width - 1:
 				var right := index + 1
 				if mask[right] != MASK_BACKGROUND:
-					var step := _flood_step(data, key_dist, right, claimed_by, weak_here)
-					if step >= 0:
+					var took := _flood_take(data, key_dist, right, claimed_by, weak_here)
+					if took != KEY_NONE:
 						mask[right] = MASK_BACKGROUND
-						key_of[right] = claimed_by
-						weak_steps[right] = step
+						key_of[right] = took
+						weak_steps[right] = _flood_weak
 						queue[tail] = right
 						tail += 1
 			if y > 0:
 				var up := index - width
 				if mask[up] != MASK_BACKGROUND:
-					var step := _flood_step(data, key_dist, up, claimed_by, weak_here)
-					if step >= 0:
+					var took := _flood_take(data, key_dist, up, claimed_by, weak_here)
+					if took != KEY_NONE:
 						mask[up] = MASK_BACKGROUND
-						key_of[up] = claimed_by
-						weak_steps[up] = step
+						key_of[up] = took
+						weak_steps[up] = _flood_weak
 						queue[tail] = up
 						tail += 1
 			if y < height - 1:
 				var down := index + width
 				if mask[down] != MASK_BACKGROUND:
-					var step := _flood_step(data, key_dist, down, claimed_by, weak_here)
-					if step >= 0:
+					var took := _flood_take(data, key_dist, down, claimed_by, weak_here)
+					if took != KEY_NONE:
 						mask[down] = MASK_BACKGROUND
-						key_of[down] = claimed_by
-						weak_steps[down] = step
+						key_of[down] = took
+						weak_steps[down] = _flood_weak
 						queue[tail] = down
 						tail += 1
 		# A pixel the flood only squeezed through is not background — it is the
@@ -832,11 +877,21 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, island_seeds
 		# meaning: every pixel matching a Remove Color already qualifies.
 		for i in pixel_count:
 			var claimed := _claiming_key(data, key_dist, i)
-			if claimed >= 0:
+			if claimed != KEY_NONE:
 				mask[i] = MASK_BACKGROUND
 				key_of[i] = claimed
 				queue[tail] = i
 				tail += 1
+
+	# Transparency the flood never reached is still transparent. Marked without
+	# being queued: there is nothing behind a transparent pixel to make opaque, so
+	# leaving it classed as subject would have coverage fill in every enclosed hole
+	# the moment an image was processed a second time — but it grows no band
+	# either, since it has no colour anything could be matted against.
+	for i in pixel_count:
+		if mask[i] != MASK_BACKGROUND and _is_clear(data, i):
+			mask[i] = MASK_BACKGROUND
+			key_of[i] = KEY_CLEAR
 
 	# Second pass: grow the edge band inwards from the background. The queue
 	# still holds every background pixel, so rewinding the head walks outwards in
@@ -853,6 +908,12 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, island_seeds
 		if step > edge_width:
 			continue
 		var claimed_by := key_of[index]
+		# A pixel that arrived transparent has no key and grows no band. Its
+		# neighbours' alpha was settled by whatever pass made it transparent, and
+		# re-matting them against a colour nobody chose would chew the soft edge
+		# off anything processed twice.
+		if claimed_by < 0:
+			continue
 		# The band inherits the key it grew from, so it is that key's tolerance
 		# that decides what still counts as background here.
 		var tolerance: float = _key_tolerances[claimed_by]
@@ -895,8 +956,22 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, island_seeds
 	return [mask, key_of]
 
 
-## Whether the flood may step onto [param index], and at what weak-step count.
-## Returns -1 to refuse, otherwise the count to record there.
+## The key [param to] should take for a flood arriving from [param from_key], or
+## [constant KEY_NONE] to refuse it. The weak-step count to record is left in
+## [member _flood_weak].
+##
+## Returns the key rather than letting the caller inherit one, because the key
+## that arrives is not always the key that applies. The flood spreads through the
+## background as a whole, not through one colour of it: a pixel the arriving key
+## refuses is offered to the rest of the list, and takes whichever entry claims
+## it. Reaching a colour is therefore a question of a path existing through
+## listed colours, not of that colour touching the image border itself.
+##
+## Transparency is the other case. A transparent pixel is open ground — already
+## removed, so any flood crosses it — and it carries no colour of its own to pass
+## on, so the first opaque pixel on the far side is offered to the whole list
+## afresh. That is what lets a background reach a region walled off by a hole,
+## which is the normal shape of an image this operation has already run over once.
 ##
 ## This is Canny's double threshold applied to region growing rather than edge
 ## linking. A pixel within its key's own tolerance is solid background and resets
@@ -914,14 +989,35 @@ func _classify(data: PackedByteArray, key_dist: PackedFloat32Array, island_seeds
 ## may keep a worse count than it deserves. That only ever makes the flood stop
 ## short — it can never reach further than the rule allows — so the failure mode
 ## is background left behind, never subject eaten.
-func _flood_step(data: PackedByteArray, key_dist: PackedFloat32Array, index: int, key_index: int, from_weak: int) -> int:
-	var distance := _key_distance(data, key_dist, index, key_index)
-	var tolerance: float = _key_tolerances[key_index]
+func _flood_take(data: PackedByteArray, key_dist: PackedFloat32Array, to: int, from_key: int, from_weak: int) -> int:
+	_flood_weak = 0
+	if _is_clear(data, to):
+		return KEY_CLEAR
+	if from_key == KEY_CLEAR:
+		return _claiming_key(data, key_dist, to)
+
+	var distance := _key_distance(data, key_dist, to, from_key)
+	var tolerance: float = _key_tolerances[from_key]
 	if distance <= tolerance:
-		return 0
+		return from_key
+
+	# The arriving key does not want it, so the rest of the list is asked before
+	# giving up. Two flat backgrounds meeting — a white plate around a green stem —
+	# are one region to the eye and have to be one to the flood, or the second
+	# colour would only ever work where it independently touched the image border,
+	# which is almost never. Whichever entry claims this pixel takes it, and the
+	# flood carries on from here at that entry's tolerance rather than the one it
+	# set out with.
+	var claimed := _claiming_key(data, key_dist, to)
+	if claimed != KEY_NONE:
+		return claimed
+
+	# Last, so a pixel another entry claims outright is never taken by the weaker
+	# rule instead. Straying is for getting through a gap, not for choosing a key.
 	if _crevice_reach > 0 and from_weak < _crevice_reach and distance <= maxf(_crevice_tolerance, tolerance):
-		return from_weak + 1
-	return -1
+		_flood_weak = from_weak + 1
+		return from_key
+	return KEY_NONE
 
 
 ## For every pixel, the index of the closest opaque subject pixel, or -1 if none
@@ -950,7 +1046,7 @@ func _nearest_subject_map(data: PackedByteArray, mask: PackedByteArray, key_dist
 	var tail := 0
 
 	for i in pixel_count:
-		if mask[i] == MASK_SUBJECT and _claiming_key(data, key_dist, i) < 0:
+		if mask[i] == MASK_SUBJECT and _claiming_key(data, key_dist, i) == KEY_NONE:
 			nearest[i] = i
 			queue[tail] = i
 			tail += 1

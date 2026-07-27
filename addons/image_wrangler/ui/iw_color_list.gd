@@ -155,10 +155,10 @@ func add_color(color: Color) -> void:
 	colors.add(color)
 	_refresh()
 	_select(colors.size() - 1)
-	# Said on the way in rather than left to the tooltip. A colour picked off a
-	# region enclosed by the subject looks like it should work and does nothing,
-	# and this is the moment that misunderstanding happens.
-	_hint.text = "Takes where this color reaches the image border. For a region enclosed by the subject, use the Island Picker."
+	# Said on the way in rather than left to the tooltip. Picking a colour the
+	# flood has no route to looks like it should work and does nothing, and this
+	# is the moment that misunderstanding happens.
+	_hint.text = "Reached through the other colors in the list, so keep the ones around it. Background walled off by the subject needs the Island Picker."
 	colors_changed.emit()
 
 
