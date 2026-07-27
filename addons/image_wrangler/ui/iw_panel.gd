@@ -19,9 +19,24 @@ const OPERATION_SCRIPTS := [
 ## Extensions [method Image.load_from_file] can read.
 const SUPPORTED_EXTENSIONS := ["png", "jpg", "jpeg", "bmp", "tga", "webp"]
 
-## Auto preview is switched off above this size, since every settings tweak
-## would otherwise re-run the whole image and stall the editor.
+## Above this size the preview stops following settings changes, since every
+## tweak would otherwise re-run the whole image and stall the editor. Refresh
+## still runs it on demand.
+##
+## Judged from the image rather than offered as a switch: the only reason to turn
+## automatic preview off is that it has become too slow, and the dock can see that
+## for itself.
 const AUTO_PREVIEW_PIXEL_LIMIT := 4_194_304
+
+## Width of the Original fade slider. Enough to aim with, short enough that the
+## toolbar does not pin the preview column open.
+const ORIGINAL_FADE_WIDTH := 90
+
+const ORIGINAL_FADE_TOOLTIP := """Fades the source image in over the result.
+
+At 0 you see the result, at 100 the untouched source, and in between both
+at once — which is how you judge whether an edge was eaten or a fringe
+left behind, since the two are then in the same place at the same time."""
 
 ## Settings edits arrive in bursts while a slider is dragged; collapse them.
 const PREVIEW_DEBOUNCE := 0.15
@@ -128,8 +143,8 @@ var _key_color_button: ColorPickerButton
 ## Property the key-colour swatch writes to, or empty when the operation has none.
 var _key_color_property := &""
 var _settings_box: VBoxContainer
-var _show_original: CheckButton
-var _auto_preview: CheckButton
+## How much of the source image is faded over the result, 0 to 100.
+var _original_fade: HSlider
 var _zoom_select: OptionButton
 var _zoom_entry: LineEdit
 var _refresh_button: Button
@@ -310,18 +325,28 @@ func _build_preview_column() -> Control:
 	# Labels are kept short on purpose: a container's minimum width comes from
 	# its children, so a chatty toolbar would pin this column open and stop the
 	# splitters from moving.
-	_show_original = CheckButton.new()
-	_show_original.text = "Original"
-	_show_original.tooltip_text = "Toggle between the source image and the processed result."
-	_show_original.toggled.connect(func(_pressed: bool) -> void: _update_preview_texture())
-	toolbar.add_child(_show_original)
+	var original_label := Label.new()
+	original_label.text = "Original"
+	original_label.tooltip_text = ORIGINAL_FADE_TOOLTIP
+	original_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	toolbar.add_child(original_label)
 
-	_auto_preview = CheckButton.new()
-	_auto_preview.text = "Auto"
-	_auto_preview.button_pressed = true
-	_auto_preview.tooltip_text = "Re-run the operation whenever a setting changes."
-	_auto_preview.toggled.connect(_on_auto_preview_toggled)
-	toolbar.add_child(_auto_preview)
+	# A slider rather than the toggle this was, because the question being asked
+	# of the preview is almost never "which of these two" — it is "how much of the
+	# edge did I just eat", and that is a question about the difference between
+	# them. Fading one over the other puts the two in the same place at the same
+	# time, where a toggle makes you hold one in your head while looking at the
+	# other.
+	_original_fade = HSlider.new()
+	_original_fade.min_value = 0.0
+	_original_fade.max_value = 100.0
+	_original_fade.step = 1.0
+	_original_fade.value = 0.0
+	_original_fade.custom_minimum_size = Vector2(ORIGINAL_FADE_WIDTH, 0)
+	_original_fade.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_original_fade.tooltip_text = ORIGINAL_FADE_TOOLTIP
+	_original_fade.value_changed.connect(_on_original_fade_changed)
+	toolbar.add_child(_original_fade)
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -670,17 +695,15 @@ func _on_file_selected(index: int) -> void:
 	# anything is processed, so both happen before the preview below.
 	_apply_settings_for(path)
 
-	var pixel_count := _source_image.get_width() * _source_image.get_height()
-	if pixel_count > AUTO_PREVIEW_PIXEL_LIMIT and _auto_preview.button_pressed:
-		_auto_preview.button_pressed = false
-		_set_status("Auto preview off: %s is large. Press Refresh to process it." % path.get_file())
-
 	_update_controls()
-	if _auto_preview.button_pressed:
+	if _auto_preview_allowed():
 		_run_preview()
 	else:
+		# Shown as it is, and left to Refresh. Processing a very large image on
+		# every click through the list would make the list unusable.
 		_update_preview_texture()
 		_update_detail_label()
+		_set_status("%s is large; press Refresh to process it." % path.get_file())
 	# A newly opened image starts fitted, so it arrives filling the frame rather
 	# than as a corner crop or a speck in the middle.
 	_preview.fit_to_view()
@@ -717,8 +740,12 @@ func _select_operation(index: int) -> void:
 		_suffix_is_default = true
 
 	_result_image = null
-	if _auto_preview.button_pressed:
+	if _auto_preview_allowed():
 		_schedule_preview()
+	else:
+		# The old operation's result no longer describes anything, so it must not
+		# be left on screen under a fade that would present it as this one's.
+		_update_preview_texture()
 
 
 ## Points the swatch at the current operation's key colour, hiding it for
@@ -1080,21 +1107,33 @@ func _on_setting_changed() -> void:
 	if _refreshing:
 		return
 	_schedule_autosave()
-	if _auto_preview.button_pressed:
+	if _auto_preview_allowed():
 		_schedule_preview()
 	else:
 		_set_status("Settings changed. Press Refresh to update the preview.")
 
 
-func _on_auto_preview_toggled(pressed: bool) -> void:
-	if pressed:
-		_schedule_preview()
+## Whether the preview should follow settings changes on its own.
+##
+## Only the image's size decides. Below the limit the preview keeps up and there
+## is no reason to ask; above it, one tweak of a slider would lock the editor for
+## seconds at a time, and Refresh is the way to ask for it deliberately.
+func _auto_preview_allowed() -> bool:
+	if _source_image == null:
+		return false
+	return _source_image.get_width() * _source_image.get_height() <= AUTO_PREVIEW_PIXEL_LIMIT
 
 
 func _schedule_preview() -> void:
 	if _source_image == null:
 		return
 	_debounce.start()
+
+
+## Fading is a redraw, not a re-run: both images are already on the preview and
+## it is only the weight between them that changed.
+func _on_original_fade_changed(value: float) -> void:
+	_preview.original_fade = value * 0.01
 
 
 func _run_preview() -> void:
@@ -1116,14 +1155,19 @@ func _run_preview() -> void:
 	_update_detail_label()
 
 
+## Hands the preview both images, so the fade slider can move between them
+## without anything being re-run.
+##
+## Before the first run there is no result, and the source stands in for it — the
+## slider then has the same image on both sides and does nothing visible, which
+## is the honest answer to fading between an image and itself.
 func _update_preview_texture() -> void:
 	if _source_image == null:
 		_preview.set_image(null)
+		_preview.set_original(null)
 		return
-	if _show_original.button_pressed or _result_image == null:
-		_preview.set_image(_source_image)
-	else:
-		_preview.set_image(_result_image)
+	_preview.set_image(_result_image if _result_image != null else _source_image)
+	_preview.set_original(_source_image)
 
 
 ## Right-clicking the dropdown swaps it for a text field, so a zoom that is not

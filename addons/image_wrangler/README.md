@@ -34,8 +34,22 @@ boundaries rather than a smoothed guess.
 
 Opening an image fits it, so it arrives filling the frame rather than as a
 corner crop or a speck. Zoom and scroll then survive everything else — re-running
-the operation, toggling **Show Original** — so you can sit at 400% on an edge and
-watch a setting change it.
+the operation, moving the **Original** slider — so you can sit at 400% on an edge
+and watch a setting change it.
+
+The **Original** slider fades the untouched source back in over the result: 0
+shows the result, 100 the source, and anything between shows both at once. That
+middle is the useful part. The question at 400% on an edge is almost never "which
+of these two am I looking at" but "how much of the edge did I just eat", and that
+is a question about the difference between them — which a slider puts in one
+place, where a toggle makes you hold one image in your head while looking at the
+other.
+
+The preview follows settings changes on its own. Above four megapixels it stops
+doing so, since one nudge of a slider would lock the editor for seconds at a
+time, and **Refresh** runs it on demand instead. There is no switch for this: the
+only reason to want automatic preview off is that it has become too slow, and the
+dock can see that for itself.
 
 The three columns are split by draggable dividers.
 
@@ -43,10 +57,9 @@ The three columns are split by draggable dividers.
 
 Keys out a flat background colour while rebuilding the antialiased silhouette.
 
-Set the colour with the **Remove Color** swatch under the operation dropdown. It
-defaults to white; the picker's eyedropper can sample one off the screen. The
-maths is colour-agnostic, so a green screen or a flat blue plate works exactly as
-well as white.
+Set the colours in the **Remove Colors** list, which starts with one white entry
+and takes as many as the image needs. The maths is colour-agnostic, so a green
+screen or a flat blue plate works exactly as well as white.
 
 The problem with deleting background-coloured pixels is that the pixels along the
 edge are not background *or* subject — they are a blend of both, produced by the

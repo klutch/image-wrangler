@@ -95,7 +95,25 @@ var markers_visible := true:
 		if _canvas != null:
 			_canvas.queue_redraw()
 
+## How much of [member _original_texture] is drawn over the result, 0 to 1.
+var original_fade := 0.0:
+	set(value):
+		var clamped := clampf(value, 0.0, 1.0)
+		if is_equal_approx(original_fade, clamped):
+			return
+		original_fade = clamped
+		if _canvas != null:
+			_canvas.queue_redraw()
+
 var _texture: Texture2D
+
+## The untouched source, drawn over the result at [member original_fade].
+##
+## Held as a second texture and blended at draw time rather than mixed into one
+## image: the fade is something the user drags, and re-blending a few megapixels
+## per step would make it stutter exactly while being used.
+var _original_texture: Texture2D
+
 var _checker: Texture2D
 var _image_size := Vector2i.ZERO
 var _markers: Array[Vector2i] = []
@@ -192,6 +210,20 @@ func set_image(image: Image) -> void:
 		_texture = ImageTexture.create_from_image(image)
 		_image_size = Vector2i(image.get_width(), image.get_height())
 	_relayout()
+
+
+## Supplies the untouched source, for [member original_fade] to bring back in.
+##
+## Deliberately does not drive the layout: the view is sized by whatever
+## [method set_image] was given, so a fade cannot move the image under the pointer
+## even if the two somehow differ in size.
+func set_original(image: Image) -> void:
+	if image == null or image.is_empty():
+		_original_texture = null
+	else:
+		_original_texture = ImageTexture.create_from_image(image)
+	if _canvas != null:
+		_canvas.queue_redraw()
 
 
 ## Marks [param markers] on the image, emphasising [param selected].
@@ -645,7 +677,14 @@ func _draw_canvas() -> void:
 	_canvas.draw_texture_rect(_checker, Rect2(Vector2.ZERO, _viewport), true)
 	if _texture == null or _content_size.x <= 0.0 or _content_size.y <= 0.0:
 		return
-	_canvas.draw_texture_rect(_texture, Rect2(_content_origin, _content_size), false)
+	var frame := Rect2(_content_origin, _content_size)
+	_canvas.draw_texture_rect(_texture, frame, false)
+	# Over the top rather than blended into it. Where the source is opaque this
+	# is an ordinary cross-fade; where the result cut something away, the source
+	# comes back over the checkerboard, which is exactly the comparison being
+	# asked for.
+	if original_fade > 0.0 and _original_texture != null:
+		_canvas.draw_texture_rect(_original_texture, frame, false, Color(1, 1, 1, original_fade))
 	_draw_markers()
 	_draw_polygons()
 
