@@ -110,6 +110,31 @@ extends Resource
 ## Alpha at or above this is forced solid. See [member alpha_floor].
 @export var alpha_ceiling: float = 1.0
 
+## Re-matte edges that ended up hard, working the coverage back out of the
+## colours either side of them. See [method RemoveBackground._restore_edges].
+##
+## On by default. A correctly keyed edge has nothing here to fix — the pass only
+## touches a solid pixel sitting straight against a clear one, and a properly
+## matted edge has half-covered pixels in between — so leaving it on costs a scan
+## and changes nothing where nothing is wrong. It earns its place on an edge that
+## never got a matte: a source that was aliased before it arrived, or one a hard
+## setting elsewhere flattened.
+@export var restore_antialiasing: bool = true
+
+## Colour of the inside stroke, alpha included.
+##
+## The alpha is how strongly it is laid over what is already there rather than
+## how transparent the result is — a stroke at half alpha tints the art beneath
+## it, and does not make the silhouette half-transparent.
+@export var stroke_color: Color = Color(0, 0, 0, 1)
+
+## Width of the inside stroke in pixels, or zero for none.
+##
+## Inside: it is drawn within the silhouette of everything visible and never
+## extends it, so it follows interior holes as well as the outer contour and
+## leaves the alpha channel exactly as it found it.
+@export var stroke_width: float = 0.0
+
 
 func _init() -> void:
 	islands = IslandList.new()

@@ -60,6 +60,22 @@ extends IWOperation
 ## RGB, which is how the background creeps back into an edge that looked clean in
 ## the file.
 ##
+## [b]Edges that never got a matte.[/b] Everything above builds the antialiasing
+## while it is deciding what is background, which only helps where it is the one
+## doing the cutting. An image that arrived aliased, or an edge a hard alpha clip
+## flattened on the way past, has a solid pixel sitting straight against a clear
+## one and nothing in between. [member
+## RemoveBackgroundSettings.restore_antialiasing] is a pass over the finished alpha
+## that finds those and works the coverage back out of the same relation. It needs
+## no settings: a pixel only qualifies when the opposite extreme is directly beside
+## it, so a properly matted edge is invisible to it.
+##
+## [b]Paint on the result.[/b] [member RemoveBackgroundSettings.stroke_width] draws
+## an outline inside the silhouette of whatever is left, at
+## [member RemoveBackgroundSettings.stroke_color]. It is the one thing here that
+## adds rather than removes, so it happens last and touches only the colour — the
+## alpha channel is left exactly as the keying left it.
+##
 ## [b]What colour cannot describe.[/b] Everything above removes background by
 ## colour, which leaves no way to say "this region goes, whatever is in it" — a
 ## watermark, a scan edge, a stray element in a corner. [member
@@ -141,6 +157,19 @@ const _DECONTAMINATE_FADE := 0.25
 ## Minimum reach for the nearest-subject map. Coverage estimation needs a couple
 ## of pixels of reach even when colour bleed is switched off.
 const _MIN_SEARCH_RADIUS := 2
+
+## What [method _restore_edges] counts as fully solid and fully clear.
+##
+## Deliberately not 1.0 and 0.0 exactly: alpha arriving there has been through a
+## division, possibly a guided filter and possibly a clip, and a pixel that is
+## solid for every practical purpose can miss an exact comparison by a hair.
+const _RESTORE_SOLID := 0.995
+const _RESTORE_CLEAR := 0.005
+
+## How many pixels [method _restore_edges] steps inward looking for a subject
+## colour. Two, because from a clear pixel the first step only reaches the
+## boundary — which is the contaminated pixel being stepped past.
+const _RESTORE_INWARD_MAX := 2
 
 
 ## Regularisation for [method _guided_refine]. Small enough that the filter
@@ -352,6 +381,31 @@ func get_settings_schema() -> Array[Dictionary]:
 			"type": SettingType.POLYGON_LIST,
 			"tooltip": "Regions drawn over the preview by hand. Subtract makes the inside fully\ntransparent whatever color it is; Add makes it fully opaque.\n\nThis is the one thing here that does not work by color, so it is the way\nto edit something that has no color in common with itself — a watermark,\na scan edge, a stray element in a corner. Shapes may be concave.\n\nThe edge is hard: no antialiasing is rebuilt along it, since there is no\nbackground there to have blended with.",
 		},
+		{
+			"property": &"restore_antialiasing",
+			"label": "Enabled",
+			"group": "Edge Cleanup",
+			"collapsed": true,
+			"type": SettingType.BOOL,
+			"tooltip": "Restores the antialiasing on edges that ended up hard — a solid pixel\nsitting straight against a transparent one, with no half-covered pixels\nbetween — by working out what their coverage should have been from the\ncolors either side.\n\nOn by default, and it costs nothing where nothing is wrong: an edge that\nalready has its matte has half-covered pixels in the way, so the pass never\nsees it. It earns its place on a source that was aliased before it arrived,\nor on an edge that Alpha Floor or a hard cutoff flattened.\n\nPolygon Edit regions are left alone: those edges are hard on purpose.",
+		},
+		{
+			"property": &"stroke_color",
+			"label": "Stroke Color",
+			"group": "Edge Cleanup",
+			"type": SettingType.COLOR,
+			"tooltip": "Color of the inside stroke. Its alpha is how strongly it is laid over what\nis already there, not how transparent the result becomes — at half alpha\nthe stroke tints the art beneath it rather than covering it.",
+		},
+		{
+			"property": &"stroke_width",
+			"label": "Stroke Width",
+			"group": "Edge Cleanup",
+			"type": SettingType.FLOAT,
+			"min": 0.0,
+			"max": 5.0,
+			"step": 0.25,
+			"tooltip": "Width of the inside stroke in pixels. 0 draws none.\n\nInside: it is drawn within the silhouette of everything visible and never\nextends it, so it follows the holes in a shape as well as its outer\ncontour, and leaves the alpha channel exactly as it found it.\n\nThe stroke is antialiased, so fractional widths are worth having — its\ninner boundary fades over the last pixel rather than stepping.",
+		},
 	]
 
 
@@ -409,11 +463,11 @@ func process_image(source: Image) -> Image:
 	var island_seeds := _build_keys(data, width, height)
 	# No colours and no Subtract islands is a coherent request for no keying, and
 	# every map below would otherwise have to defend itself against having no key
-	# to measure against. The regions still have to land, though — they are
-	# geometry and owe nothing to the keying that is being skipped.
+	# to measure against. The regions and the stroke still have to land, though —
+	# they are geometry and paint, and owe nothing to the keying being skipped.
 	if _keys.is_empty():
 		var regions := _protect_mask(data, width, height)
-		if blacked.is_empty() and regions.is_empty():
+		if blacked.is_empty() and regions.is_empty() and not _wants_stroke():
 			return image
 		return _regions_only(image, data, blacked, regions, pixel_count)
 
@@ -463,6 +517,11 @@ func process_image(source: Image) -> Image:
 	if alpha_floor > 0.0 or alpha_ceiling < 1.0:
 		_clip_alpha(coverage)
 
+	# After the clip, because flattening an edge is one of the ways an edge comes
+	# to need restoring, and before the regions below, which are hard on purpose.
+	if settings.restore_antialiasing:
+		coverage = _restore_edges(data, coverage, key_of, nearest, blacked, width, height)
+
 	# After everything that can move alpha, since a region is an instruction about
 	# the result rather than a suggestion to the keyer. Refinement smooths across
 	# a hard region edge and the alpha clip drags values around; both would leave a
@@ -480,7 +539,29 @@ func process_image(source: Image) -> Image:
 			if protect[i] != 0:
 				coverage[i] = 1.0
 
-	return _compose(data, coverage, key_of, nearest, width, height)
+	# Last of all, so the stroke follows the silhouette that actually comes out —
+	# drawn regions and all — rather than the one the keyer alone would have given.
+	var stroke := _stroke_mask(_final_alpha(data, coverage, pixel_count), width, height)
+
+	return _compose(data, coverage, key_of, nearest, stroke, width, height)
+
+
+## Whether a stroke would draw anything. A width of zero or a fully transparent
+## colour both mean no, and neither is worth a pass over the image to discover.
+func _wants_stroke() -> bool:
+	return settings.stroke_width > 0.0 and settings.stroke_color.a > 0.0
+
+
+## The alpha the image ends up with, 0 to 1, which is the source's own multiplied
+## by the coverage worked out for it. What [method _compose] writes, ahead of it
+## writing it, for the stroke to measure its silhouette from.
+func _final_alpha(data: PackedByteArray, coverage: PackedFloat32Array, pixel_count: int) -> PackedFloat32Array:
+	var alpha := PackedFloat32Array()
+	alpha.resize(pixel_count)
+	var to_unit := 1.0 / 255.0
+	for i in pixel_count:
+		alpha[i] = data[i * 4 + 3] * to_unit * coverage[i]
+	return alpha
 
 
 ## One byte per pixel marking what the drawn regions do there, or an empty
@@ -665,8 +746,30 @@ func _regions_only(image: Image, data: PackedByteArray, blacked: PackedByteArray
 				out[offset] = 255
 		if not protect.is_empty() and protect[i] != 0:
 			out[offset] = 255
-	return Image.create_from_data(
-			image.get_width(), image.get_height(), false, Image.FORMAT_RGBA8, out)
+
+	# The stroke belongs to the silhouette rather than to the keying, so it is
+	# drawn here too. Skipping it on this path would mean a region cut with the
+	# colour list emptied came out unstroked for no reason the user could see.
+	var width := image.get_width()
+	var height := image.get_height()
+	var to_unit := 1.0 / 255.0
+	var alpha := PackedFloat32Array()
+	alpha.resize(pixel_count)
+	for i in pixel_count:
+		alpha[i] = out[i * 4 + 3] * to_unit
+	var stroke := _stroke_mask(alpha, width, height)
+	if not stroke.is_empty():
+		var stroke_color := settings.stroke_color
+		for i in pixel_count:
+			var over := stroke[i]
+			if over <= 0.0:
+				continue
+			var offset := i * 4
+			out[offset] = roundi(clampf(lerpf(out[offset] * to_unit, stroke_color.r, over), 0.0, 1.0) * 255.0)
+			out[offset + 1] = roundi(clampf(lerpf(out[offset + 1] * to_unit, stroke_color.g, over), 0.0, 1.0) * 255.0)
+			out[offset + 2] = roundi(clampf(lerpf(out[offset + 2] * to_unit, stroke_color.b, over), 0.0, 1.0) * 255.0)
+
+	return Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, out)
 
 
 ## Stretches alpha so [member alpha_floor] and below lands on clear and
@@ -728,11 +831,259 @@ func _coverage_map(data: PackedByteArray, key_dist: PackedFloat32Array, mask: Pa
 	return coverage
 
 
+## Alpha with hard edges re-matted from the colours on either side of them.
+##
+## The rest of this operation builds a matte while it is deciding what is
+## background, which works when it is the one doing the cutting. It cannot help an
+## edge that arrived aliased, or one that [member alpha_floor] flattened on the way
+## past. This looks at the finished alpha instead and asks, of every place a solid
+## pixel sits straight against a clear one, what the coverage there should have
+## been.
+##
+## The answer is the same relation the whole operation rests on. A pixel on an
+## antialiased edge is [code]C = a * F + (1 - a) * K[/code], so its distance from
+## the background is [code]a[/code] times the subject's distance from the
+## background, and dividing one by the other gives back [code]a[/code] with the
+## unknown [code]F[/code] cancelled out. The work is in finding a trustworthy
+## [code]F[/code] and [code]K[/code] for a pixel the classifier has finished with.
+##
+## [b]Adjacency is the whole test[/b], and it is why this needs no settings. Only a
+## pixel with the opposite extreme directly beside it is touched. A properly matted
+## edge has half-covered pixels in between, so neither side can see the other and
+## the edge is left exactly as it was — the pass cannot undo the good work of the
+## edge band, so there is nothing to tune it down with.
+##
+## Hard by intent is left hard: a pixel in or against a drawn region is skipped,
+## since a drawn cut is a straight line the user asked for rather than an edge that
+## lost its antialiasing.
+func _restore_edges(data: PackedByteArray, coverage: PackedFloat32Array, key_of: PackedInt32Array, nearest: PackedInt32Array, blacked: PackedByteArray, width: int, height: int) -> PackedFloat32Array:
+	var has_regions := not blacked.is_empty()
+	var fallback_key: Color = _keys[0]
+	var pixel_count := width * height
+	# Written to a copy, so that a pixel restored early in the scan cannot become
+	# the evidence that its neighbour needs restoring too.
+	var out := coverage.duplicate()
+
+	for i in pixel_count:
+		if has_regions and blacked[i] != REGION_NONE:
+			continue
+		var here := coverage[i]
+		var solid := here >= _RESTORE_SOLID
+		if not solid and here > _RESTORE_CLEAR:
+			continue
+
+		var x := i % width
+		@warning_ignore("integer_division")
+		var y := i / width
+
+		# The opposite extreme, if it is right there. Anything softer between the
+		# two means this edge already has its matte.
+		var facing := -1
+		if x > 0 and _restore_opposes(coverage, i - 1, solid):
+			facing = i - 1
+		elif x < width - 1 and _restore_opposes(coverage, i + 1, solid):
+			facing = i + 1
+		elif y > 0 and _restore_opposes(coverage, i - width, solid):
+			facing = i - width
+		elif y < height - 1 and _restore_opposes(coverage, i + width, solid):
+			facing = i + width
+		if facing < 0:
+			continue
+		if has_regions and blacked[facing] != REGION_NONE:
+			continue
+
+		# The background this edge is against, taken from whichever of the two
+		# sides the flood actually claimed, since that is the one that knows.
+		var claimed := key_of[facing] if key_of[facing] >= 0 else key_of[i]
+		var key: Color = _keys[claimed] if claimed >= 0 else fallback_key
+
+		var subject := _restore_subject(coverage, x, y, width, height)
+		if subject < 0:
+			subject = nearest[i]
+		if subject < 0:
+			continue
+
+		var reference := _distance_at(data, subject, key)
+		# Subject indistinguishable from background here: the division would
+		# amplify nothing into anything, and there is no coverage to recover.
+		if reference <= _EPSILON:
+			continue
+		out[i] = clampf(_distance_at(data, i, key) / reference, 0.0, 1.0)
+
+	return out
+
+
+## Whether [param index] sits at the opposite extreme to a pixel that is
+## [param solid].
+func _restore_opposes(coverage: PackedFloat32Array, index: int, solid: bool) -> bool:
+	return coverage[index] <= _RESTORE_CLEAR if solid else coverage[index] >= _RESTORE_SOLID
+
+
+## A pixel a step or two into the opaque shape from ([param x], [param y]), or -1.
+##
+## The pixel being restored is itself part background — that is what makes it an
+## edge — so measuring it against its own colour would ask how much of a blend a
+## blend is and answer "all of it". A step inward gets past the contamination.
+##
+## The direction comes from the alpha around the pixel: every neighbour pulls
+## towards itself in proportion to how opaque it is, so the sum points the way the
+## shape lies. Walking it stops at the first pixel that is not solid, so a step can
+## never cross a gap and come back with a colour from the far side.
+func _restore_subject(coverage: PackedFloat32Array, x: int, y: int, width: int, height: int) -> int:
+	var dx := 0.0
+	var dy := 0.0
+	for oy in [-1, 0, 1]:
+		for ox in [-1, 0, 1]:
+			if ox == 0 and oy == 0:
+				continue
+			var nx: int = x + ox
+			var ny: int = y + oy
+			if nx < 0 or ny < 0 or nx >= width or ny >= height:
+				continue
+			var weight := coverage[ny * width + nx]
+			dx += ox * weight
+			dy += oy * weight
+
+	var length := sqrt(dx * dx + dy * dy)
+	if length <= _EPSILON:
+		return -1
+	dx /= length
+	dy /= length
+
+	var found := -1
+	for step in range(1, _RESTORE_INWARD_MAX + 1):
+		var sx := x + roundi(dx * step)
+		var sy := y + roundi(dy * step)
+		if sx < 0 or sy < 0 or sx >= width or sy >= height:
+			break
+		var candidate := sy * width + sx
+		if coverage[candidate] < _RESTORE_SOLID:
+			break
+		found = candidate
+	return found
+
+
+## How strongly the stroke colour is laid over each pixel, or an empty array when
+## there is no stroke to draw.
+##
+## An [i]inside[/i] stroke: it runs within the silhouette of everything visible
+## and never extends it, so it follows the holes in a shape as well as its outer
+## contour and leaves the alpha channel alone. What it needs is a distance from
+## each visible pixel to the nearest place there is nothing.
+##
+## [b]Distance by grassfire.[/b] Seeded from every pixel that ends up fully
+## transparent and grown outwards, each pixel keeping the [i]index of the seed[/i]
+## that reached it rather than the number of steps taken. Measuring back to that
+## stored seed gives a real Euclidean distance; counting steps would give a
+## Manhattan staircase, and a stroke drawn from one would come out visibly
+## diamond-shaped on a curve. Same trick [method _nearest_subject_map] uses.
+##
+## [b]The canvas edge counts as outside.[/b] Rather than seeding the border, every
+## pixel also measures its distance to just past the frame and takes whichever is
+## nearer — one comparison, no extra seeds, and a shape running off the edge is
+## stroked along it like any other contour.
+##
+## The falloff is linear over the last pixel, which is what makes the stroke
+## antialiased and fractional widths worth having.
+##
+## [param alpha] is the alpha the image actually ends up with, 0 to 1 — not the
+## coverage, which is only half of it, since [method _compose] multiplies coverage
+## by the alpha the source arrived with.
+func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedFloat32Array:
+	var empty := PackedFloat32Array()
+	if not _wants_stroke():
+		return empty
+	var stroke_width := settings.stroke_width
+	var strength := settings.stroke_color.a
+
+	var pixel_count := width * height
+	var source := PackedInt32Array()
+	source.resize(pixel_count)
+	source.fill(-1)
+	var steps := PackedInt32Array()
+	steps.resize(pixel_count)
+	var queue := PackedInt32Array()
+	queue.resize(pixel_count)
+	var head := 0
+	var tail := 0
+
+	for i in pixel_count:
+		if alpha[i] <= 0.0:
+			source[i] = i
+			queue[tail] = i
+			tail += 1
+
+	# One further than the widest the stroke can be, so the falloff has a real
+	# distance to work from rather than running out mid-fade.
+	var reach := ceili(stroke_width) + 1
+	while head < tail:
+		var index := queue[head]
+		head += 1
+		var step := steps[index] + 1
+		if step > reach:
+			continue
+		var seed_index := source[index]
+		var x := index % width
+		@warning_ignore("integer_division")
+		var y := index / width
+		if x > 0 and source[index - 1] == -1:
+			source[index - 1] = seed_index
+			steps[index - 1] = step
+			queue[tail] = index - 1
+			tail += 1
+		if x < width - 1 and source[index + 1] == -1:
+			source[index + 1] = seed_index
+			steps[index + 1] = step
+			queue[tail] = index + 1
+			tail += 1
+		if y > 0 and source[index - width] == -1:
+			source[index - width] = seed_index
+			steps[index - width] = step
+			queue[tail] = index - width
+			tail += 1
+		if y < height - 1 and source[index + width] == -1:
+			source[index + width] = seed_index
+			steps[index + width] = step
+			queue[tail] = index + width
+			tail += 1
+
+	var mask := PackedFloat32Array()
+	mask.resize(pixel_count)
+	var painted := false
+	for i in pixel_count:
+		# A seed is outside by definition. Its raw distance is zero, which would
+		# come out as full stroke and paint over the colour bleed.
+		if alpha[i] <= 0.0:
+			continue
+		var x := i % width
+		@warning_ignore("integer_division")
+		var y := i / width
+
+		# Just past the frame, so a pixel on the border sits one away from outside.
+		var distance := float(mini(mini(x, y), mini(width - 1 - x, height - 1 - y)) + 1)
+		var seed_index := source[i]
+		if seed_index >= 0:
+			var sx := seed_index % width
+			@warning_ignore("integer_division")
+			var sy := seed_index / width
+			distance = minf(distance, sqrt(float((x - sx) * (x - sx) + (y - sy) * (y - sy))))
+
+		var band := clampf(stroke_width - distance + 1.0, 0.0, 1.0)
+		if band <= 0.0:
+			continue
+		mask[i] = band * strength
+		painted = true
+
+	return mask if painted else empty
+
+
 ## Writes the final image: alpha from [param coverage], colour un-blended and
 ## bled outwards as needed.
-func _compose(data: PackedByteArray, coverage: PackedFloat32Array, key_of: PackedInt32Array, nearest: PackedInt32Array, width: int, height: int) -> Image:
+func _compose(data: PackedByteArray, coverage: PackedFloat32Array, key_of: PackedInt32Array, nearest: PackedInt32Array, stroke: PackedFloat32Array, width: int, height: int) -> Image:
 	var bleed_radius := settings.bleed_radius
 	var decontaminate := settings.decontaminate
+	var stroke_color := settings.stroke_color
+	var has_stroke := not stroke.is_empty()
 	# Stand-in for a pixel no flood ever claimed. Only reachable once refinement
 	# or the alpha clip has pulled a subject pixel below full coverage, since
 	# nothing else leaves an unclaimed pixel needing to be un-blended.
@@ -778,6 +1129,18 @@ func _compose(data: PackedByteArray, coverage: PackedFloat32Array, key_of: Packe
 				r = pure_r
 				g = pure_g
 				b = pure_b
+
+		# Last, and on the colour only. Everything above is still working out what
+		# the subject's own colour was; the stroke is paint going on top of the
+		# answer, and it must not be un-blended or bled as if it were part of the
+		# image. Alpha is untouched — an inside stroke draws on the silhouette
+		# rather than adding to it.
+		if has_stroke:
+			var over := stroke[i]
+			if over > 0.0:
+				r = lerpf(r, stroke_color.r, over)
+				g = lerpf(g, stroke_color.g, over)
+				b = lerpf(b, stroke_color.b, over)
 
 		out[offset] = roundi(clampf(r, 0.0, 1.0) * 255.0)
 		out[offset + 1] = roundi(clampf(g, 0.0, 1.0) * 255.0)

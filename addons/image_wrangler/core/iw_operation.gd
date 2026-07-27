@@ -22,6 +22,8 @@ enum SettingType {
 	## A fixed choice. The entry must carry an [code]options[/code] key listing
 	## the labels; the property holds the chosen index.
 	ENUM,
+	## A single colour, alpha included. The property must hold a [Color].
+	COLOR,
 	## A list of image positions the user picks off the preview, each standing
 	## for a region to act on. The property must hold an [IslandList].
 	ISLAND_PICKER,

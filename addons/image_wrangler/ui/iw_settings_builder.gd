@@ -72,6 +72,8 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 				control = _build_string(operation, property, label, on_changed)
 			IWOperation.SettingType.ENUM:
 				control = _build_enum(operation, property, label, setting, on_changed)
+			IWOperation.SettingType.COLOR:
+				control = _build_color(operation, property, label, on_changed)
 			IWOperation.SettingType.ISLAND_PICKER:
 				control = _build_island_picker(operation, property)
 			IWOperation.SettingType.COLOR_LIST:
@@ -241,6 +243,29 @@ static func _build_enum(operation: IWOperation, property: StringName, label: Str
 	return _labelled_row(label, choice)
 
 
+## A colour swatch, alpha included.
+##
+## [ColorPickerButton] has no no-signal setter, so [method refresh_values] writing
+## to it fires this handler for a change nobody made. That is why the dock keeps a
+## refreshing flag — [code]on_changed[/code] resolves to a handler that early-
+## returns on it, and this control is the reason that flag exists at all.
+static func _build_color(operation: IWOperation, property: StringName, label: String, on_changed: Callable) -> Control:
+	var swatch := ColorPickerButton.new()
+	swatch.edit_alpha = true
+	swatch.custom_minimum_size = Vector2(0, 24)
+	swatch.color = operation.get_settings().get(property)
+	swatch.set_meta(META_PROPERTY, property)
+	swatch.color_changed.connect(
+		func(value: Color) -> void:
+			var settings := operation.get_settings()
+			if settings == null:
+				return
+			settings.set(property, value)
+			on_changed.call()
+	)
+	return _labelled_row(label, swatch)
+
+
 static func _build_bool(operation: IWOperation, property: StringName, label: String, on_changed: Callable) -> Control:
 	var check := CheckBox.new()
 	check.text = label
@@ -280,7 +305,8 @@ static func _build_number(operation: IWOperation, property: StringName, label: S
 
 
 ## Pushes the operation's current settings into the controls [method build]
-## created, without firing their change signals.
+## created, without firing their change signals — with one exception noted in
+## [method _build_color], which has no way to be set quietly.
 ##
 ## Used when the settings Resource behind the form is swapped for another image.
 ## Rebuilding instead would work, but it would destroy the list controls — losing
@@ -313,6 +339,10 @@ static func _refresh_into(settings: Resource, node: Node) -> void:
 					choice.select(index)
 			elif child is LineEdit:
 				(child as LineEdit).text = String(value)
+			elif child is ColorPickerButton:
+				# The one control here that cannot be set quietly; see
+				# _build_color for why that turns out to be harmless.
+				(child as ColorPickerButton).color = value
 			elif child is IslandPicker:
 				(child as IslandPicker).refresh()
 			elif child is ColorList:
