@@ -154,6 +154,11 @@ func get_key_color_property() -> StringName:
 ## Every named group folds. Put [code]collapsed[/code] on the entry that opens
 ## one and it starts folded away — worth doing for anything but the group the
 ## user reaches for first, since a form of open groups is taller than the dock.
+##
+## [code]hidden_when[/code] names a [bool] property; the entry disappears from the
+## form while that property is true. For a setting the other one replaces outright
+## — a colour picked by hand against one worked out from the image — showing both
+## would mean showing one that does nothing.
 func get_settings_schema() -> Array[Dictionary]:
 	return []
 

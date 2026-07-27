@@ -1129,6 +1129,9 @@ func _update_overlays() -> void:
 func _on_setting_changed() -> void:
 	if _refreshing:
 		return
+	# A setting can be the switch that hides another one, and nothing but this
+	# would notice it had been thrown.
+	SettingsBuilder.refresh_visibility(_operation, _settings_box)
 	_schedule_autosave()
 	if _auto_preview_allowed():
 		_schedule_preview()

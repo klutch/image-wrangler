@@ -21,6 +21,10 @@ const LABEL_WIDTH := 92
 ## it again without the builder having to keep a registry.
 const META_PROPERTY := &"iw_property"
 
+## Marks a control with the bool property that hides it, for the same reason and
+## in the same way.
+const META_HIDDEN_WHEN := &"iw_hidden_when"
+
 
 ## Replaces the contents of [param container] with controls for every setting
 ## [param operation] declares. [param on_changed] is called after each edit.
@@ -85,8 +89,15 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 
 		if not control.has_meta(META_PROPERTY):
 			control.set_meta(META_PROPERTY, property)
+		# On the outermost control the entry produced, so hiding it takes the whole
+		# row — a label with nothing beside it would be worse than showing both.
+		var hidden_when: StringName = setting.get("hidden_when", &"")
+		if hidden_when != &"":
+			control.set_meta(META_HIDDEN_WHEN, hidden_when)
 		control.tooltip_text = tooltip
 		target.add_child(control)
+
+	refresh_visibility(operation, container)
 
 
 ## Opens a heading in [param container] and returns the box its members go into,
@@ -318,6 +329,28 @@ static func refresh_values(operation: IWOperation, container: Node) -> void:
 	if settings == null:
 		return
 	_refresh_into(settings, container)
+	refresh_visibility(operation, container)
+
+
+## Shows or hides the controls whose schema entry named a [code]hidden_when[/code]
+## property, against what that property now says.
+##
+## Separate from [method refresh_values] because it also has to run after an
+## ordinary edit: ticking the box that hides a control is itself just a settings
+## change, and nothing else would notice.
+static func refresh_visibility(operation: IWOperation, container: Node) -> void:
+	var settings := operation.get_settings()
+	if settings == null:
+		return
+	_visibility_into(settings, container)
+
+
+static func _visibility_into(settings: Resource, node: Node) -> void:
+	for child in node.get_children():
+		if child is Control and child.has_meta(META_HIDDEN_WHEN):
+			var gate: StringName = child.get_meta(META_HIDDEN_WHEN)
+			(child as Control).visible = not bool(settings.get(gate))
+		_visibility_into(settings, child)
 
 
 static func _refresh_into(settings: Resource, node: Node) -> void:

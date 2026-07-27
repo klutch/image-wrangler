@@ -176,6 +176,28 @@ const _RESTORE_CLEAR := 0.005
 ## boundary — which is the contaminated pixel being stepped past.
 const _RESTORE_INWARD_MAX := 2
 
+## How the automatic stroke colour is derived from what it runs alongside.
+##
+## A line is a darker, more saturated relative of the fill it borders — that is
+## how it is picked by hand, and it is why the sampled colour cannot be used as
+## it is: paint a colour over itself and there is nothing to see.
+##
+## Proportional rather than a fixed target, and with no threshold anywhere: a rule
+## that switched from darkening to lightening below some luminance would flip the
+## outline mid-stroke wherever a subject crossed it, which is worse than an outline
+## that is merely subtle on something already dark.
+const _AUTO_STROKE_DARKEN := 0.35
+const _AUTO_STROKE_SATURATION := 1.3
+
+## Blur radius for the sample, as a multiple of the stroke's own width and never
+## below a few pixels.
+##
+## Wide on purpose. The question is "what colour is the subject around here", and
+## a tight blur answers "what colour is this pixel" — which on any texture is
+## noise, and would give a stroke that changed colour along its own length.
+const _AUTO_STROKE_BLUR_SCALE := 4.0
+const _AUTO_STROKE_BLUR_MIN := 6
+
 ## Feather on the stroke's inner edge at full softness, in pixels.
 ##
 ## Two, so that the middle of the slider lands on a one-pixel falloff — the width
@@ -424,9 +446,17 @@ func get_settings_schema() -> Array[Dictionary]:
 			"tooltip": "How soft the stroke's inner edge is. 0 is a hard step with no antialiasing\nat all; 0.5 falls off over one pixel, which is what a real antialiased edge\ndoes; 1 is the softest.\n\nOnly the inner edge. The outer one is the silhouette itself, and its\nsoftness comes from the image's own alpha — feathering that would let the\nstroke bleed past the shape, which is the one thing an inside stroke must\nnot do.\n\nA wide feather on a narrow stroke spreads it past its own width, since the\nfalloff is centred on the edge rather than tucked inside it.",
 		},
 		{
+			"property": &"auto_stroke_color",
+			"label": "Auto Stroke Color",
+			"group": "Edge Cleanup",
+			"type": SettingType.BOOL,
+			"tooltip": "Takes the stroke color from the image instead of picking one.\n\nEach stroke pixel samples a heavily blurred copy of the subject nearby and\nthen darkens it, so a green stem gets a dark green outline and a red petal\na deep red one — the way an illustrator picks a line color against a fill,\nrather than one flat color fighting everything it runs alongside.\n\nThe blur is weighted by alpha, so only real subject pixels count towards it.\nAn unweighted one would average in the empty space just outside the edge,\nwhich is exactly where every stroke pixel sits.\n\nDrawn at full strength. For a stroke that only tints, turn this off and pick\na color with some transparency.",
+		},
+		{
 			"property": &"stroke_color",
 			"label": "Stroke Color",
 			"group": "Edge Cleanup",
+			"hidden_when": &"auto_stroke_color",
 			"type": SettingType.COLOR,
 			"tooltip": "Color of the inside stroke. Its alpha is how strongly it is laid over what\nis already there, not how transparent the result becomes — at half alpha\nthe stroke tints the art beneath it rather than covering it.",
 		},
@@ -585,10 +615,12 @@ func process_image(source: Image) -> Image:
 
 	# Last of all, so the stroke follows the silhouette that actually comes out —
 	# drawn regions and all — rather than the one the keyer alone would have given.
-	var stroke := _stroke_mask(_final_alpha(data, coverage, pixel_count), width, height)
+	var final_alpha := _final_alpha(data, coverage, pixel_count)
+	var stroke := _stroke_mask(final_alpha, width, height)
+	var stroke_colors := _auto_stroke_colors(data, final_alpha, stroke, width, height)
 	report_progress(0.92)
 
-	var composed := _compose(data, coverage, key_of, nearest, stroke, width, height)
+	var composed := _compose(data, coverage, key_of, nearest, stroke, stroke_colors, width, height)
 	report_progress(1.0)
 	return composed
 
@@ -603,11 +635,22 @@ func _edge_cleanup_enabled() -> bool:
 	return settings.edge_cleanup
 
 
-## Whether a stroke would actually put paint down. Zero width or a fully
-## transparent colour both mean no, and neither is worth a pass over the image to
-## find out.
+## Whether a stroke would actually put paint down. Zero width means no, and so
+## does a fully transparent colour — but only when the colour is the one being
+## used: an automatic stroke takes its colour from the image and never sees the
+## picker, whose alpha would otherwise be a hidden switch for a hidden control.
 func _wants_stroke() -> bool:
-	return _edge_cleanup_enabled() and settings.stroke_width > 0.0 and settings.stroke_color.a > 0.0
+	if not _edge_cleanup_enabled() or settings.stroke_width <= 0.0:
+		return false
+	return settings.auto_stroke_color or settings.stroke_color.a > 0.0
+
+
+## How strongly the stroke is laid over what is under it.
+##
+## Full for an automatic colour, since its picker is hidden and there would be no
+## way to have set anything else.
+func _stroke_strength() -> float:
+	return 1.0 if settings.auto_stroke_color else settings.stroke_color.a
 
 
 ## The alpha the image ends up with, 0 to 1, which is the source's own multiplied
@@ -819,14 +862,20 @@ func _regions_only(image: Image, data: PackedByteArray, blacked: PackedByteArray
 	var stroke := _stroke_mask(alpha, width, height)
 	if not stroke.is_empty():
 		var stroke_color := settings.stroke_color
+		var stroke_colors := _auto_stroke_colors(data, alpha, stroke, width, height)
+		var auto_colors := not stroke_colors.is_empty()
 		for i in pixel_count:
 			var over := stroke[i]
 			if over <= 0.0:
 				continue
 			var offset := i * 4
-			out[offset] = roundi(clampf(lerpf(out[offset] * to_unit, stroke_color.r, over), 0.0, 1.0) * 255.0)
-			out[offset + 1] = roundi(clampf(lerpf(out[offset + 1] * to_unit, stroke_color.g, over), 0.0, 1.0) * 255.0)
-			out[offset + 2] = roundi(clampf(lerpf(out[offset + 2] * to_unit, stroke_color.b, over), 0.0, 1.0) * 255.0)
+			var target := stroke_color
+			if auto_colors:
+				var slot := i * 3
+				target = Color(stroke_colors[slot], stroke_colors[slot + 1], stroke_colors[slot + 2])
+			out[offset] = roundi(clampf(lerpf(out[offset] * to_unit, target.r, over), 0.0, 1.0) * 255.0)
+			out[offset + 1] = roundi(clampf(lerpf(out[offset + 1] * to_unit, target.g, over), 0.0, 1.0) * 255.0)
+			out[offset + 2] = roundi(clampf(lerpf(out[offset + 2] * to_unit, target.b, over), 0.0, 1.0) * 255.0)
 
 	return Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, out)
 
@@ -1074,7 +1123,7 @@ func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedF
 	if not _wants_stroke():
 		return empty
 	var stroke_width := settings.stroke_width
-	var strength := settings.stroke_color.a
+	var strength := _stroke_strength()
 	var feather := clampf(settings.stroke_softness, 0.0, 1.0) * _STROKE_MAX_FEATHER
 
 	var pixel_count := width * height
@@ -1183,13 +1232,84 @@ func _stroke_mask(alpha: PackedFloat32Array, width: int, height: int) -> PackedF
 	return mask if painted else empty
 
 
+## A stroke colour per pixel, taken from the image, or an empty array when the
+## colour is being picked by hand instead.
+##
+## Three floats per pixel, filled only where [param stroke] actually paints. The
+## rest is left at zero and never read.
+##
+## [b]Sampled from an alpha-weighted blur.[/b] Each channel is blurred premultiplied
+## by alpha and divided by a blur of the alpha itself, so the average is over
+## subject only. That weighting is the whole trick: a plain blur, sampled at the
+## silhouette edge where every stroke pixel sits, would average in the empty space
+## just outside it and drag every stroke towards whatever the bleed left there.
+##
+## [b]Then darkened.[/b] The sampled colour cannot be used as it is — painting a
+## colour over itself shows nothing. What reads as a line is a darker, more
+## saturated relative of the fill it borders, which is what
+## [constant _AUTO_STROKE_DARKEN] and [constant _AUTO_STROKE_SATURATION] make of it.
+func _auto_stroke_colors(data: PackedByteArray, alpha: PackedFloat32Array, stroke: PackedFloat32Array, width: int, height: int) -> PackedFloat32Array:
+	var empty := PackedFloat32Array()
+	if not settings.auto_stroke_color or stroke.is_empty():
+		return empty
+
+	var pixel_count := width * height
+	var premul_r := PackedFloat32Array()
+	var premul_g := PackedFloat32Array()
+	var premul_b := PackedFloat32Array()
+	var weight := PackedFloat32Array()
+	premul_r.resize(pixel_count)
+	premul_g.resize(pixel_count)
+	premul_b.resize(pixel_count)
+	weight.resize(pixel_count)
+
+	var to_unit := 1.0 / 255.0
+	for i in pixel_count:
+		var offset := i * 4
+		var a := alpha[i]
+		premul_r[i] = data[offset] * to_unit * a
+		premul_g[i] = data[offset + 1] * to_unit * a
+		premul_b[i] = data[offset + 2] * to_unit * a
+		weight[i] = a
+
+	var radius := maxi(ceili(settings.stroke_width * _AUTO_STROKE_BLUR_SCALE), _AUTO_STROKE_BLUR_MIN)
+	premul_r = _box_mean(premul_r, width, height, radius)
+	premul_g = _box_mean(premul_g, width, height, radius)
+	premul_b = _box_mean(premul_b, width, height, radius)
+	weight = _box_mean(weight, width, height, radius)
+
+	var colors := PackedFloat32Array()
+	colors.resize(pixel_count * 3)
+	for i in pixel_count:
+		if stroke[i] <= 0.0:
+			continue
+		var w := weight[i]
+		# No subject within the whole blur radius, which for a stroke pixel means
+		# something has gone strange. Nothing to sample, so leave it black.
+		if w <= _EPSILON:
+			continue
+		var sampled := Color(premul_r[i] / w, premul_g[i] / w, premul_b[i] / w)
+		var line := Color.from_hsv(
+			sampled.h,
+			minf(sampled.s * _AUTO_STROKE_SATURATION, 1.0),
+			clampf(sampled.v * _AUTO_STROKE_DARKEN, 0.0, 1.0),
+		)
+		var slot := i * 3
+		colors[slot] = line.r
+		colors[slot + 1] = line.g
+		colors[slot + 2] = line.b
+
+	return colors
+
+
 ## Writes the final image: alpha from [param coverage], colour un-blended and
 ## bled outwards as needed.
-func _compose(data: PackedByteArray, coverage: PackedFloat32Array, key_of: PackedInt32Array, nearest: PackedInt32Array, stroke: PackedFloat32Array, width: int, height: int) -> Image:
+func _compose(data: PackedByteArray, coverage: PackedFloat32Array, key_of: PackedInt32Array, nearest: PackedInt32Array, stroke: PackedFloat32Array, stroke_colors: PackedFloat32Array, width: int, height: int) -> Image:
 	var bleed_radius := settings.bleed_radius
 	var decontaminate := settings.decontaminate
 	var stroke_color := settings.stroke_color
 	var has_stroke := not stroke.is_empty()
+	var auto_colors := not stroke_colors.is_empty()
 	# Stand-in for a pixel no flood ever claimed. Only reachable once refinement
 	# or the alpha clip has pulled a subject pixel below full coverage, since
 	# nothing else leaves an unclaimed pixel needing to be un-blended.
@@ -1244,9 +1364,15 @@ func _compose(data: PackedByteArray, coverage: PackedFloat32Array, key_of: Packe
 		if has_stroke:
 			var over := stroke[i]
 			if over > 0.0:
-				r = lerpf(r, stroke_color.r, over)
-				g = lerpf(g, stroke_color.g, over)
-				b = lerpf(b, stroke_color.b, over)
+				if auto_colors:
+					var slot := i * 3
+					r = lerpf(r, stroke_colors[slot], over)
+					g = lerpf(g, stroke_colors[slot + 1], over)
+					b = lerpf(b, stroke_colors[slot + 2], over)
+				else:
+					r = lerpf(r, stroke_color.r, over)
+					g = lerpf(g, stroke_color.g, over)
+					b = lerpf(b, stroke_color.b, over)
 
 		out[offset] = roundi(clampf(r, 0.0, 1.0) * 255.0)
 		out[offset + 1] = roundi(clampf(g, 0.0, 1.0) * 255.0)

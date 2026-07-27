@@ -126,7 +126,15 @@ extends Resource
 ## past the shape, which is the one thing an inside stroke must not do.
 @export var stroke_softness: float = 0.75
 
-## Colour of the inside stroke, alpha included.
+## Take the stroke colour from the image rather than from [member stroke_color].
+##
+## Sampled per pixel from a heavily blurred, alpha-weighted copy of the subject
+## and then darkened, so the stroke is a darker relative of whatever it is running
+## alongside. See [method RemoveBackground._auto_stroke_colors].
+@export var auto_stroke_color: bool = false
+
+## Colour of the inside stroke, alpha included. Ignored while
+## [member auto_stroke_color] is on.
 ##
 ## The alpha is how strongly it is laid over what is already there rather than
 ## how transparent the result is — a stroke at half alpha tints the art beneath

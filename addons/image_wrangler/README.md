@@ -134,6 +134,7 @@ working on rather than about the image.
 | Edge Cleanup → Enabled | on | Restores the antialiasing on edges that ended up hard, and switches the stroke on. See below. |
 | Edge Cleanup → Stroke Width | 0.0 (off) | Width of the inside stroke in pixels, antialiased. See below. |
 | Edge Cleanup → Stroke Softness | 0.75 | How soft the stroke's inner edge is. 0 is a hard step, 0.5 a one-pixel falloff, 1 the softest. |
+| Edge Cleanup → Auto Stroke Color | off | Takes the stroke colour from the image instead of picking one. Hides the picker. See below. |
 | Edge Cleanup → Stroke Color | opaque black | Colour of the inside stroke. Its alpha is blend strength, not result transparency. |
 
 ### Remove Colors
@@ -353,6 +354,35 @@ half-transparent. It is applied last of all, on the colour only, after the
 un-blending and the colour bleed have finished working out what the subject's own
 colour was — the stroke is paint going on top of that answer, not part of the
 image to be recovered.
+
+**Auto Stroke Color** takes the colour from the image instead, per pixel, and
+hides the picker. A green stem gets a dark green outline and a red petal a deep
+red one, rather than one flat colour fighting everything it runs alongside.
+
+Two things make it work, and neither is optional:
+
+- **The blur is weighted by alpha.** Each channel is blurred premultiplied by
+  alpha and divided by a blur of the alpha itself, so only real subject pixels
+  count. An unweighted blur would average in the empty space just outside the
+  edge — which is exactly where every stroke pixel sits, so every stroke would
+  drift towards whatever the colour bleed left out there.
+- **The sample is darkened before use.** Painting a colour over itself shows
+  nothing. What reads as a line is a darker, more saturated relative of the fill
+  it borders, which is how one is picked by hand.
+
+The darkening is proportional, with no threshold anywhere. A rule that switched
+from darkening to lightening below some luminance would flip the outline mid-
+stroke wherever a subject crossed that line, which is worse than an outline that
+is merely subtle on something already dark.
+
+The blur radius is four times the stroke width, and at least six pixels. Wide on
+purpose: the question is "what colour is the subject around here", and a tight
+blur answers "what colour is this pixel" — noise on any texture, and a stroke
+that changed colour along its own length.
+
+An automatic stroke is drawn at full strength, since its picker is hidden and
+there would be no way to have set anything else. For a stroke that only tints,
+turn this off and pick a colour with some transparency.
 
 Where a subject runs off the edge of the canvas, **the frame counts as outside**
 and the stroke follows it. The stroke also follows Polygon Edit cuts, since it is
@@ -709,6 +739,10 @@ give the preview-driven lists described above, for an `IslandList`, a
 consecutive entries a matching `"group"` and they are boxed under a heading of
 that name; every named group folds, and `"collapsed": true` on the entry that
 opens one starts it folded away.
+
+`"hidden_when": &"some_bool_property"` takes an entry out of the form while that
+property is true — for a setting another one replaces outright, where showing
+both would mean showing one that does nothing.
 
 Override `get_key_color_property()` to return the name of a `Color` property and
 the dock gives it a swatch under the operation dropdown instead of a row in the
