@@ -14,10 +14,14 @@ extends VBoxContainer
 
 const StackEntry := preload("res://addons/image_wrangler/ui/iw_stack_entry.gd")
 
-## Room around the column of entries, and between one entry and the next.
+## Room above and below the column of entries, and between one entry and the next.
 ##
-## The gap is what makes the drop indicator legible: a line drawn on the edge of an
-## entry needs somewhere to be that is not already the next entry's edge.
+## Vertical only. The entries take the full width of the column, which is narrow
+## enough already — insetting them would cost the settings inside them room they need
+## more than the card needs a gutter.
+##
+## The gap between them is what makes the drop indicator legible: a line drawn on the
+## edge of an entry needs somewhere to be that is not already the next entry's edge.
 const ENTRY_MARGIN := 4
 const ENTRY_GAP := 4
 
@@ -71,11 +75,11 @@ func _build() -> void:
 	create.pressed.connect(_on_create)
 	add_row.add_child(create)
 
-	# The entries are cards standing off the panel, so they need room around them to
-	# read as separate things rather than as one block with lines in it.
+	# The entries are cards standing off the panel, so they need room above and below
+	# to read as separate things rather than as one block with lines in it.
 	var inset := MarginContainer.new()
 	inset.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+	for side in ["margin_top", "margin_bottom"]:
 		inset.add_theme_constant_override(side, ENTRY_MARGIN)
 	add_child(inset)
 
