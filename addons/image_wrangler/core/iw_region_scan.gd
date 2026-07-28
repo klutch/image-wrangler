@@ -15,6 +15,14 @@ extends RefCounted
 ## write twice.
 
 
+## How much of a pixel has to survive the stack before its colour is worth sampling.
+##
+## Fully, and not a threshold. Anything short of solid is a pixel some pass has already
+## decided is partly background, and its colour is the blend that decision was made
+## about — so there is no amount of "mostly there" that makes it a background colour.
+const SOLID_ALPHA := 1.0
+
+
 ## Positions along one axis: [param start], then every [param step] pixels, then the
 ## far end of the run whether or not the stride landed on it.
 ##
@@ -67,10 +75,27 @@ static func stride_for(region: Rect2i, budget: int) -> int:
 ## would be one rule written twice; and a pixel that arrived fully transparent is
 ## already removed and has no colour worth listing.
 ##
+## [b][param remaining] is what the stack has left of the image, and only the pixels it
+## still shows as solid are sampled.[/b] The colour itself must come from [param image]
+## and not from there — every stage keys against the source pixels, so a colour taken
+## from the result would be a rule matching nothing. But which pixels are worth asking
+## about is a question only the result can answer.
+##
+## That matters as soon as anything has been removed. Sweeping a green stem after the
+## white plate has gone reads a rectangle that is mostly plate in the source: the
+## colours come back white, which is what was already dealt with. Worse are the pixels
+## between — a half-removed edge is a [i]blend[/i] of the thing removed and the thing
+## kept, and listing a blend as a background colour keys out half-covered pixels
+## everywhere in the image rather than any background at all. Solid or nothing.
+##
+## Pass [code]null[/code] to sample regardless, which is what a run with no result yet
+## gets.
+##
 ## No more than [param budget] pixels are read, on an even stride past that. What the
 ## stride can miss is a colour occupying fewer pixels than the stride is wide, which
 ## is a colour a tolerance would have had to swallow anyway.
-static func colors_in(image: Image, region: Rect2i, budget: int) -> PackedColorArray:
+static func colors_in(
+		image: Image, region: Rect2i, budget: int, remaining: Image = null) -> PackedColorArray:
 	var out := PackedColorArray()
 	if image == null or image.is_empty():
 		return out
@@ -78,6 +103,12 @@ static func colors_in(image: Image, region: Rect2i, budget: int) -> PackedColorA
 	var box := region.intersection(frame)
 	if box.size.x <= 0 or box.size.y <= 0:
 		return out
+
+	# Only when it describes this image. A result of another size belongs to another
+	# picture, and masking one image by another's alpha would be worse than not masking.
+	var masked := remaining != null and not remaining.is_empty() \
+			and remaining.get_width() == image.get_width() \
+			and remaining.get_height() == image.get_height()
 
 	var step := stride_for(box, budget)
 	var xs := stops(box.position.x, box.size.x, step)
@@ -88,6 +119,8 @@ static func colors_in(image: Image, region: Rect2i, budget: int) -> PackedColorA
 	var counts := {}
 	for y in ys:
 		for x in xs:
+			if masked and remaining.get_pixel(x, y).a < SOLID_ALPHA:
+				continue
 			var pixel := image.get_pixel(x, y)
 			if pixel.a <= 0.0:
 				continue

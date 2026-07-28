@@ -1275,7 +1275,12 @@ func _pick_island_region(region: Rect2i) -> void:
 ## belongs to the dock, and a settings control that could reach it would be a control
 ## that has to be told which image it is looking at.
 func _pick_color_region(region: Rect2i) -> void:
-	var colors := IWRegionScan.colors_in(_source_image, region, RemoveColorList.SCAN_BUDGET)
+	# The colour comes from the source, because that is what the keyer measures against.
+	# What the stack has left of the image only says which pixels are still worth
+	# asking about — see [method IWRegionScan.colors_in]. Null before the first run,
+	# which samples everything, as it did before anything had been removed.
+	var colors := IWRegionScan.colors_in(
+			_source_image, region, RemoveColorList.SCAN_BUDGET, _result_image)
 	var added := (_pick_target as ColorList).add_region(colors, region)
 	if added <= 0:
 		return

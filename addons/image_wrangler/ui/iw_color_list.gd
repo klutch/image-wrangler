@@ -226,7 +226,10 @@ func add_region(colors: PackedColorArray, region: Rect2i) -> int:
 	if list == null:
 		return 0
 	if colors.is_empty():
-		_set_hint("Nothing there to take: that region is fully transparent.")
+		# Either it was transparent to begin with, or the stack above has already taken
+		# everything under it. Both mean the same thing to the user — there is nothing
+		# left there to key out — and neither is worth two messages.
+		_set_hint("Nothing there to take: no pixel under that region is still solid.")
 		return 0
 
 	var entry := list.add_region(colors)
