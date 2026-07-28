@@ -122,6 +122,16 @@ var _preview_thread: Thread
 ## means whatever comes back from that run is out of date.
 var _preview_pending := false
 
+## Set while the dock is leaving the tree, and checked by everything a run reports
+## back through.
+##
+## A worker reports by deferral, so its calls can still be sitting in the message queue
+## when the dock is pulled out from under them. The queue drops a call whose object has
+## been freed, but between leaving the tree and being freed the dock is still a valid
+## object holding controls that are on their way out — and that is the window these
+## guards close.
+var _shutting_down := false
+
 ## The operation the worker is running, kept so it can be told to stop.
 ##
 ## A run that has been superseded is producing an answer nobody will look at, so
@@ -231,6 +241,12 @@ var _removal_dialog: ConfirmationDialog
 var _pending_removals: Dictionary = {}
 
 
+func _enter_tree() -> void:
+	# Cleared rather than assumed false: the dock can be taken out of the tree and put
+	# back, and the flag would otherwise survive as a permanent mute.
+	_shutting_down = false
+
+
 func _ready() -> void:
 	# Only a floor, so the splitters between the columns stay freely draggable.
 	custom_minimum_size = Vector2(0, 240)
@@ -293,6 +309,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 ## letting the editor tear down a node a live thread is about to call back into.
 ## The wait is bounded by whatever one image takes.
 func _exit_tree() -> void:
+	# Before anything else: the join below pumps no messages, but a worker that
+	# finishes during it will have queued its report by the time this returns.
+	_shutting_down = true
 	_flush_autosave()
 	_preview_pending = false
 	# Asked to stop before being waited on, so the wait is however long the current
@@ -1387,7 +1406,7 @@ func _on_original_fade_changed(value: float) -> void:
 ## collects it starts the replacement.
 func _run_preview() -> void:
 	_debounce.stop()
-	if _source_image == null or _mode == Mode.RENAME:
+	if _shutting_down or _source_image == null or _mode == Mode.RENAME:
 		return
 	if _preview_thread != null:
 		_preview_pending = true
@@ -1401,6 +1420,8 @@ func _run_preview() -> void:
 ## state.
 func _start_preview() -> void:
 	_preview_pending = false
+	if _shutting_down:
+		return
 	var worker := _snapshot_operation()
 	if worker == null:
 		return
@@ -1437,6 +1458,8 @@ func _preview_worker(worker: IWOperation, source: Image) -> void:
 
 
 func _on_preview_progress(fraction: float) -> void:
+	if _shutting_down or not is_instance_valid(_preview):
+		return
 	_preview.set_progress(fraction)
 
 
@@ -1445,11 +1468,17 @@ func _on_preview_progress(fraction: float) -> void:
 ## The position is in the label rather than only the name, because a stack may hold
 ## the same operation twice and "Polygon Edit" on its own would not say which.
 func _on_preview_stage_progress(index: int, count: int, fraction: float, stage_name: String) -> void:
+	if _shutting_down or not is_instance_valid(_preview):
+		return
 	_preview.set_stage_progress(fraction, "%s  (%d/%d)" % [stage_name, index + 1, count])
 
 
 ## Takes delivery of a finished run, back on the main thread.
 func _on_preview_done(source: Image, result: Image, elapsed: int) -> void:
+	# The dock is on its way out and [method _exit_tree] has already joined the thread
+	# and let go of it. Nothing below has anywhere to put an answer.
+	if _shutting_down:
+		return
 	if _preview_thread != null:
 		# Returns at once — the worker is already done, this is the bookkeeping
 		# Thread insists on before it can be let go.
