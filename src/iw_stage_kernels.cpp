@@ -57,6 +57,10 @@ void IWStageKernels::_bind_methods() {
 	// third-party header; bound here so every entry point is in one list.
 	ClassDB::bind_static_method("IWStageKernels",
 			D_METHOD("denoise", "ctx", "quality", "blend"), &IWStageKernels::denoise);
+	// Defined in iw_line_kernels.cpp; bound here so every entry point is in one list.
+	ClassDB::bind_static_method("IWStageKernels",
+			D_METHOD("remove_lines", "ctx", "thickness", "detached_only"),
+			&IWStageKernels::remove_lines);
 }
 
 // Rasterises this stage's shapes and folds them into whatever is already declared.

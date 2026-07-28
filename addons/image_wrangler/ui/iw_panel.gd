@@ -20,6 +20,7 @@ const OPERATION_SCRIPTS := [
 	"res://addons/image_wrangler/core/refine_edges.gd",
 	"res://addons/image_wrangler/core/island_picker_op.gd",
 	"res://addons/image_wrangler/core/polygon_edit_op.gd",
+	"res://addons/image_wrangler/core/remove_lines.gd",
 	"res://addons/image_wrangler/core/edge_cleanup.gd",
 ]
 

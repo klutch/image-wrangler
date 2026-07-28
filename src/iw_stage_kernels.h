@@ -130,6 +130,23 @@ public:
 	// filter failed, having pushed an error saying which. A failure is a stage that did
 	// nothing, never a corrupted image.
 	static bool denoise(const Ref<IWPipelineContext> &ctx, int64_t quality, double blend);
+
+	// RemoveLines.process_context: erases every structure the silhouette is too thin to
+	// have earned, and returns the indices it took.
+	//
+	// A morphological opening by a square of side `thickness + 1` — the smallest square a
+	// shape has to have room for to count as thick enough. `detached_only` chooses what
+	// happens to what is left: false puts the square back, so a thin part goes wherever it
+	// is, and true floods each shape back from wherever a square did fit, so a shape thick
+	// anywhere survives whole.
+	//
+	// The one kernel that erases on the strength of shape alone rather than colour, which
+	// is why it needs no key and answers false to needs_keying. It writes coverage, and
+	// the mask and key list where a classification exists; the caller owes the run a
+	// rebuild_nearest afterwards, and deliberately not a compute_coverage. See the note on
+	// RemoveLines.process_context for why that second one would undo the stages above it.
+	static PackedInt32Array remove_lines(
+			const Ref<IWPipelineContext> &ctx, int64_t thickness, bool detached_only);
 };
 
 } // namespace godot

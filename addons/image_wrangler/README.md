@@ -39,6 +39,11 @@ operation did:
 | **Refine Edges** | Tidies the alpha, then clips its extremes |
 | **Edge Cleanup** | Restores hard edges and draws an outline |
 
+Two more are in the dropdown but not in a fresh stack, because they are corrective
+rather than routine: **Remove Lines**, which erases debris too thin to be part of
+the subject, and **Denoise**, which costs seconds per image and changes what every
+tolerance below it means.
+
 **Order matters, and duplicates are allowed.** Two Polygon Edits are two
 independent sets of shapes. A second Remove Background adds its colours to the
 keys the first registered rather than starting again. Refine Edges above Edge
@@ -411,6 +416,60 @@ So start low. A floor around 0.1–0.2 with the ceiling left at 1.0 clears haze
 while keeping most of the gradient; 0.5 / 0.6 is decisive but close to a binary
 cutout. Setting the ceiling at or below the floor is a hard cutoff at that value,
 and is honoured rather than rejected.
+
+### Removing thin debris
+
+**Alpha Floor removes by threshold, which cannot tell a speck from a soft edge.**
+**Remove Lines** removes by *shape* instead: it measures how thick the silhouette
+is and erases everything thinner than a stated width, wherever it is and whichever
+way it runs. That is the answer for hairlines, scan borders, leftover grid rules
+and specks — the debris a floor can only fade.
+
+| Setting | What it does |
+| --- | --- |
+| **Thickness** | The widest structure removed, in pixels. 1 takes a hairline and leaves a two-pixel line |
+| **Detached Only** | Spares any shape that is thick enough *somewhere*. On by default |
+
+It is a morphological opening. A shape counts as thick enough where a square of
+side `Thickness + 1` fits inside it; erode by that square to find where it fits,
+then either put the square back — every thin part goes, wherever it is — or flood
+each shape back from wherever a square did fit, so a shape thick anywhere survives
+whole. **Detached Only** picks the second, which is what keeps a whisker on the
+subject while taking the hairline lying beside it.
+
+**A width, not a radius, and the boundary is exact.** At a thickness of 1 a
+one-pixel line goes and a two-pixel line stays. That distinction is why the square
+is there at all: the largest distance to background across a structure of width
+*w* is `ceil(w / 2)`, so one pixel and two pixels give the same number, and
+nothing built on a distance map can separate them.
+
+**Thickness is measured on the solid part; the erase takes all of it.** Measuring
+on everything above zero alpha would make a one-pixel antialiased line read as
+three wide. Erasing only the solid part would leave the shoulders behind as
+exactly the faint ghost this is here to avoid. So what survives is grown back out
+through its own antialiasing, bounded by the skirt rather than by a number — which
+is what lets a kept shape come out with its edge untouched however soft that edge
+is. Reclaiming a fixed pixel or two instead would harden every edge in the image.
+
+One consequence worth knowing: a shape that is **wide but faint everywhere** —
+peak alpha under a half — has no solid part, so it counts as thin and goes at any
+setting. Unless it touches something that stayed, which brings it back with it.
+That is usually what is wanted from a line remover pointed at a matte, and it is
+the one place the answer surprises people.
+
+**It needs no background.** Every other stage that removes something measures
+colour, which is meaningless without a key. This one measures shape, which exists
+as soon as there is an alpha channel — so it works on art that arrived transparent,
+with nothing above it in the stack. Pointed at an opaque JPEG with no keying above
+it, nothing is thin and it does nothing.
+
+**Put it above Edge Cleanup.** A stroke brings its own alpha and is composited
+over the result, so a stroke drawn around a hairline and then erased leaves the
+stroke behind as a floating outline — this stage's own artefact, wearing a ring.
+Against **Refine Edges** it is free either way: above, the filter smooths what is
+left; below, it judges the alpha the filter settled on. Neither undoes the other.
+It is not in the default stack, because it is a corrective pass rather than
+something every image needs.
 
 ### Edge Cleanup
 
@@ -910,7 +969,12 @@ Four things worth knowing about the context:
   they say which pixels are subject, not what colour they are.
 - **Invalidate what you disturb.** Moving a pixel out of subject makes
   `ctx.nearest` stale; call `ctx.rebuild_nearest()` and then
-  `ctx.compute_coverage(...)` over what could have changed.
+  `ctx.compute_coverage(...)` over what could have changed. That second call is for
+  a stage that *creates* edge pixels nothing has matted yet, which is what makes it
+  a repair — it derives coverage from the mask, and forces every subject pixel it
+  visits to 1. A stage that sets the coverage it changes itself, as `RemoveLines`
+  does, must leave it out: running it anyway would flatten the guided filter's work
+  in a ring around everything the stage touched.
 - **Bind before you loop.** Reaching through `ctx.` inside a per-pixel loop is a
   property lookup a few million times over. Copy what you need into locals at the
   top, the way the existing operations do.
