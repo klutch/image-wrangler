@@ -89,23 +89,6 @@ func needs_keying() -> bool:
 	return true
 
 
-## Whether this stage has to run before anything establishes a background.
-##
-## The mirror of [method needs_keying], and asked separately for the same reason
-## [method establishes_keying] is rather than being read as its opposite: almost every
-## stage answers false to both, and treating one as the negation of the other would make
-## "does not care either way" unsayable.
-##
-## True for a stage that rewrites [member IWPipelineContext.data]. The maps built off
-## those pixels — [member IWPipelineContext.key_dist], the sampled [member
-## IWPipelineContext.keys], [member IWPipelineContext.nearest] — are built once and never
-## rebuilt, so replacing the colours under them is a change nothing downstream can see.
-## Such a stage stands down and says so through [method prerequisite_note], exactly as a
-## stage waiting on a keyer does. [Denoise] is the only one.
-func precedes_keying() -> bool:
-	return false
-
-
 ## Whether this stage is one that establishes the keys and the classification.
 ##
 ## Asked separately from [method needs_keying] rather than read as its opposite,
@@ -121,11 +104,6 @@ func establishes_keying() -> bool:
 ## run yet is a normal state to be in halfway through building a stack, not a
 ## fault. [param ctx] is the run so far, or null when the dock is only asking what
 ## the stack looks like.
-##
-## Asked in either direction — for a stage waiting on something above it, and for one
-## that cannot have anything above it. The dock decides which question applies from
-## [method needs_keying] and [method precedes_keying] and only asks when one of them is
-## the stage's problem, so the answer here need not work out which.
 func prerequisite_note(_ctx: IWPipelineContext) -> String:
 	return ""
 

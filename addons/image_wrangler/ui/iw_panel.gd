@@ -1252,19 +1252,11 @@ func _store_stack(path: String) -> void:
 ## Answered without a run, so it can only speak about the stack rather than about the
 ## image: whether something above establishes keys, and whether a classification will
 ## exist by the time each stage is reached.
-##
-## Both directions, because there are two ways to be in the wrong place. Most stages need
-## something above them and say so when there is nothing; a stage that rewrites the source
-## pixels needs nothing above it and says so when there is something. The two flags gate
-## the one call rather than the note being worked out from position alone, so a stage is
-## never handed a complaint about a problem it does not have.
 func _refresh_notes() -> void:
 	var keying := false
 	for entry: Control in _stack_view.entries():
 		var stage: IWStackOperation = entry.stage
-		var misplaced := (stage.needs_keying() and not keying) \
-				or (stage.precedes_keying() and keying)
-		entry.set_note(stage.prerequisite_note(null) if misplaced else "")
+		entry.set_note("" if keying or not stage.needs_keying() else stage.prerequisite_note(null))
 		if stage.enabled and stage.establishes_keying():
 			keying = true
 

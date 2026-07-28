@@ -682,10 +682,9 @@ PackedInt32Array IWStageKernels::flood_protect(
 
 	for (int64_t s = 0; s < seeds.size(); s++) {
 		// Sampled here rather than carried in, which is the same answer: the source
-		// pixels are immutable from the first key onwards, so reading one now and
-		// reading it before the first flood started cannot differ. Denoise is the only
-		// stage that rewrites them, and it stands down below anything that keys — so it
-		// cannot have run between those two moments.
+		// pixels do not change while a stage is running, so reading one now and reading
+		// it before the first flood started cannot differ. Only Denoise rewrites them,
+		// and it is a stage of its own — it cannot run in the middle of this one.
 		const Color key = ctx->color_at(seed_ptr[s]);
 		const double tolerance = tol_ptr[s];
 		int64_t head = 0;

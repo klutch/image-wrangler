@@ -60,8 +60,8 @@ extends IWStackOperation
 ## which is how the background creeps back into an edge that looked clean in the
 ## file. Both are settings here and both are applied by [IWCompose], which is the
 ## only pass that writes colour [i]out[/i]. [Denoise] rewrites the colour going
-## [i]in[/i], which is why it only runs above this stage: the keys sampled here are
-## sampled from whatever it left behind.
+## [i]in[/i]: above this stage it changes what gets keyed, and below it changes only
+## what comes out, since the matte is settled by then.
 ##
 ## [b]Running it twice.[/b] A source pixel that arrives fully transparent is treated
 ## as open ground: it is already removed, so every flood crosses it, it grows no edge

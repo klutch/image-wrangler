@@ -10,8 +10,9 @@ extends SceneTree
 ## the first OIDN bump would fail the harness for no defect of ours.
 ##
 ## So this asserts what the stage promises instead — that the runtime is there, that
-## alpha survives, that the filter actually removes noise, and above all that the stage
-## stands down when it is below a keyer.
+## alpha survives, that the filter actually removes noise, and that where the stage sits
+## decides what it affects: above a keyer it changes the cut, below one the cut is
+## already settled and only the colours move.
 ##
 ## [b]One asymmetry worth knowing.[/b] [code]Fixtures.OPERATION_SCRIPTS[/code] is a second
 ## registry, separate from the dock's, used by [code]_stack_from_sidecar[/code]. Denoise
@@ -51,12 +52,12 @@ func _initialize() -> void:
 	_check_binding()
 	_check_kernel(clean, noisy)
 	_check_stage(noisy)
-	_check_stand_down(noisy)
+	_check_below_keyer(noisy)
 	_check_placement(noisy)
 
 	if _failures == 0:
-		print("Denoise OK — the runtime resolves, alpha survives, and the stage stands "
-				+ "down below a keyer.")
+		print("Denoise OK — the runtime resolves, alpha survives, and position decides "
+				+ "whether the cut moves.")
 	quit(1 if _failures > 0 else 0)
 
 
@@ -134,58 +135,76 @@ func _check_stage(noisy: Image) -> void:
 			+ pipeline.get_output_suffix())
 
 
-# --- The invariant the whole design rests on ----------------------------
+# --- Below a keyer it still runs, and disturbs only what it should ------
 
-## Below a keyer the stage must change nothing at all — not the pixels, and not the maps
-## that were built out of them.
-func _check_stand_down(noisy: Image) -> void:
+## The matte is already decided by the time it gets there, so it must not move — but the
+## pixels must, and the one map derived from them has to be rebuilt rather than left
+## describing colours that are gone.
+func _check_below_keyer(noisy: Image) -> void:
 	var ctx := IWPipelineContext.from_image(noisy)
-	var keyer := _keyer()
-	keyer.process_context(ctx)
+	_keyer().process_context(ctx)
 	if not _expect(ctx.has_keying, "the fixture's Remove Background did not key anything, "
-			+ "so the stand-down check would prove nothing"):
+			+ "so this check would prove nothing"):
 		return
 
 	var data_before: PackedByteArray = ctx.data
 	var key_dist_before: PackedFloat32Array = ctx.key_dist
 	var mask_before: PackedByteArray = ctx.mask
-	var keys_before: Array = ctx.keys.duplicate()
+	var coverage_before: PackedFloat32Array = ctx.coverage
+	var nearest_before: PackedInt32Array = ctx.nearest
 
 	var stage := Denoise.new()
 	stage.settings.blend = 1.0
 	stage.process_context(ctx)
 
-	_expect(ctx.data == data_before, "Denoise rewrote the pixels below a keyer")
-	_expect(ctx.key_dist == key_dist_before, "key_dist moved")
-	_expect(ctx.mask == mask_before, "the mask moved")
-	_expect(ctx.keys == keys_before, "the keys moved")
+	# It ran.
+	_expect(ctx.data != data_before, "Denoise did nothing below a keyer")
 
-	# And it says so, rather than failing silently.
-	_expect(stage.prerequisite_note(ctx) == Denoise.STAND_DOWN_NOTE,
-			"no note on a context that has already keyed")
-	_expect(stage.prerequisite_note(IWPipelineContext.from_image(noisy)) == "",
-			"a note on a fresh context, where the stage is perfectly well placed")
-	_expect(stage.precedes_keying(), "Denoise does not declare that it precedes keying")
+	# The cut is settled and stays settled: these say which pixels are subject, which is
+	# not a question about colour.
+	_expect(ctx.mask == mask_before, "the mask moved below a keyer")
+	_expect(ctx.coverage == coverage_before, "the alpha moved below a keyer")
+	_expect(ctx.nearest == nearest_before, "the nearest-subject map moved below a keyer")
+
+	# And the one thing that is about colour was redone rather than left stale or empty.
+	_expect(not ctx.key_dist.is_empty(),
+			"key_dist was cleared and not rebuilt — RefineEdges below would silently "
+			+ "skip its guided filter")
+	_expect(ctx.key_dist != key_dist_before,
+			"key_dist still describes the pixels that were replaced")
+
+	_expect(IWCompose.compose(ctx) != null, "the composed image did not survive")
 
 
 # --- Placement changes the answer ---------------------------------------
 
-## Positive proof that running above the keyer does something, and that the rewrite
-## survives all the way to the composed image.
+## The whole point of the stage being reorderable: above the keyer it changes the cut,
+## below it the cut is already made and only the colours change.
 func _check_placement(noisy: Image) -> void:
-	var denoised_first := IWPipelineContext.from_image(noisy)
+	var above := IWPipelineContext.from_image(noisy)
 	var denoise := Denoise.new()
 	denoise.settings.blend = 1.0
-	denoise.process_context(denoised_first)
-	_keyer().process_context(denoised_first)
+	denoise.process_context(above)
+	_keyer().process_context(above)
 
-	var keyed_only := IWPipelineContext.from_image(noisy)
-	_keyer().process_context(keyed_only)
+	var below := IWPipelineContext.from_image(noisy)
+	_keyer().process_context(below)
+	Denoise.new().process_context(below)
 
-	_expect(denoised_first.key_dist != keyed_only.key_dist,
-			"denoising first made no difference to what the keyer measured")
+	var neither := IWPipelineContext.from_image(noisy)
+	_keyer().process_context(neither)
 
-	var composed := IWCompose.compose(denoised_first)
+	# Above: a different matte, because the keyer measured different pixels.
+	_expect(above.coverage != neither.coverage,
+			"denoising above the keyer did not change the cut, which is the reason to "
+			+ "put it there")
+
+	# Below: the same matte as no denoise at all, and different pixels.
+	_expect(below.coverage == neither.coverage,
+			"denoising below the keyer changed the cut, which it must not")
+	_expect(below.data != neither.data, "denoising below the keyer changed no pixels")
+
+	var composed := IWCompose.compose(above)
 	_expect(composed != null and composed.get_width() == W and composed.get_height() == H,
 			"the composed image did not survive the rewrite")
 

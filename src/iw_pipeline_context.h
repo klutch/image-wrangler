@@ -89,10 +89,10 @@ public:
 	// --- Buffers ---------------------------------------------------------
 
 	// The source image, RGBA8, four bytes per pixel. Read-only to every stage but one:
-	// Denoise replaces it outright, and stands down unless it is running above
-	// everything that keys. It has to, because key_dist, the sampled keys and nearest
-	// are each built once out of these bytes and never rebuilt — so a rewrite under them
-	// is a change nothing downstream could find out about. See IWStageKernels::denoise.
+	// Denoise replaces it, and everything below it in the stack then measures what it
+	// left. A stage that does that owes the run one thing — key_dist is derived from
+	// these bytes and is built once rather than on demand, so it has to be rebuilt
+	// rather than left describing pixels that are gone. See IWStageKernels::denoise.
 	PackedByteArray data;
 
 	int64_t width = 0;

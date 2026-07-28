@@ -898,20 +898,16 @@ separately because most operations answer `false` to both. `needs_keying()` may
 also be answered from the settings, as Island Picker does: only a Subtract island
 needs anything above it.
 
-There is a third flag for the opposite problem. `precedes_keying()` returns `true`
-for an operation that must run *above* everything that keys, and the dock asks it
-for a note in the same way — so there are two ways to be in the wrong place and
-both of them say so on the entry rather than failing. `Denoise` is the only one.
-
 Four things worth knowing about the context:
 
-- **`ctx.data` is the source, and you do not rewrite it.** Everything an operation
-  decides goes into `ctx.coverage`, `ctx.mask` or `ctx.key_of`. `Denoise` is the
-  single exception, and it earns it by standing down: it replaces the pixels, so it
-  runs only where nothing has yet been derived from them. If you are writing a
-  second one of those, read `denoise.gd` first — the reason it stands down rather
-  than invalidating what it disturbed is that `ensure_key_dist()` is a no-op once
-  the map exists, so the staleness would never surface.
+- **`ctx.data` is the source, and rewriting it is `Denoise`'s job alone.** Everything
+  any other operation decides goes into `ctx.coverage`, `ctx.mask` or `ctx.key_of`.
+  A stage that does replace the pixels changes what every stage below it measures,
+  and owes the run one repair: `ctx.key_dist` is derived from those bytes and is
+  built once rather than on demand, so it has to be rebuilt rather than left
+  describing pixels that are gone. Clearing it is not enough — `RefineEdges` skips
+  its filter entirely when it is empty. `mask` and `nearest` survive untouched;
+  they say which pixels are subject, not what colour they are.
 - **Invalidate what you disturb.** Moving a pixel out of subject makes
   `ctx.nearest` stale; call `ctx.rebuild_nearest()` and then
   `ctx.compute_coverage(...)` over what could have changed.
