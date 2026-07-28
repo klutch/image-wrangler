@@ -1,0 +1,66 @@
+{
+	"format": "image_wrangler",
+	"stack": [
+		{
+			"enabled": true,
+			"id": "denoise",
+			"settings": {
+				"blend": 1.0,
+				"quality": 2
+			}
+		},
+		{
+			"enabled": true,
+			"id": "smooth_blocks",
+			"settings": {
+				"amount": 1.0,
+				"threshold": 0.3
+			}
+		},
+		{
+			"enabled": true,
+			"id": "smooth_color",
+			"settings": {
+				"amount": 1.0,
+				"radius": 2,
+				"strength": 0.5
+			}
+		},
+		{
+			"enabled": true,
+			"id": "remove_background",
+			"settings": {
+				"bleed_radius": 16,
+				"contiguous": true,
+				"decontaminate": true,
+				"edge_width": 2,
+				"remove_colors": {
+					"entries": [
+						{
+							"color": [
+								1.0,
+								1.0,
+								1.0,
+								1.0
+							],
+							"color_tolerance": 0.02,
+							"enabled": true,
+							"samples": [
+								{
+									"color": [
+										1.0,
+										1.0,
+										1.0,
+										1.0
+									],
+									"color_tolerance": 0.02
+								}
+							]
+						}
+					]
+				}
+			}
+		}
+	],
+	"version": 2
+}
