@@ -36,7 +36,7 @@ signal setting_changed
 ## their controls.
 signal entries_rebuilt
 
-## Emitted when Copy Stack or Paste Stack is pressed.
+## Emitted when Copy or Paste is pressed.
 ##
 ## The dock does the work rather than this. The clipboard carries the sidecar's own
 ## format, and both the codec and the registry saying which ids name operations belong
@@ -97,10 +97,14 @@ func _notification(what: int) -> void:
 
 
 ## One button on the tool row.
-func _add_tool(icon: StringName, label: String, hint: String, on_press: Callable) -> void:
+##
+## The label is the tooltip as well as the word the button falls back on. These do what
+## they are called and nothing more, so a sentence explaining one would only be the same
+## word again with padding.
+func _add_tool(icon: StringName, label: String, on_press: Callable) -> void:
     var button := Button.new()
     button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    button.tooltip_text = hint
+    button.tooltip_text = label
     # The icon grows to fill whatever width the button ends up with, and the height
     # follows in _square_up, so the buttons stay square however wide the dock is.
     button.expand_icon = true
@@ -175,25 +179,20 @@ func _build() -> void:
     # Its own row under the one that builds a stack by hand, because these are the other
     # ways of getting one. Icons rather than names: five of these across a dock this
     # narrow leaves no room for words, and what each one does is the sort of thing an
-    # icon says faster than a label anyway. The tooltips carry the detail.
+    # icon says faster than a label anyway.
     #
     # In the order they are reached for — the two that go through a file, the two that go
     # through the clipboard, and then the one that throws everything away, which is last
-    # because it is the only one that costs something.
+    # because it is the only one with nothing to bring back what it took.
     _tools = HBoxContainer.new()
     _tools.resized.connect(_square_up)
     add_child(_tools)
 
-    _add_tool(&"Save", "Save", "Save this image's stack to a file.\n\nWrites the same JSON a sidecar holds, so a saved stack can be\nkept as a preset, edited by hand, or sent to somebody.",
-            func() -> void: save_requested.emit())
-    _add_tool(&"Load", "Load", "Replace this image's stack with the one in a saved stack file.\n\nWhat is in the stack now is thrown away. History keeps it, so a\nload can be rewound like any other change.",
-            func() -> void: load_requested.emit())
-    _add_tool(&"ActionCopy", "Copy", "Copy every operation in this image's stack to the clipboard,\nsettings and all.\n\nThe clipboard gets the same JSON a sidecar holds, so a copied\nstack can be pasted into a text file and kept.",
-            func() -> void: copy_requested.emit())
-    _add_tool(&"ActionPaste", "Paste", "Add every operation on the clipboard to the bottom of this\nimage's stack.\n\nAdds rather than replaces, so pasting onto a stack that already\nhas something in it keeps both. Remove the rows you don't want.",
-            func() -> void: paste_requested.emit())
-    _add_tool(&"Reload", "Reset", "Throw this image's stack away and start again from the default.\n\nAsks first, and takes the image's edit history with it — a reset\nis not something History can rewind past.",
-            func() -> void: reset_requested.emit())
+    _add_tool(&"Save", "Save", func() -> void: save_requested.emit())
+    _add_tool(&"Load", "Load", func() -> void: load_requested.emit())
+    _add_tool(&"ActionCopy", "Copy", func() -> void: copy_requested.emit())
+    _add_tool(&"ActionPaste", "Paste", func() -> void: paste_requested.emit())
+    _add_tool(&"Reload", "Reset", func() -> void: reset_requested.emit())
 
     # The entries are cards standing off the panel, so they need room above and below
     # to read as separate things rather than as one block with lines in it.
@@ -249,25 +248,6 @@ func _on_pick(index: int) -> void:
 func add_stage(stage: IWStackOperation) -> void:
     _entries.append({"uid": _take_uid(), "stage": stage, "entry": null})
     rebuild()
-
-
-## Appends [param stages] to the stack in order, rebuilds once, and announces it.
-##
-## It announces and [method add_stage] does not, which looks inconsistent and is not:
-## a pick from the dropdown appends and then emits from its own handler, so the append
-## there is half an action. A paste is the whole of one, and there is no second half to
-## do the telling.
-##
-## One rebuild for the lot rather than one apiece — every entry's form is thrown away
-## and rebuilt each time, and pasting a six-stage stack would otherwise do that six
-## times to arrive at the same place.
-func add_stages(stages: Array) -> void:
-    if stages.is_empty():
-        return
-    for stage: IWStackOperation in stages:
-        _entries.append({"uid": _take_uid(), "stage": stage, "entry": null})
-    rebuild()
-    stack_changed.emit()
 
 
 ## Replaces the whole stack with [param stages], in order.

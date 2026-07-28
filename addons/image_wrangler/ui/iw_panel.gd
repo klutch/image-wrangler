@@ -1637,19 +1637,14 @@ func _on_copy_stack() -> void:
     _set_status("Copied %s to the clipboard." % _operation_count(records.size()))
 
 
-## Adds whatever stack is on the clipboard to the bottom of this one.
-##
-## Adds where Load replaces, and the difference is what each one is for. A paste is a
-## piece of another stack being brought over; a file is a whole stack being restored.
+## Puts whatever stack is on the clipboard in place of this one.
 func _on_paste_stack() -> void:
     var stages := _stages_from_text(DisplayServer.clipboard_get())
     if stages.is_empty():
         _set_status("Found no operation stack on the clipboard.")
         return
-    # Emits stack_changed, which stores, re-notes and reruns. The status is set after,
-    # because what just happened is more use than being told the stack changed.
-    _stack_view.add_stages(stages)
-    _set_status("Added %s from the clipboard." % _operation_count(stages.size()))
+    _replace_stack(stages, "Paste stack")
+    _set_status("Pasted %s over the stack." % _operation_count(stages.size()))
 
 
 ## Writes the whole stack out as a file that can be loaded back.
@@ -1678,12 +1673,7 @@ func _on_load_stack() -> void:
     _stack_load_dialog.popup_centered_ratio(0.6)
 
 
-## Replaces this image's stack with the one in the chosen file.
-##
-## [b]Replaces, where Paste adds.[/b] A file is a stack somebody saved whole and means to
-## get back whole, so anything already there would only be in the way. Nothing is lost
-## that cannot be recovered: the replacement goes into History like any other edit, so it
-## rewinds.
+## Puts the stack in the chosen file in place of this one.
 func _on_stack_load_chosen(path: String) -> void:
     var file := FileAccess.open(path, FileAccess.READ)
     if file == null:
@@ -1696,17 +1686,31 @@ func _on_stack_load_chosen(path: String) -> void:
     if stages.is_empty():
         _set_status("Found no operation stack in %s." % path.get_file())
         return
+    _replace_stack(stages, "Load %s" % path.get_file())
+    _set_status("Loaded %s from %s." % [
+        _operation_count(stages.size()), path.get_file(),
+    ])
 
-    _pending_label = "Load %s" % path.get_file()
+
+## Puts [param stages] in place of whatever the stack holds now.
+##
+## [b]Both Paste and Load replace.[/b] Either one is a whole stack arriving, saved or
+## copied as a piece, and mixing it into whatever was already there would give a stack
+## nobody chose — the operations in the wrong order and the wrong number of them. Nothing
+## is lost that cannot be got back: this goes into History like any other edit, so it
+## rewinds. Reset is the one that does not, and it asks first for exactly that reason.
+##
+## [param label] is what History calls it. Left to the diff, a wholesale replacement gets
+## described by whichever way the counts happened to work out, which is never what
+## happened.
+func _replace_stack(stages: Array[IWStackOperation], label: String) -> void:
+    _pending_label = label
     _refreshing = true
     _stack_view.set_stages(stages)
     _refreshing = false
     # set_stages does not announce, because swapping images uses it too. Everything that
     # has to follow a stack changing is in here.
     _on_stack_changed()
-    _set_status("Loaded %s from %s." % [
-        _operation_count(stages.size()), path.get_file(),
-    ])
 
 
 ## The operations [param text] describes, or an empty Array when it describes none.
