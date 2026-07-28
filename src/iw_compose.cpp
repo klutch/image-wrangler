@@ -54,6 +54,7 @@ Ref<Image> IWCompose::compose(const Ref<IWPipelineContext> &ctx) {
 	const PackedFloat32Array &outer = ctx->stroke_outer;
 	const PackedFloat32Array &stroke_colors = ctx->stroke_colors;
 	const PackedByteArray &force_opaque = ctx->force_opaque;
+	const PackedByteArray &blacked = ctx->blacked;
 	const TypedArray<Color> &key_list = ctx->keys;
 
 	const int64_t width = ctx->width;
@@ -69,6 +70,7 @@ Ref<Image> IWCompose::compose(const Ref<IWPipelineContext> &ctx) {
 	const bool has_key_of = !key_of.is_empty();
 	const bool has_nearest = !nearest.is_empty();
 	const bool has_force = !force_opaque.is_empty();
+	const bool has_blacked = blacked.size() == pixel_count;
 	// Nothing to un-blend against without a key. The setting stays on; it simply
 	// describes work that cannot be done here, the same way it describes no work for a
 	// pixel that came out fully covered.
@@ -97,6 +99,7 @@ Ref<Image> IWCompose::compose(const Ref<IWPipelineContext> &ctx) {
 	const float *outer_ptr = outer.ptr();
 	const float *stroke_ptr = stroke_colors.ptr();
 	const uint8_t *force_ptr = force_opaque.ptr();
+	const uint8_t *blacked_ptr = blacked.ptr();
 
 	const double to_unit = 1.0 / 255.0;
 	const int64_t key_count = static_cast<int64_t>(keys.size());
@@ -186,6 +189,21 @@ Ref<Image> IWCompose::compose(const Ref<IWPipelineContext> &ctx) {
 				}
 				out_alpha = combined;
 			}
+		}
+
+		// A drawn cut is a deletion, and it has the last word.
+		//
+		// Last because everything else here adds: the stroke is composited after the
+		// alpha and brings its own, so an outer stroke would otherwise trace the inside
+		// of every hole the user cut and fill it back in from the rim — at a width of 4
+		// in a 20-pixel hole, three quarters of it came back. Zeroing the coverage
+		// earlier cannot prevent that; only having the last word can.
+		//
+		// An Add still wins over it, since that is the one thing that says "keep this"
+		// and it beats a cut everywhere else too.
+		if (has_blacked && blacked_ptr[i] == IWPipelineContext::REGION_CUT
+				&& !(has_force && force_ptr[i] != 0)) {
+			out_alpha = 0.0;
 		}
 
 		dst[offset] = static_cast<uint8_t>(iw::roundi(iw::clampf(r, 0.0, 1.0) * 255.0));

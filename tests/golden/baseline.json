@@ -688,6 +688,41 @@
 			"5e+15",
 			"0.16999999999999998"
 		],
+		"native": {
+			"clampf": [
+				"0.5",
+				"0.0",
+				"1.0",
+				"1.0",
+				"0.0"
+			],
+			"float32": [
+				"0.1",
+				"0.33333334",
+				"0.5",
+				"16777216.0",
+				"1e-45"
+			],
+			"lerpf": [
+				"0.2",
+				"0.0",
+				"1.0",
+				"5e+15",
+				"0.16999999999999998"
+			],
+			"roundi": [
+				-3,
+				-2,
+				-1,
+				0,
+				0,
+				1,
+				1,
+				2,
+				3,
+				3
+			]
+		},
 		"roundi": [
 			-3,
 			-2,
@@ -702,8 +737,8 @@
 		]
 	},
 	"sheet_full": {
-		"final": "f5e24a395fcb3ba8481e4c43643093e52e1ae7dc78059a75e0294865195b7868",
-		"pipeline": "f5e24a395fcb3ba8481e4c43643093e52e1ae7dc78059a75e0294865195b7868",
+		"final": "1082dabdb79eb55fa3152afc44f7da31dbde9a1bf2b117a994cb4721c19c52bd",
+		"pipeline": "1082dabdb79eb55fa3152afc44f7da31dbde9a1bf2b117a994cb4721c19c52bd",
 		"stages": [
 			{
 				"buffers": {
@@ -1227,8 +1262,8 @@
 		]
 	},
 	"speckled_full": {
-		"final": "53b361ac3f38e35cdea24bc5d90c2e9a144f91fe572527118412f01e5d2ecb5f",
-		"pipeline": "53b361ac3f38e35cdea24bc5d90c2e9a144f91fe572527118412f01e5d2ecb5f",
+		"final": "7a2ffee4230215b4ff31e6dec16ccb22deec850804f7d73b97dc7846c489b0a2",
+		"pipeline": "7a2ffee4230215b4ff31e6dec16ccb22deec850804f7d73b97dc7846c489b0a2",
 		"stages": [
 			{
 				"buffers": {
