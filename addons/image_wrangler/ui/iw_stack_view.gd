@@ -148,10 +148,12 @@ func _refresh_selector() -> void:
 		_selector.selected = 0
 
 
-func _on_create() -> void:
-	if _selector == null or _selector.selected < 0:
+## Adds the operation at [param index]. Every pick arrives here, including a pick of the
+## one already showing.
+func _on_pick(index: int) -> void:
+	if _selector == null or index < 0 or index >= _selector.item_count:
 		return
-	var path: Variant = _selector.get_item_metadata(_selector.selected)
+	var path: Variant = _selector.get_item_metadata(index)
 	if not (path is String):
 		return
 	var script: Script = load(path)
@@ -170,8 +172,9 @@ func add_stage(stage: IWStackOperation) -> void:
 ## Appends [param stages] to the stack in order, rebuilds once, and announces it.
 ##
 ## It announces and [method add_stage] does not, which looks inconsistent and is not:
-## Create appends and then emits from its own handler, so the append there is half an
-## action. A paste is the whole of one, and there is no second half to do the telling.
+## a pick from the dropdown appends and then emits from its own handler, so the append
+## there is half an action. A paste is the whole of one, and there is no second half to
+## do the telling.
 ##
 ## One rebuild for the lot rather than one apiece — every entry's form is thrown away
 ## and rebuilt each time, and pasting a six-stage stack would otherwise do that six

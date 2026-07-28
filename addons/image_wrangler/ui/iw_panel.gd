@@ -12,8 +12,8 @@ const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd"
 const StackView := preload("res://addons/image_wrangler/ui/iw_stack_view.gd")
 const HistoryView := preload("res://addons/image_wrangler/ui/iw_history_view.gd")
 
-## Every [IWStackOperation] the stack can hold, in the order the Create dropdown
-## offers them. Add new stack operations here.
+## Every [IWStackOperation] the stack can hold, in the order the dropdown offers them.
+## Add new stack operations here.
 const OPERATION_SCRIPTS := [
 	"res://addons/image_wrangler/core/denoise.gd",
 	"res://addons/image_wrangler/core/smooth_blocks.gd",
@@ -38,7 +38,7 @@ const OPERATION_SCRIPTS := [
 ## reach for.
 ##
 ## It also makes the default honest about the one thing this addon does. Add what the
-## image turns out to need; the Create dropdown is right there, and the order the rest
+## image turns out to need; the dropdown is right there, and the order the rest
 ## want to go in is on their own entries.
 const DEFAULT_STACK := [
 	"res://addons/image_wrangler/core/remove_background.gd",
@@ -1198,8 +1198,8 @@ static func _load_image(path: String) -> Image:
 ## Rebuilds the stack view from [param path]'s saved stack.
 ##
 ## With no image selected there is no saved stack, and the default one is shown
-## instead — an empty column with nothing but a Create button reads as broken, and the
-## first thing anyone does with a fresh dock is add an image anyway.
+## instead — an empty column with nothing above it but a dropdown reads as broken, and
+## the first thing anyone does with a fresh dock is add an image anyway.
 func _apply_stack_for(path: String) -> void:
 	_refreshing = true
 	var stages: Array[IWStackOperation] = []
