@@ -13,6 +13,7 @@ extends VBoxContainer
 ## exactly what a reorder changes.
 
 const StackEntry := preload("res://addons/image_wrangler/ui/iw_stack_entry.gd")
+const ToolButton := preload("res://addons/image_wrangler/ui/iw_tool_button.gd")
 
 ## Room above and below the column of entries, and between one entry and the next.
 ##
@@ -134,15 +135,27 @@ func _square_up() -> void:
 
 ## Puts the icon on a tool button, or its word if there is no icon to be had.
 ##
-## Asked for rather than assumed, the same way the fold arrow is: outside the editor
-## there is no [code]EditorIcons[/code] theme at all, and a row of buttons wearing their
-## own names is better than a row of errors.
+## Three ways down, each a fallback for the one above. The drawn one is what these
+## buttons want, since they are square and grow with the dock and the theme's own copy is
+## a flat sixteen pixels. The theme's copy still stands behind it in case the artwork is
+## ever missing, and the button's own name stands behind that — outside the editor there
+## is no icon of either kind to be had, and a row of buttons wearing their names is
+## better than a row of errors.
 func _dress(button: Button) -> void:
     var icon: StringName = button.get_meta(META_ICON, &"")
-    if not icon.is_empty() and has_theme_icon(icon, &"EditorIcons"):
-        button.icon = get_theme_icon(icon, &"EditorIcons")
-        button.text = ""
-        return
+    if not icon.is_empty():
+        var tint := Color(0.88, 0.88, 0.88)
+        if button.has_theme_color(&"font_color", &"Button"):
+            tint = button.get_theme_color(&"font_color", &"Button")
+        var drawn := ToolButton.build_svg_icon(icon, tint)
+        if drawn != null:
+            button.icon = drawn
+            button.text = ""
+            return
+        if has_theme_icon(icon, &"EditorIcons"):
+            button.icon = get_theme_icon(icon, &"EditorIcons")
+            button.text = ""
+            return
     button.icon = null
     button.text = String(button.get_meta(META_LABEL, ""))
 
