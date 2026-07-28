@@ -73,20 +73,16 @@ func _ready() -> void:
 
 
 func _build() -> void:
-	var add_row := HBoxContainer.new()
-	add_child(add_row)
-
+	# Picking from the list is the whole gesture — there is no button beside it to press
+	# afterwards, so the popup's own index_pressed is what this listens to rather than
+	# item_selected. item_selected does not fire when the item picked is the one already
+	# showing, and adding a second Polygon Edit is an ordinary thing to want.
 	_selector = OptionButton.new()
 	_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_selector.tooltip_text = "Pick an operation to add to the bottom of the stack."
+	_selector.tooltip_text = "Add an operation to the bottom of the stack.\nDrag its handle afterwards to move it.\n\nPicking the one already showing adds another of it, which is what duplicates are for."
 	_selector.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	add_row.add_child(_selector)
-
-	var create := Button.new()
-	create.text = "Create"
-	create.tooltip_text = "Add the chosen operation to the stack.\nDrag its handle afterwards to move it."
-	create.pressed.connect(_on_create)
-	add_row.add_child(create)
+	_selector.get_popup().index_pressed.connect(_on_pick)
+	add_child(_selector)
 
 	# Its own row under the one that builds a stack by hand, because it is the other way
 	# of getting one: the two buttons share the width evenly rather than sitting beside

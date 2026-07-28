@@ -16,6 +16,7 @@ const HistoryView := preload("res://addons/image_wrangler/ui/iw_history_view.gd"
 ## offers them. Add new stack operations here.
 const OPERATION_SCRIPTS := [
 	"res://addons/image_wrangler/core/denoise.gd",
+	"res://addons/image_wrangler/core/smooth_blocks.gd",
 	"res://addons/image_wrangler/core/smooth_color.gd",
 	"res://addons/image_wrangler/core/remove_background.gd",
 	"res://addons/image_wrangler/core/remove_crevice.gd",

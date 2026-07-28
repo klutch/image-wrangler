@@ -157,6 +157,15 @@ public:
 	// running above everything that keys, for the reason given on denoise above.
 	static void smooth_color(const Ref<IWPipelineContext> &ctx, int64_t radius,
 			double strength, double amount);
+
+	// SmoothBlocks.process_context: flattens the seams a JPEG leaves every eight pixels.
+	//
+	// The other half of the same damage the colour smoother repairs, and the half that
+	// lives in the brightness — which is exactly what that one leaves alone. The third
+	// kernel that rewrites the source pixels, and it stands down unless it is running
+	// above everything that keys, for the reason given on denoise above.
+	static void smooth_blocks(const Ref<IWPipelineContext> &ctx, double threshold,
+			double amount);
 };
 
 } // namespace godot
