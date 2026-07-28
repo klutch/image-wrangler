@@ -131,6 +131,14 @@ var _result_image: Image
 ## to remove — [member _preview_pending] queues the next run instead.
 var _preview_thread: Thread
 
+## Whether a run is in flight, in either mode.
+##
+## [member _preview_thread] used to answer this on its own. With threading off there is
+## no thread to point at but there is still a run in progress — it is sitting between
+## two stages, and the editor is live enough in that gap for the debounce to fire and
+## ask for another.
+var _preview_running := false
+
 ## Whether a preview is allowed to leave the main thread.
 ##
 ## Read once per run, when the run starts, so flipping it never has to reach into a
@@ -343,6 +351,11 @@ func _exit_tree() -> void:
 		_preview_thread.wait_to_finish()
 		_preview_thread = null
 	_preview_worker_op = null
+	# An unthreaded run cannot be waited on the way a thread can — it is parked on a
+	# frame that has not come yet. Cancelling it above is what stops it: it resumes,
+	# finds the flag at its next checkpoint and drops out without reporting. This
+	# clears the way for the next run should the dock come back.
+	_preview_running = false
 
 
 ## Builds the file operation and its form. One instance for the session, since a
@@ -360,8 +373,6 @@ func _build_rename() -> void:
 
 func _build_ui() -> void:
 	add_theme_constant_override("separation", 4)
-
-	add_child(_build_top_bar())
 
 	var columns := HSplitContainer.new()
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -388,30 +399,6 @@ func _build_ui() -> void:
 	_autosave.wait_time = AUTOSAVE_DEBOUNCE
 	_autosave.timeout.connect(_flush_autosave)
 	add_child(_autosave)
-
-
-## The strip across the whole dock, above the columns.
-##
-## Above rather than in the preview toolbar, because what is on it is not about
-## the image being looked at: it is about how the dock runs, and it holds while
-## the selection moves.
-func _build_top_bar() -> Control:
-	var row := HBoxContainer.new()
-
-	_thread_toggle = CheckBox.new()
-	_thread_toggle.text = "Enable Threading"
-	_thread_toggle.tooltip_text = THREADING_TOOLTIP
-	_thread_toggle.button_pressed = _threading_enabled
-	_thread_toggle.toggled.connect(_on_threading_toggled)
-	row.add_child(_thread_toggle)
-
-	# So nothing added here later is pulled to the middle by the box centring its
-	# children against a container that is wider than they are.
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(spacer)
-
-	return row
 
 
 ## Takes effect at the next run. A worker already going is left alone — see
@@ -498,6 +485,17 @@ func _build_preview_column() -> Control:
 	_original_fade.tooltip_text = ORIGINAL_FADE_TOOLTIP
 	_original_fade.value_changed.connect(_on_original_fade_changed)
 	toolbar.add_child(_original_fade)
+
+	# The one long label on this toolbar, and it does widen the column's minimum —
+	# but this is a switch you want in sight while judging a result, not one to go
+	# hunting for, and it is spelled out rather than abbreviated because what it
+	# changes is not something to have to guess at.
+	_thread_toggle = CheckBox.new()
+	_thread_toggle.text = "Enable Threading"
+	_thread_toggle.tooltip_text = THREADING_TOOLTIP
+	_thread_toggle.button_pressed = _threading_enabled
+	_thread_toggle.toggled.connect(_on_threading_toggled)
+	toolbar.add_child(_thread_toggle)
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1524,7 +1522,7 @@ func _run_preview() -> void:
 	_debounce.stop()
 	if _shutting_down or _source_image == null or _mode == Mode.RENAME:
 		return
-	if _preview_thread != null:
+	if _preview_running:
 		_preview_pending = true
 		if _preview_worker_op != null:
 			_preview_worker_op.cancelled = true
@@ -1546,31 +1544,63 @@ func _start_preview() -> void:
 	# on screen. Comparing the Image itself is the exact test: selecting another
 	# file replaces the object, and nothing else does.
 	var source := _source_image
+
+	# Captured rather than read again when a report arrives: the switch can be flipped
+	# mid-run, and a run must report the way it was started or half its numbers would
+	# take the other route.
+	var threaded := _threading_enabled
 	worker.progress_reporter = func(fraction: float) -> void:
-		# Called from the worker. Nothing on this side of it may touch a control,
-		# so it hands the number to the main thread and returns.
-		_on_preview_progress.call_deferred(fraction)
+		# Deferred when it comes from the worker, since nothing on that side of it may
+		# touch a control. Called straight through when the run is on the main thread
+		# already — deferring there would land the number after the frame it belongs to.
+		if threaded:
+			_on_preview_progress.call_deferred(fraction)
+		else:
+			_on_preview_progress(fraction)
 	if worker is IWPipeline:
-		(worker as IWPipeline).stage_progress_reporter = 			func(index: int, count: int, fraction: float, stage_name: String) -> void:
+		(worker as IWPipeline).stage_progress_reporter = func(index: int, count: int, fraction: float, stage_name: String) -> void:
+			if threaded:
 				_on_preview_stage_progress.call_deferred(index, count, fraction, stage_name)
+			else:
+				_on_preview_stage_progress(index, count, fraction, stage_name)
 
 	# set_busy resets the bar even when it is already up, so a restart begins from
 	# nothing rather than from wherever the abandoned run had got to.
 	_preview.set_busy(true)
 	_preview_worker_op = worker
+	_preview_running = true
 
-	if not _threading_enabled:
-		# Straight through on the main thread. The editor is frozen for the length of
-		# the run, so none of what threading exists to allow can happen during it:
-		# nothing can ask for another preview, which means [member _preview_pending]
-		# cannot be set, which means the handler below cannot recurse back into here.
-		var started := Time.get_ticks_msec()
-		var result := worker.process_image(source)
-		_on_preview_done(source, result, Time.get_ticks_msec() - started)
+	if not threaded:
+		_run_preview_here(worker, source)
 		return
 
 	_preview_thread = Thread.new()
 	_preview_thread.start(_preview_worker.bind(worker, source))
+
+
+## The run with threading off: on the main thread, a stage at a time.
+##
+## Stepped rather than run straight through, because a bar nobody can see is not a
+## bar. The main thread does the painting, so while it is inside a stack of stages
+## nothing on screen changes — set_busy and every report in between would land as one
+## repaint at the end, on their way out. Yielding between stages gets each of them
+## drawn.
+##
+## The editor is live during those yields, which the straight-through version never
+## was, so everything that guards a threaded run has to hold here too: the request
+## arriving mid-run is caught by [member _preview_running] and cancels this one, and
+## the answer is dropped if the dock left the tree while a stage was running.
+func _run_preview_here(worker: IWOperation, source: Image) -> void:
+	var started := Time.get_ticks_msec()
+	var result: Image
+	if worker is IWPipeline:
+		result = await (worker as IWPipeline).process_image_stepped(source, get_tree().process_frame)
+	else:
+		# Nothing to step through. One call, and the bar stands still for it.
+		result = worker.process_image(source)
+	if _shutting_down:
+		return
+	_on_preview_done(source, result, Time.get_ticks_msec() - started)
 
 
 ## The whole of what runs off the main thread.
@@ -1608,10 +1638,13 @@ func _on_preview_done(source: Image, result: Image, elapsed: int) -> void:
 		return
 	if _preview_thread != null:
 		# Returns at once — the worker is already done, this is the bookkeeping
-		# Thread insists on before it can be let go.
+		# Thread insists on before it can be let go. Null when the run was unthreaded,
+		# which is the whole of the difference by the time an answer gets here.
 		_preview_thread.wait_to_finish()
 		_preview_thread = null
 	_preview_worker_op = null
+	# Before the restart below rather than after, since that sets it again.
+	_preview_running = false
 
 	# Kept only while it still describes what is on screen. A run whose image was
 	# swapped out under it, or one already superseded by another request, is a

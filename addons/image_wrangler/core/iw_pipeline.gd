@@ -85,33 +85,89 @@ func has_keying_stage() -> bool:
 
 
 func process_image(source: Image) -> Image:
-	var ctx := IWPipelineContext.from_image(source)
-	# Nothing to process and nothing a stage could say about it. The source is the
-	# honest answer, and every buffer below would need a special case for a zero
-	# length otherwise.
-	if ctx.pixel_count == 0:
-		return source
-
-	_plan_progress()
-	if not report_progress(0.0):
+	var ctx := _begin_run(source)
+	if ctx == null:
 		return source
 
 	for i in stages.size():
-		var stage := stages[i]
-		if not stage.enabled:
+		if not stages[i].enabled:
 			continue
-		stage.owner = self
-		stage.progress_reporter = _stage_reporter(i)
-		stage.process_context(ctx)
-		# Cleared rather than left pointing at this run, so a stage handed to
-		# another pipeline cannot report into the one that finished with it.
-		stage.progress_reporter = Callable()
-		stage.owner = null
-		if not report_progress(_offsets[i] + _spans[i]):
+		if not _run_stage(ctx, i):
 			return source
 
 	report_progress(1.0)
 	return IWCompose.compose(ctx)
+
+
+## The same run as [method process_image], awaiting [param between_stages] before
+## each stage.
+##
+## For running on the main thread, where [method process_image] would hold it for the
+## whole stack. Nothing on screen is repainted while the main thread is inside a call,
+## so a bar driven from there is seen at the start and at the end and never in between
+## — it may as well not be there. Handing control back between stages lets the frame
+## the reports have piled up on actually be drawn.
+##
+## Only between stages, though: a stage is one call and cannot be interrupted, so this
+## does not make the editor usable during a run. It makes the bar move stage by stage,
+## which is enough to say which stage is the slow one.
+##
+## Not for the worker: awaiting is a main-thread notion, and the thread is already the
+## answer to the same problem.
+func process_image_stepped(source: Image, between_stages: Signal) -> Image:
+	var ctx := _begin_run(source)
+	if ctx == null:
+		return source
+
+	for i in stages.size():
+		if not stages[i].enabled:
+			continue
+		# Named before it runs rather than after, so the caption says what the editor
+		# is about to be busy with. Reporting it after would leave the name of the
+		# stage that has just finished on screen for the length of the next one.
+		if stage_progress_reporter.is_valid():
+			stage_progress_reporter.call(i, stages.size(), 0.0, stages[i].get_operation_name())
+		await between_stages
+		# Checked on the way out of the yield as well as inside the stage, so a run
+		# cancelled while it was parked drops out here rather than paying for one
+		# more stage first. Being parked is most of an unthreaded run's life, and it
+		# is exactly when a cancel is most likely to arrive.
+		if cancelled:
+			return source
+		if not _run_stage(ctx, i):
+			return source
+
+	report_progress(1.0)
+	return IWCompose.compose(ctx)
+
+
+## Sets a run up: the shared context, the progress plan, and the opening report.
+##
+## Null means there is nothing to run — an image with no pixels, about which no stage
+## could say anything and for which every buffer below would need a zero-length special
+## case, or a cancel that arrived before the first stage.
+func _begin_run(source: Image) -> IWPipelineContext:
+	var ctx := IWPipelineContext.from_image(source)
+	if ctx.pixel_count == 0:
+		return null
+	_plan_progress()
+	if not report_progress(0.0):
+		return null
+	return ctx
+
+
+## Runs the enabled stage at [param index] into [param ctx], and reports where that
+## leaves the overall bar. False means the run has been cancelled.
+func _run_stage(ctx: IWPipelineContext, index: int) -> bool:
+	var stage := stages[index]
+	stage.owner = self
+	stage.progress_reporter = _stage_reporter(index)
+	stage.process_context(ctx)
+	# Cleared rather than left pointing at this run, so a stage handed to
+	# another pipeline cannot report into the one that finished with it.
+	stage.progress_reporter = Callable()
+	stage.owner = null
+	return report_progress(_offsets[index] + _spans[index])
 
 
 ## Splits the 0-to-1 overall fraction between the enabled stages by weight.
