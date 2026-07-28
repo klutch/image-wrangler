@@ -75,6 +75,25 @@ doing or the threading's.
 Off for now. Processing files is unaffected either way; only the
 preview is threaded."""
 
+## Whether saving one of this addon's own scripts rebuilds the interface by itself.
+##
+## On, because the alternative is remembering to press the shortcut — and an edit that
+## appears to have done nothing, when what actually happened is that nothing built it a
+## second time, is a confusing thing to debug. Set false to rebuild only on demand.
+const AUTO_REBUILD := true
+
+## Seconds to let the editor finish reloading before building against the new code.
+##
+## The signal says a reload is coming, not that it has happened: the editor collects the
+## changed resources and swaps them on the next idle. Rebuilding inside the signal would
+## run the old code one more time, which looks exactly like the feature not working.
+const REBUILD_SETTLE := 0.3
+
+## Where a script has to live for a change to it to mean anything here. Everything else
+## the editor reloads — another addon, a script in the project proper — is none of this
+## dock's business.
+const ADDON_ROOT := "res://addons/image_wrangler/"
+
 ## Settings edits arrive in bursts while a slider is dragged; collapse them.
 const PREVIEW_DEBOUNCE := 0.15
 
@@ -199,6 +218,13 @@ var _fold_state: Dictionary = {}
 ## the only defence.
 var _refreshing := false
 
+## Whether a rebuild is already waiting out [constant REBUILD_SETTLE].
+##
+## One save can reload a dozen scripts and the signal arrives per batch, so without this
+## a busy save would queue a rebuild for each of them and the dock would be taken apart
+## and put back together several times over.
+var _rebuild_queued := false
+
 ## Path the pending autosave belongs to, captured when it was scheduled: the
 ## selection can move before the timer fires.
 var _autosave_path := ""
@@ -275,6 +301,12 @@ func _enter_tree() -> void:
 	# back, and the flag would otherwise survive as a permanent mute.
 	_shutting_down = false
 
+	# Connected here rather than in [method _ready], so it is paired with the disconnect
+	# in [method _exit_tree] and a dock put back into the tree is listening again.
+	var filesystem := EditorInterface.get_resource_filesystem()
+	if filesystem != null and not filesystem.resources_reload.is_connected(_on_resources_reload):
+		filesystem.resources_reload.connect(_on_resources_reload)
+
 
 func _ready() -> void:
 	# Only a floor, so the splitters between the columns stay freely draggable.
@@ -300,15 +332,29 @@ func _ready() -> void:
 ## Escape and Backspace are further gated on a region actually being drawn, so
 ## they do nothing at all the rest of the time — Backspace especially, which has
 ## an obvious meaning elsewhere and must not be swallowed here.
+##
+## Ctrl+Shift+R rebuilds the interface, which is a development affordance rather than
+## a feature: see [method _rebuild_ui]. It takes a modifier so it cannot be hit by
+## accident, and being scoped to the dock like the rest, it leaves the combination free
+## everywhere else in the editor.
 func _unhandled_key_input(event: InputEvent) -> void:
 	if _preview == null or not is_visible_in_tree():
 		return
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
-	if key.ctrl_pressed or key.alt_pressed or key.shift_pressed or key.meta_pressed:
-		return
 	if not get_global_rect().has_point(get_global_mouse_position()):
+		return
+
+	if key.keycode == KEY_R and key.ctrl_pressed and key.shift_pressed \
+			and not key.alt_pressed and not key.meta_pressed:
+		# Before the rebuild rather than after it: what this is called on is about to be
+		# taken apart, and marking the key handled is not something to leave until then.
+		accept_event()
+		_rebuild_ui()
+		return
+
+	if key.ctrl_pressed or key.alt_pressed or key.shift_pressed or key.meta_pressed:
 		return
 
 	if key.keycode == KEY_H:
@@ -341,6 +387,11 @@ func _exit_tree() -> void:
 	# Before anything else: the join below pumps no messages, but a worker that
 	# finishes during it will have queued its report by the time this returns.
 	_shutting_down = true
+
+	var filesystem := EditorInterface.get_resource_filesystem()
+	if filesystem != null and filesystem.resources_reload.is_connected(_on_resources_reload):
+		filesystem.resources_reload.disconnect(_on_resources_reload)
+
 	_flush_autosave()
 	_preview_pending = false
 	# Asked to stop before being waited on, so the wait is however long the current
@@ -360,13 +411,184 @@ func _exit_tree() -> void:
 
 ## Builds the file operation and its form. One instance for the session, since a
 ## rename scheme describes the batch rather than any one image.
+##
+## The operation is made only when there is not one already, so that rebuilding the
+## dock rebuilds the form without resetting what has been dialled into it — the whole
+## point of the instance lasting the session.
 func _build_rename() -> void:
-	var script: GDScript = load(RENAME_SCRIPT)
-	if script == null:
-		push_error("Image Wrangler: could not load operation script at %s" % RENAME_SCRIPT)
-		return
-	_rename = script.new()
+	if _rename == null:
+		var script: GDScript = load(RENAME_SCRIPT)
+		if script == null:
+			push_error("Image Wrangler: could not load operation script at %s" % RENAME_SCRIPT)
+			return
+		_rename = script.new()
 	SettingsBuilder.build(_rename, _rename_box, _on_setting_changed, _fold_state, "rename")
+
+
+## Rebuilds the dock when one of this addon's scripts has been reloaded.
+##
+## [param resources] is everything the editor is about to swap, which is how this can
+## ignore the rest of the project — and, more to the point, ignore the sidecar the dock
+## writes itself. A rebuild flushes a pending autosave, so a rule that fired on any file
+## at all would have the dock rebuilding in response to its own writing.
+##
+## Only the arrival is handled here. The rebuild waits, because at this moment the new
+## code has not been loaded yet — see [constant REBUILD_SETTLE].
+func _on_resources_reload(resources: PackedStringArray) -> void:
+	if not AUTO_REBUILD or _rebuild_queued or _shutting_down or not is_inside_tree():
+		return
+
+	var ours := false
+	for path in resources:
+		if path.begins_with(ADDON_ROOT) and path.ends_with(".gd"):
+			ours = true
+			break
+	if not ours:
+		return
+
+	# A half-drawn region lives on the control a rebuild throws away. Losing one to a
+	# file being saved in another window is not a trade worth making silently, so the
+	# rebuild is left to the shortcut and the line below says so.
+	var drawing := _drawing_list()
+	if drawing != null and drawing.draft_index() >= 0:
+		_set_status("Scripts changed. Finish the region, then Ctrl+Shift+R to rebuild.")
+		return
+
+	_rebuild_queued = true
+	# A [SceneTreeTimer] rather than one of the dock's own, which are children and would
+	# be freed by the very rebuild they are waiting to start. Connected rather than
+	# awaited, because this script is itself among the ones about to be reloaded and a
+	# suspended coroutine belongs to the version being replaced.
+	get_tree().create_timer(REBUILD_SETTLE).timeout.connect(_on_rebuild_settled)
+
+
+func _on_rebuild_settled() -> void:
+	_rebuild_queued = false
+	# The wait is long enough for the dock to have been taken out from under it, or for
+	# the plugin to have been switched off entirely.
+	if _shutting_down or not is_inside_tree():
+		return
+	_rebuild_ui()
+	_set_status("Scripts reloaded. Interface rebuilt.")
+
+
+## Throws the interface away and builds it again, keeping the session.
+##
+## For working on the layout. Saving a [code]@tool[/code] script swaps the code under
+## the instances already in the tree, but re-runs neither [method _init] nor
+## [method _ready] — so a changed method body or constant takes effect at its next call,
+## while every change to how a control is *made* stays invisible. Which toolbar
+## something goes on, what its tooltip says, whether it exists at all: none of that can
+## appear until something builds it a second time. Toggling the plugin does that and
+## takes the session with it. This does it and keeps it.
+##
+## What survives does so because it lives on the dock rather than in a control: the
+## source list, each image's stack and fold state, the image being looked at, the file
+## operation. What is read off the controls here — the selection, the zoom, the mode, a
+## typed suffix — is put back afterwards. Everything else is built fresh, which is the
+## entire point of the exercise.
+func _rebuild_ui() -> void:
+	# A pending sidecar write belongs to the stack about to be taken down, and the flush
+	# resolves it against the current mode, so it goes before any of this.
+	_flush_autosave()
+
+	# A run in flight reports into controls that are about to be freed. Cancelled and
+	# joined exactly as [method _exit_tree] does it, and for the same reason — the wait
+	# is however long the current pass has left. An unthreaded run cannot be waited on,
+	# but the cancel reaches it at its next checkpoint and what it reports then lands on
+	# the rebuilt controls harmlessly.
+	_preview_pending = false
+	if _preview_worker_op != null:
+		_preview_worker_op.cancelled = true
+	if _preview_thread != null:
+		_preview_thread.wait_to_finish()
+		_preview_thread = null
+	_preview_worker_op = null
+	_preview_running = false
+
+	var path := _current_path()
+	var selected := _selected_index()
+	var mode := _mode
+	var suffix := _suffix_edit.text
+	var fade := _original_fade.value
+	var zoom := _preview.get_zoom()
+	var markers := _preview.markers_visible
+	var threading := _threading_enabled
+	# Back into the store the rebuild reads it out of, so the new form comes up pointed
+	# at the same operation instances rather than at fresh ones carrying defaults.
+	_store_stack(path)
+
+	# Removed before being freed, not merely queued: a queue_free alone leaves the old
+	# columns in the tree for the rest of the frame, laid out alongside the new ones.
+	for child in get_children():
+		remove_child(child)
+		child.queue_free()
+	_forget_controls()
+
+	_build_ui()
+	_build_rename()
+
+	_threading_enabled = threading
+	_thread_toggle.set_pressed_no_signal(threading)
+	_apply_stack_for(path)
+	_refresh_file_list()
+	if selected >= 0 and selected < _file_list.item_count:
+		_file_list.select(selected)
+	_suffix_edit.text = suffix
+	_original_fade.set_value_no_signal(fade)
+	_preview.original_fade = fade * 0.01
+	_preview.markers_visible = markers
+
+	# Held across the mode switch, which clears it: the result on screen a moment ago
+	# still describes this image, and dropping it would blank the preview until the
+	# rerun below lands.
+	var result := _result_image
+	_select_mode(mode)
+	_result_image = result
+	_update_preview_texture()
+	# Deferred, unlike everything above it: the new preview has no size until the
+	# containers have laid out, and a zoom worked out against a viewport of nothing
+	# lands the image somewhere it was never asked to go.
+	_preview.set_zoom.call_deferred(zoom)
+
+	_update_overlays()
+	_update_controls()
+	_update_detail_label()
+	_set_status("Interface rebuilt.")
+
+
+## Drops every reference to a control the build made.
+##
+## Between the teardown and the rebuild each of these names a freed object, and the
+## handful of guards that check for null are written expecting exactly that.
+func _forget_controls() -> void:
+	_pick_controls.clear()
+	_pick_target = null
+	_overlay_owner = null
+	_file_list = null
+	_preview = null
+	_status_label = null
+	_detail_label = null
+	_stack_view = null
+	_modes = null
+	_rename_box = null
+	_original_fade = null
+	_zoom_select = null
+	_zoom_entry = null
+	_thread_toggle = null
+	_refresh_button = null
+	_remove_button = null
+	_clear_button = null
+	_suffix_edit = null
+	_process_selected_button = null
+	_process_all_button = null
+	_debounce = null
+	_autosave = null
+	_open_dialog = null
+	_output_dialog = null
+	_save_dialog = null
+	_overwrite_dialog = null
+	_removal_dialog = null
 
 
 # --- Layout -------------------------------------------------------------
