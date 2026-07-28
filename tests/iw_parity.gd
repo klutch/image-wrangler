@@ -115,6 +115,32 @@ func _build_cases() -> Array:
 		{"name": "gradient_auto_stroke", "image": Fixtures.gradient(32), "stack": Fixtures.stack_full(32, true), "dump": true},
 		{"name": "tiny_minimal", "image": Fixtures.tiny(), "stack": Fixtures.stack_minimal(), "dump": true},
 		{"name": "single_minimal", "image": Fixtures.single(), "stack": Fixtures.stack_minimal(), "dump": true},
+
+		# Tight tolerances, where a flood that reaches one pixel too far shows up as a
+		# flood that reaches everywhere. The set above runs at 0.05, which turned out to
+		# be loose enough to hide a whole class of question.
+		#
+		# Each tolerance is run twice, once with the crevice rule and once without,
+		# because the two answer different questions. Without it a flood may only cross
+		# what its own tolerance covers; with it a colour keyed at 0.01 may stray to 0.26,
+		# and a flood that looks far too eager at a tight tolerance is far more often that
+		# rule working as designed than the flood being wrong.
+		{"name": "tol001_speckled_crevice", "image": Fixtures.speckled(64),
+			"stack": Fixtures.stack_keying(0.01, 1), "dump": true},
+		{"name": "tol001_speckled_nocrevice", "image": Fixtures.speckled(64),
+			"stack": Fixtures.stack_keying(0.01, 0), "dump": true},
+		{"name": "tol001_gradient_crevice", "image": Fixtures.gradient(32),
+			"stack": Fixtures.stack_keying(0.01, 1), "dump": true},
+		{"name": "tol001_gradient_nocrevice", "image": Fixtures.gradient(32),
+			"stack": Fixtures.stack_keying(0.01, 0), "dump": true},
+		{"name": "tol001_enclosed_crevice", "image": Fixtures.enclosed(64),
+			"stack": Fixtures.stack_keying(0.01, 1), "dump": true},
+		{"name": "tol0001_speckled_nocrevice", "image": Fixtures.speckled(64),
+			"stack": Fixtures.stack_keying(0.001, 0), "dump": true},
+		# Tolerance zero: nothing may be crossed that is not the key exactly. Any pixel
+		# claimed beyond the flat ground is a flood going somewhere it was not invited.
+		{"name": "tol000_speckled_nocrevice", "image": Fixtures.speckled(64),
+			"stack": Fixtures.stack_keying(0.0, 0), "dump": true},
 	]
 
 	# The real one, last, because it is the slow one. Its sidecar is a version 1 file,
@@ -130,6 +156,13 @@ func _build_cases() -> Array:
 		cases.append({"name": "sheet_sidecar", "image": sheet, "stack": sidecar, "dump": false})
 	var size := maxi(sheet.get_width(), sheet.get_height())
 	cases.append({"name": "sheet_full", "image": sheet, "stack": Fixtures.stack_full(size), "dump": false})
+	# The tight tolerances on real artwork too. A synthetic fixture has flat grounds and
+	# hard edges by construction; a drawing has neither, and the pixels where a flood
+	# decides whether to keep going are exactly the ones a drawing is made of.
+	cases.append({"name": "sheet_tol001_crevice", "image": sheet,
+		"stack": Fixtures.stack_keying(0.01, 1), "dump": false})
+	cases.append({"name": "sheet_tol001_nocrevice", "image": sheet,
+		"stack": Fixtures.stack_keying(0.01, 0), "dump": false})
 	return cases
 
 

@@ -205,6 +205,31 @@ static func stack_full(size: int, auto_stroke := false) -> Array[IWStackOperatio
 	return stages
 
 
+## Remove Background and Remove Crevice alone, at a stated tolerance.
+##
+## Isolates the flood from everything downstream of it. A tolerance of 0.01 is where a
+## flood that crosses a boundary it should not is most visible: at 0.05 a pixel a step
+## over the line is still nearly within reach, where at 0.01 it is five times outside and
+## the answer is unambiguous.
+##
+## [param crevice_reach] of zero switches the crevice rule off, which is the control:
+## with the rule on, a colour keyed at 0.01 may still stray to 0.01 + [param crevice_tolerance],
+## and telling the two apart is most of the question when a flood looks too eager.
+static func stack_keying(
+		tolerance: float, crevice_reach: int, crevice_tolerance := 0.25) -> Array[IWStackOperation]:
+	var stages: Array[IWStackOperation] = []
+	var background := _remove_background()
+	background.get_settings().remove_colors.clear()
+	background.get_settings().remove_colors.add(Color.WHITE, tolerance)
+	stages.append(background)
+
+	var crevice: IWStackOperation = load(OP_REMOVE_CREVICE).new()
+	crevice.get_settings().crevice_reach = crevice_reach
+	crevice.get_settings().crevice_tolerance = crevice_tolerance
+	stages.append(crevice)
+	return stages
+
+
 static func _remove_background() -> IWStackOperation:
 	var stage: IWStackOperation = load(OP_REMOVE_BACKGROUND).new()
 	var settings := stage.get_settings()
