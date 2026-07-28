@@ -7,6 +7,8 @@ build/
 .vscode/
 *.depren
 flower_sheets/
+*.dll
+*.obj
 
 # GDExtension build output. The addon's own bin/ is deliberately NOT ignored — the
 # built library is committed so the addon works from a checkout — but the .dll is the
