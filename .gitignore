@@ -7,7 +7,6 @@ build/
 .vscode/
 *.depren
 flower_sheets/
-addons/image_wrangler/~*.dll
 
 # GDExtension build output. The addon's own bin/ is deliberately NOT ignored — the
 # built library is committed so the addon works from a checkout — but the .dll is the
@@ -19,6 +18,7 @@ src/*.obj
 addons/image_wrangler/bin/*.exp
 addons/image_wrangler/bin/*.lib
 addons/image_wrangler/bin/*.pdb
+addons/image_wrangler/bin/~image_wrangler.windows.editor.x86_64.dll
 
 # The vendored Open Image Denoise runtime, committed on purpose — see
 # thirdparty/oidn/README-vendored.md. It has to sit beside the extension, because that is
