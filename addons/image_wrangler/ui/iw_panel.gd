@@ -63,6 +63,18 @@ At 0 you see the result, at 100 the untouched source, and in between both
 at once — which is how you judge whether an edge was eaten or a fringe
 left behind, since the two are then in the same place at the same time."""
 
+const THREADING_TOOLTIP := """Runs the preview on a worker thread instead of on the main one.
+
+With it on, the editor stays responsive while an image is being worked
+and a run already in flight can be abandoned the moment a setting
+changes. With it off, every run blocks the editor until it finishes —
+slower to work with, but there is one thread touching the image, which
+is what you want while judging whether a result is the operation's
+doing or the threading's.
+
+Off for now. Processing files is unaffected either way; only the
+preview is threaded."""
+
 ## Settings edits arrive in bursts while a slider is dragged; collapse them.
 const PREVIEW_DEBOUNCE := 0.15
 
@@ -118,6 +130,13 @@ var _result_image: Image
 ## blocks, so a second one would reintroduce exactly the stall the thread exists
 ## to remove — [member _preview_pending] queues the next run instead.
 var _preview_thread: Thread
+
+## Whether a preview is allowed to leave the main thread.
+##
+## Read once per run, when the run starts, so flipping it never has to reach into a
+## worker that is already going — that one finishes the way it began and the next
+## one picks up the new answer.
+var _threading_enabled := false
 
 ## Whether something asked for a preview while one was already running, which also
 ## means whatever comes back from that run is out of date.
@@ -218,6 +237,7 @@ var _rename_box: VBoxContainer
 var _original_fade: HSlider
 var _zoom_select: OptionButton
 var _zoom_entry: LineEdit
+var _thread_toggle: CheckBox
 var _refresh_button: Button
 var _remove_button: Button
 var _clear_button: Button
@@ -341,6 +361,8 @@ func _build_rename() -> void:
 func _build_ui() -> void:
 	add_theme_constant_override("separation", 4)
 
+	add_child(_build_top_bar())
+
 	var columns := HSplitContainer.new()
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(columns)
@@ -366,6 +388,36 @@ func _build_ui() -> void:
 	_autosave.wait_time = AUTOSAVE_DEBOUNCE
 	_autosave.timeout.connect(_flush_autosave)
 	add_child(_autosave)
+
+
+## The strip across the whole dock, above the columns.
+##
+## Above rather than in the preview toolbar, because what is on it is not about
+## the image being looked at: it is about how the dock runs, and it holds while
+## the selection moves.
+func _build_top_bar() -> Control:
+	var row := HBoxContainer.new()
+
+	_thread_toggle = CheckBox.new()
+	_thread_toggle.text = "Enable Threading"
+	_thread_toggle.tooltip_text = THREADING_TOOLTIP
+	_thread_toggle.button_pressed = _threading_enabled
+	_thread_toggle.toggled.connect(_on_threading_toggled)
+	row.add_child(_thread_toggle)
+
+	# So nothing added here later is pulled to the middle by the box centring its
+	# children against a container that is wider than they are.
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
+
+	return row
+
+
+## Takes effect at the next run. A worker already going is left alone — see
+## [member _threading_enabled].
+func _on_threading_toggled(pressed: bool) -> void:
+	_threading_enabled = pressed
 
 
 func _build_source_column() -> Control:
@@ -1480,8 +1532,8 @@ func _run_preview() -> void:
 	_start_preview()
 
 
-## Hands the operation to a worker thread and puts the preview into its working
-## state.
+## Hands the operation to a worker thread — or, with threading off, runs it right
+## here — and puts the preview into its working state.
 func _start_preview() -> void:
 	_preview_pending = false
 	if _shutting_down:
@@ -1506,6 +1558,17 @@ func _start_preview() -> void:
 	# nothing rather than from wherever the abandoned run had got to.
 	_preview.set_busy(true)
 	_preview_worker_op = worker
+
+	if not _threading_enabled:
+		# Straight through on the main thread. The editor is frozen for the length of
+		# the run, so none of what threading exists to allow can happen during it:
+		# nothing can ask for another preview, which means [member _preview_pending]
+		# cannot be set, which means the handler below cannot recurse back into here.
+		var started := Time.get_ticks_msec()
+		var result := worker.process_image(source)
+		_on_preview_done(source, result, Time.get_ticks_msec() - started)
+		return
+
 	_preview_thread = Thread.new()
 	_preview_thread.start(_preview_worker.bind(worker, source))
 
