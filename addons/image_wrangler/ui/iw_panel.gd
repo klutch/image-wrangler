@@ -10,6 +10,7 @@ const ColorList := preload("res://addons/image_wrangler/ui/iw_color_list.gd")
 const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd")
 const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
 const StackView := preload("res://addons/image_wrangler/ui/iw_stack_view.gd")
+const HistoryView := preload("res://addons/image_wrangler/ui/iw_history_view.gd")
 
 ## Every [IWStackOperation] the stack can hold, in the order the Create dropdown
 ## offers them. Add new stack operations here.
@@ -139,7 +140,15 @@ file untouched, so it keeps whatever format it already had."""
 ## Rename is not a stage and cannot be one — it does not touch pixels, and its
 ## settings describe the batch rather than any one image — so it lives beside the
 ## stack rather than in it, and the two are switched between.
-enum Mode { IMAGE, RENAME }
+## Tab order, and the tab index is the mode. History sits beside Operations rather than
+## after Rename because it is about the stack: everything it lists is an edit to one, and
+## a rename scheme has no history because it belongs to the batch rather than to an image.
+##
+## For everything that follows from the mode, History [i]is[/i] image mode — it previews,
+## it autosaves, it processes pixels. The tests below are written against [constant
+## Mode.RENAME] rather than for [constant Mode.IMAGE] for that reason: a new tab on the
+## image side should not have to find every one of them.
+enum Mode { IMAGE, HISTORY, RENAME }
 
 var _mode := Mode.IMAGE
 
@@ -266,9 +275,34 @@ var _overlay_owner: Control
 var _status_label: Label
 var _detail_label: Label
 var _stack_view: Control
+var _history_view: Control
 
-## The Operations / Rename tabs. Tab order is [enum Mode] order, so the index the
-## container reports is the mode itself.
+## One [IWHistory] per image path, made when the image is first shown.
+##
+## Session only, and deliberately: what an image's settings are belongs on disk, how they
+## got that way does not. Keyed by path like [member _stacks_by_path], and never pruned —
+## an image taken out of the list and put back has its edits waiting, which is what a
+## user who removed a row by accident expects.
+var _history_by_path: Dictionary = {}
+
+## Operation id to display name, filled on first use. Built once because naming a stage
+## otherwise means instantiating every operation script, and a history row asks per row.
+var _operation_names: Dictionary = {}
+
+## The current image's stack as it stood after the last recorded edit, encoded and
+## stringified.
+##
+## Compared against on every change to answer "did anything actually move", which is what
+## makes the two funnels below safe to hook: they fire for edits that changed nothing, and
+## a history full of entries that did nothing would be worse than no history.
+var _shadow_text := ""
+
+## Set while an undo or a redo is putting a state back, so the rebuild that causes is not
+## recorded as a fresh edit.
+var _applying_history := false
+
+## The Operations / History / Rename tabs. Tab order is [enum Mode] order, so the index
+## the container reports is the mode itself.
 var _modes: TabContainer
 
 ## Rename's form, built into its own box and hidden while the stack is showing.
@@ -845,6 +879,13 @@ func _build_operation_column() -> Control:
 	_stack_view.paste_requested.connect(_on_paste_stack)
 	stack_page.add_child(_stack_view)
 
+	# No scroll of its own: the list inside it scrolls, and nesting the two would give
+	# the tab a scrollbar that moved a list with a scrollbar in it.
+	_history_view = HistoryView.new()
+	_history_view.name = "History"
+	_history_view.revert_requested.connect(_on_history_revert)
+	_modes.add_child(_history_view)
+
 	var rename_page := ScrollContainer.new()
 	rename_page.name = "Rename"
 	rename_page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -855,6 +896,8 @@ func _build_operation_column() -> Control:
 	rename_page.add_child(_rename_box)
 
 	_modes.set_tab_tooltip(Mode.IMAGE, "Build a stack of operations that rewrite the pixels.")
+	_modes.set_tab_tooltip(Mode.HISTORY,
+			"Every edit made to this image's stack this session.\nClick one to rewind to it. Held in memory only, and never saved.")
 	_modes.set_tab_tooltip(Mode.RENAME,
 			"Write the files out under new names, pixels untouched.\nDescribes the whole batch rather than one image, so it is not part of the stack.")
 
@@ -880,6 +923,7 @@ func _select_mode(mode: int) -> void:
 	# Any pending write belongs to whatever was showing, and the flush resolves it
 	# against the current mode — so it has to go first.
 	_flush_autosave()
+	var previous := _mode
 	_mode = mode
 	if _modes != null and _modes.current_tab != mode:
 		_modes.current_tab = mode
@@ -890,12 +934,16 @@ func _select_mode(mode: int) -> void:
 	_update_overlays()
 	_refresh_suffix()
 
-	# The other mode's result no longer describes anything, so it must not be left on
-	# screen — under a fade it would be presented as this one's.
-	_result_image = null
+	# The other side's result no longer describes anything, so it must not be left on
+	# screen — under a fade it would be presented as this one's. Crossing between
+	# Operations and History is not that: both are the stack, the result on screen is
+	# still the stack's, and blanking it would make looking at the history cost the
+	# picture you were looking at it about.
+	if (previous == Mode.RENAME) != (mode == Mode.RENAME):
+		_result_image = null
 	_update_preview_texture()
 	_update_detail_label()
-	if mode == Mode.IMAGE and _auto_preview_allowed():
+	if mode != Mode.RENAME and _auto_preview_allowed():
 		_schedule_preview()
 
 
@@ -1154,6 +1202,15 @@ func _apply_stack_for(path: String) -> void:
 	_stack_view.set_stages(stages)
 	_refreshing = false
 
+	# The shadow has to describe this image before anything can be diffed against it, and
+	# the history has to be seeded from the same moment or its first row would be some
+	# other image's stack. Both before any edit can arrive, which is why they are here
+	# rather than anywhere the selection is handled.
+	_shadow_text = JSON.stringify(SettingsIO.encode_stack(_stack_records()))
+	if not path.is_empty():
+		_history_for(path)
+	_refresh_history_view()
+
 
 ## A fresh instance of each operation in [constant DEFAULT_STACK], in order.
 func _default_stages() -> Array[IWStackOperation]:
@@ -1217,6 +1274,7 @@ func _on_stack_changed() -> void:
 		return
 	_release_pick_if_disabled()
 	_store_stack(_current_path())
+	_capture_history()
 	_refresh_notes()
 	_schedule_autosave()
 	_refresh_suffix()
@@ -1231,6 +1289,278 @@ func _store_stack(path: String) -> void:
 	if path.is_empty():
 		return
 	_stacks_by_path[path] = _stack_records()
+
+
+# --- History ------------------------------------------------------------
+
+## Records whatever just changed about the stack, if anything did.
+##
+## [b]Called from the two funnels every edit already passes through[/b] — [method
+## _on_setting_changed] and [method _on_stack_changed] — rather than from the places
+## edits are made. That is the whole reason the history can claim to be complete: a
+## generated spinner, an island picked off the preview, a dragged polygon vertex, a
+## reorder and a pasted stack all arrive here, and so will whatever the next operation
+## brings with it. Wiring the sources instead would mean a list to keep in step, and the
+## failure mode of forgetting one is an edit that silently cannot be undone.
+##
+## What it does is diff: the stack as it stands against [member _shadow_text], which is
+## how it stood after the last thing recorded. No difference, no command — these funnels
+## fire for edits that changed nothing, and rows that do nothing are worse than no rows.
+func _capture_history() -> void:
+	if _applying_history or _refreshing:
+		return
+	var path := _current_path()
+	if path.is_empty():
+		return
+
+	var after := SettingsIO.encode_stack(_stack_records())
+	var after_text := JSON.stringify(after)
+	if after_text == _shadow_text:
+		return
+
+	var history := _history_for(path)
+	var before := history.current_state()
+	var described := _describe_change(before, after)
+	var key: StringName = described["merge_key"]
+
+	# Asked before describing, so a gesture already under way is described from where it
+	# started rather than from its last step. See IWCommand.absorb.
+	var top: IWCommand = history.mergeable_top(key, Time.get_ticks_msec())
+	if top != null:
+		described = _describe_change(top.before, after)
+
+	history.record(IWCommand.new(
+			described["label"], key, before, after, _apply_history_state))
+	_shadow_text = after_text
+	_refresh_history_view()
+
+
+## The history for one image, seeded from what is on screen the first time it is asked
+## for.
+##
+## Seeded rather than left empty so the first row is the state the image opened in, which
+## is what makes the very first edit reversible.
+func _history_for(path: String) -> IWHistory:
+	if _history_by_path.has(path):
+		return _history_by_path[path]
+	var history := IWHistory.new()
+	history.seed(SettingsIO.encode_stack(_stack_records()))
+	_history_by_path[path] = history
+	return history
+
+
+## Puts the stack into a recorded state. Handed to every [IWCommand] as its applier.
+##
+## Deliberately only the state. A rewind of forty steps calls this forty times, and doing
+## the preview, the autosave and the notes each time would be thirty-nine runs of work
+## nobody asked for against states nobody will see. Those happen once, in [method
+## _on_history_revert], after the last step has landed.
+func _apply_history_state(state: Array) -> void:
+	var registry := _operation_registry()
+	var stages: Array[IWStackOperation] = []
+	for record: Dictionary in SettingsIO.decode_stack_records(state, registry, "the history"):
+		var script: Variant = registry.get(record["id"])
+		if not (script is Script):
+			continue
+		var stage: IWStackOperation = (script as Script).new()
+		stage.set_settings(record["settings"])
+		stage.enabled = bool(record["enabled"])
+		stages.append(stage)
+
+	# Both flags, and for different reasons: _refreshing stops the rebuild being read as
+	# a settings edit, _applying_history stops anything that slips past it being recorded.
+	var was_refreshing := _refreshing
+	_refreshing = true
+	_applying_history = true
+	_stack_view.set_stages(stages)
+	_applying_history = false
+	_refreshing = was_refreshing
+
+
+## A row in the History tab was clicked.
+func _on_history_revert(index: int) -> void:
+	var path := _current_path()
+	if path.is_empty() or not _history_by_path.has(path):
+		return
+	var history: IWHistory = _history_by_path[path]
+	if index == history.current_index():
+		return
+
+	history.go_to(index)
+
+	# The state is in place; everything that follows from it happens once, here.
+	_shadow_text = JSON.stringify(history.current_state())
+	_store_stack(path)
+	_refresh_notes()
+	_refresh_suffix()
+	_schedule_autosave()
+	_refresh_history_view()
+	if _auto_preview_allowed():
+		_schedule_preview()
+	else:
+		_set_status("Rewound. Press Refresh to update the preview.")
+
+
+func _refresh_history_view() -> void:
+	if _history_view == null:
+		return
+	var path := _current_path()
+	if path.is_empty() or not _history_by_path.has(path):
+		_history_view.set_rows([], IWHistory.BASE_INDEX)
+		return
+	var history: IWHistory = _history_by_path[path]
+	_history_view.set_rows(history.rows(), history.current_index())
+
+
+# --- Describing an edit -------------------------------------------------
+
+## What to call the difference between two stack states, and which consecutive edits it
+## is the same gesture as.
+##
+## Returns [code]{"label": String, "merge_key": StringName}[/code]. An empty merge key
+## never folds into anything, which is right for every structural edit: adding a stage
+## twice is two additions, however fast they were done.
+func _describe_change(before: Array, after: Array) -> Dictionary:
+	var before_ids := _ids_of(before)
+	var after_ids := _ids_of(after)
+
+	if before_ids != after_ids:
+		if after.size() > before.size():
+			return _plain("Add %s" % _added_name(before_ids, after_ids))
+		if after.size() < before.size():
+			return _plain("Remove %s" % _added_name(after_ids, before_ids))
+		return _plain("Reorder operations")
+
+	for i in after.size():
+		var was := bool((before[i] as Dictionary).get("enabled", true))
+		var now := bool((after[i] as Dictionary).get("enabled", true))
+		if was != now:
+			return _plain("%s %s" % ["Enable" if now else "Disable", _name_for_id(after_ids[i])])
+
+	for i in after.size():
+		var was_settings: Dictionary = (before[i] as Dictionary).get("settings", {})
+		var now_settings: Dictionary = (after[i] as Dictionary).get("settings", {})
+		if JSON.stringify(was_settings) == JSON.stringify(now_settings):
+			continue
+		var stage_name := _name_for_id(after_ids[i])
+		var property := _sole_scalar_change(was_settings, now_settings)
+		if property.is_empty():
+			# A list control rewrote a nested Resource, or several values moved at once.
+			# Nothing useful to name, but it still merges, so dragging a polygon vertex
+			# is one row rather than one per frame of the drag.
+			return {"label": "%s settings" % stage_name,
+					"merge_key": StringName("stage:%d" % i)}
+		return {
+			"label": "%s %s" % [_label_for(i, property), _transition(i, property,
+					was_settings[property], now_settings[property])],
+			"merge_key": StringName("set:%d:%s" % [i, property]),
+		}
+
+	return _plain("Changed")
+
+
+func _plain(text: String) -> Dictionary:
+	return {"label": text, "merge_key": &""}
+
+
+func _ids_of(state: Array) -> PackedStringArray:
+	var out := PackedStringArray()
+	for record: Dictionary in state:
+		out.append(String(record.get("id", "")))
+	return out
+
+
+## The first id [param bigger] has that [param smaller] does not account for, as a display
+## name. Used for both directions — an addition is what the new list has spare, and a
+## removal is what the old one had.
+func _added_name(smaller: PackedStringArray, bigger: PackedStringArray) -> String:
+	var counts := {}
+	for id: String in smaller:
+		counts[id] = int(counts.get(id, 0)) + 1
+	for id: String in bigger:
+		var left := int(counts.get(id, 0))
+		if left <= 0:
+			return _name_for_id(id)
+		counts[id] = left - 1
+	return "an operation"
+
+
+## The one property that changed, or an empty String when it was not exactly one, or not
+## something worth quoting a value for.
+func _sole_scalar_change(before: Dictionary, after: Dictionary) -> String:
+	var found := ""
+	for key: Variant in after:
+		var was: Variant = before.get(key)
+		if JSON.stringify(was) == JSON.stringify(after[key]):
+			continue
+		if not found.is_empty():
+			return ""
+		match typeof(after[key]):
+			TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STRING:
+				found = String(key)
+			_:
+				return ""
+	# A key the new state has lost is a change too, and not one to put a value on.
+	for key: Variant in before:
+		if not after.has(key):
+			return ""
+	return found
+
+
+## What the schema calls a property, so a row reads the way the control it came from is
+## labelled rather than the way the variable is spelled.
+func _label_for(stage_index: int, property: String) -> String:
+	var entry := _schema_entry(stage_index, property)
+	if entry.has("label"):
+		return String(entry["label"])
+	return property.capitalize()
+
+
+## One value to another, in the terms the control uses: an enum by its option's name, a
+## bool as on or off, a float without the trailing noise a plain cast leaves.
+func _transition(stage_index: int, property: String, was: Variant, now: Variant) -> String:
+	var entry := _schema_entry(stage_index, property)
+	return "%s → %s" % [_value_text(entry, was), _value_text(entry, now)]
+
+
+func _value_text(entry: Dictionary, value: Variant) -> String:
+	if typeof(value) == TYPE_BOOL:
+		return "on" if value else "off"
+	if int(entry.get("type", -1)) == IWOperation.SettingType.ENUM:
+		var options: Array = entry.get("options", [])
+		var at := int(value)
+		if at >= 0 and at < options.size():
+			return String(options[at])
+	if typeof(value) == TYPE_FLOAT:
+		return String.num(float(value), 3).rstrip("0").rstrip(".")
+	if typeof(value) == TYPE_STRING:
+		return "\"%s\"" % String(value)
+	return str(value)
+
+
+## The schema entry a stage declares for one property, or an empty Dictionary.
+func _schema_entry(stage_index: int, property: String) -> Dictionary:
+	if _stack_view == null:
+		return {}
+	var stages: Array = _stack_view.stages()
+	if stage_index < 0 or stage_index >= stages.size():
+		return {}
+	for entry: Dictionary in (stages[stage_index] as IWStackOperation).get_settings_schema():
+		if String(entry.get("property", "")) == property:
+			return entry
+	return {}
+
+
+## The display name for an operation id.
+func _name_for_id(id: String) -> String:
+	if _operation_names.is_empty():
+		for script_path: String in OPERATION_SCRIPTS:
+			var script: Script = load(script_path)
+			if script == null:
+				continue
+			var probe: IWOperation = script.new()
+			_operation_names[String(probe.get_operation_id())] = probe.get_operation_name()
+	return String(_operation_names.get(id, id))
 
 
 ## The live stack in the codec's record shape, which is what both the sidecar and the
@@ -1717,7 +2047,7 @@ func _update_overlays() -> void:
 	var selected_region := -1
 	var draft_region := -1
 
-	if _mode == Mode.IMAGE:
+	if _mode != Mode.RENAME:
 		for control: Control in _pick_controls:
 			if control is IslandPicker:
 				var picker := control as IslandPicker
@@ -1757,6 +2087,7 @@ func _on_setting_changed() -> void:
 		# And a setting can be what makes a stage need something above it — the first
 		# Subtract island picked is the case — so the notes are asked again too.
 		_refresh_notes()
+		_capture_history()
 	_schedule_autosave()
 	if _mode == Mode.RENAME:
 		_update_detail_label()
@@ -1953,7 +2284,7 @@ func _on_preview_done(source: Image, result: Image, elapsed: int) -> void:
 
 	# Straight into the next run rather than clearing the overlay first, so a held
 	# slider does not strobe it off and on between every pass.
-	if _preview_pending and _source_image != null and _mode == Mode.IMAGE:
+	if _preview_pending and _source_image != null and _mode != Mode.RENAME:
 		_start_preview()
 	else:
 		_preview_pending = false
@@ -2455,7 +2786,7 @@ func _write_pending_outputs() -> void:
 	# Rename copies the file byte for byte rather than decoding and re-encoding it, so
 	# a format this addon cannot write is not turned into a PNG wearing the wrong
 	# extension.
-	var rewrites_pixels := _mode == Mode.IMAGE
+	var rewrites_pixels := _mode != Mode.RENAME
 	# Worked out once for the whole run rather than per file, since it depends on which
 	# sources the run leaves alone.
 	var held_sidecars := _sidecars_held_outside(jobs)

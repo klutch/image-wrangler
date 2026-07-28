@@ -361,6 +361,16 @@ static func stack_to_text(stack: Array) -> String:
 	})
 
 
+## The stack a bare list of encoded records describes.
+##
+## The list [method encode_stack] produces, read back. Used by the undo history, which
+## keeps states rather than files and has no envelope to put them in — and which needs
+## the same decoder as everything else so a recorded state and a saved one cannot come
+## back meaning different things.
+static func decode_stack_records(encoded: Array, registry: Dictionary, source: String) -> Array:
+	return decode_stack({"version": VERSION, "stack": encoded}, registry, source)
+
+
 ## The stack [param text] describes, or an empty Array when it is not one of ours.
 ##
 ## Quiet about text that is simply not a stack — the clipboard holds whatever the user
