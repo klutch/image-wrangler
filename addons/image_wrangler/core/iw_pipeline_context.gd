@@ -102,6 +102,20 @@ var blacked := PackedByteArray()
 ## are none.
 var protect := PackedByteArray()
 
+## Non-zero wherever a flood reached the pixel only by straying past its key, or
+## empty until one has.
+##
+## Two things read it. It is why those pixels are classed as edge rather than
+## background — reaching somewhere by straying is not proof that it is background, so
+## the coverage maths decides them by colour instead. And it is where the next
+## [RemoveCrevice] seeds from, which is what lets two of them in a row get through two
+## constrictions when one could only get through the first.
+##
+## Distinct from the mask for the second of those: the antialiasing band is edge too,
+## and a squeeze seeded from the whole of it would walk a pixel into the subject
+## everywhere at once rather than only where something got through.
+var strayed := PackedByteArray()
+
 ## Non-zero wherever the result is opaque whatever the source was, or empty.
 ##
 ## Distinct from a coverage of 1.0, which still gets multiplied by the alpha the

@@ -15,6 +15,7 @@ const StackView := preload("res://addons/image_wrangler/ui/iw_stack_view.gd")
 ## offers them. Add new stack operations here.
 const OPERATION_SCRIPTS := [
 	"res://addons/image_wrangler/core/remove_background.gd",
+	"res://addons/image_wrangler/core/remove_crevice.gd",
 	"res://addons/image_wrangler/core/refine_edges.gd",
 	"res://addons/image_wrangler/core/island_picker_op.gd",
 	"res://addons/image_wrangler/core/polygon_edit_op.gd",

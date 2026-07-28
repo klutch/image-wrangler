@@ -249,13 +249,19 @@ func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 		return touched
 	# What the flood only squeezed through is edge, not background, along with
 	# everything it reached afterwards — exactly as in the border flood, and for the
-	# reason given there.
+	# reason given there. Remembered on the context as well, so a [RemoveCrevice] below
+	# this can carry on from where an island's own squeeze stopped.
 	if ctx.crevice_reach > 0:
+		var strayed := ctx.strayed
+		if strayed.size() != ctx.pixel_count:
+			strayed.resize(ctx.pixel_count)
 		for i in touched:
 			if mask[i] == IWPipelineContext.MASK_BACKGROUND and weak_steps[i] > 0 \
 					and key_of[i] >= 0:
 				mask[i] = IWPipelineContext.MASK_EDGE
+				strayed[i] = 1
 		ctx.mask = mask
+		ctx.strayed = strayed
 	# The band has to grow from what this opened, or an island region would have a
 	# hard rim where every other edge in the image has a matte.
 	touched.append_array(ctx.grow_edge_band(touched, ctx.edge_width))

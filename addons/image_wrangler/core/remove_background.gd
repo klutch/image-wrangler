@@ -70,11 +70,13 @@ extends IWStackOperation
 ## background, and the flood dies at the frame. Crossing a hole also re-offers the far
 ## side to the whole Remove Colors list, since transparency carries no key to inherit.
 ##
-## [b]Getting into a nook too narrow to flood[/b] is
-## [member RemoveBackgroundSettings.crevice_reach], and it lives here rather than in an
-## operation of its own because it is a rule inside the flood: it is applied against
-## the tolerance of whichever entry the flood is carrying at that moment, so it runs
-## once per colour in the list and each one squeezes on its own terms.
+## [b]Getting into a nook too narrow to flood[/b] is [RemoveCrevice], which is a stage
+## of its own below this one. The rule still runs inside this flood — a squeeze is
+## measured against the tolerance of whichever entry the flood is carrying at that
+## moment — but the terms come off the context rather than out of these settings, so
+## whichever [RemoveCrevice] is above says what they are and every flood below obeys
+## the same ones. A stack with none of them keys strictly within each colour's own
+## tolerance.
 ##
 ## [b]What the other stages do.[/b] Tidying the alpha afterwards is [RefineEdges];
 ## picking a region by hand is [IslandPickerOp] or [PolygonEditOp]; restoring a hard
@@ -147,11 +149,6 @@ func process_context(ctx: IWPipelineContext) -> void:
 	ctx.edge_width = maxi(ctx.edge_width, settings.edge_width)
 	ctx.bleed_radius = maxi(ctx.bleed_radius, settings.bleed_radius)
 	ctx.decontaminate = ctx.decontaminate or settings.decontaminate
-	# On the context because every flood in the run obeys it, not just this one's:
-	# an island squeezing through a gap on different terms from the border flood
-	# beside it would be arbitrary.
-	ctx.crevice_reach = maxi(ctx.crevice_reach, settings.crevice_reach)
-	ctx.crevice_tolerance = maxf(ctx.crevice_tolerance, settings.crevice_tolerance)
 	ctx.search_radius = maxi(
 			maxi(ctx.bleed_radius, ctx.edge_width), IWPipelineContext.MIN_SEARCH_RADIUS)
 
@@ -406,10 +403,20 @@ func _classify(ctx: IWPipelineContext, first_key: int) -> void:
 	#
 	# Never a pixel that arrived transparent, though: it has no key to be matted
 	# against, and the band pass leaves it alone for the same reason.
-	if settings.crevice_reach > 0:
+	#
+	# The rule itself belongs to [RemoveCrevice] now, and this obeys whatever one of
+	# those above it declared — a flood squeezing on different terms from the pass that
+	# set the terms would be arbitrary. A stack with none of them keys strictly within
+	# each colour's own tolerance, which is what a reach of zero always meant.
+	if ctx.crevice_reach > 0:
+		var strayed := ctx.strayed
+		if strayed.size() != pixel_count:
+			strayed.resize(pixel_count)
 		for i in pixel_count:
 			if mask[i] == background and weak_steps[i] > 0 and key_of[i] >= 0:
 				mask[i] = IWPipelineContext.MASK_EDGE
+				strayed[i] = 1
+		ctx.strayed = strayed
 
 	ctx.mask = mask
 	ctx.key_of = key_of
@@ -464,24 +471,6 @@ subject (eyes, highlights, gaps in lettering) stay opaque.
 This is also what makes Remove Colors border-only: an entry seeds the flood
 where its color meets the border, and nowhere else. Turn it off and every
 listed color is removed wherever it appears — enclosed regions included.",
-		},
-		{
-			"property": &"crevice_reach",
-			"label": "Crevice Reach",
-			"type": SettingType.INT,
-			"min": 0,
-			"max": 32,
-			"step": 1,
-			"tooltip": "Lets the flood squeeze into nooks whose opening is nothing but the\nantialiasing of the two walls meeting, which it would otherwise stop at.\nThis is how many such pixels one path may cross in total, so it needs to be\nat least as long as the constriction it has to get through. 0 switches it off.\n\nA total rather than a count that solid background resets, so the flood\ncannot stray, land on a stray highlight, and use that to buy its way\nfurther in. Everything past a squeeze is matted rather than cut out, so\nsubject it should not have reached keeps its alpha.\n\nPart of the flood, so it runs for every color in the list above, each\nagainst its own tolerance.",
-		},
-		{
-			"property": &"crevice_tolerance",
-			"label": "Crevice Tolerance",
-			"type": SettingType.FLOAT,
-			"min": 0.0,
-			"max": 1.0,
-			"step": 0.01,
-			"tooltip": "How much further than its own tolerance a color may stray to get through\na squeeze. Added to that tolerance rather than replacing it, so a color\nkeyed tightly stays keyed tightly.\n\nOnly applies while Crevice Reach is above zero.",
 		},
 		{
 			"property": &"decontaminate",

@@ -44,6 +44,7 @@ const _V1_ORDER := [
 	&"polygon_edit",
 	&"remove_background",
 	&"island_picker",
+	&"remove_crevice",
 	&"refine_edges",
 	&"edge_cleanup",
 ]
@@ -52,12 +53,12 @@ const _V1_ORDER := [
 ##
 ## Dropped without a warning, unlike an id nobody recognises: these were ours, and the
 ## settings they carried have a home to go to. See [method _absorb_retired].
-const _RETIRED_IDS := {
-	# The crevice rule is part of the background flood again, because it has to be
-	# applied against the tolerance of whichever colour the flood is carrying — which
-	# means running inside it, once per entry, rather than as a pass afterwards.
-	&"remove_crevice": &"remove_background",
-}
+##
+## Empty at the moment. [code]remove_crevice[/code] was here while the crevice rule
+## lived inside the background flood, and is an operation again — a file written while
+## it was retired carries its values inside the background block instead, which
+## [method _crevice_from_block] takes back out.
+const _RETIRED_IDS := {}
 
 
 ## Sidecar path for a source image: the same path with its extension replaced.
@@ -207,9 +208,40 @@ static func load_stack(source_path: String, registry: Dictionary) -> Array:
 			"enabled": bool(entry.get("enabled", true)),
 			"settings": settings,
 		})
+		# A file written while the crevice rule lived inside the background flood keeps
+		# its two values in that block, where nothing reads them any more. They become
+		# the stage they now belong to, directly below the one they were part of, which
+		# is where they were acting.
+		if id == &"remove_background" and stored is Dictionary:
+			var split := _crevice_from_block(stored, registry)
+			if not split.is_empty():
+				stack.append(split)
 
 	_absorb_retired(stack, retired)
 	return stack
+
+
+## A [code]remove_crevice[/code] stack entry carrying what an older
+## [code]remove_background[/code] block was using the crevice rule for, or an empty
+## Dictionary when it was not using it.
+##
+## A reach of zero is left alone rather than turned into a switched-off stage: it was
+## the default and it meant the rule was not in play, so there is nothing to carry and
+## an entry that does nothing is still an entry to read past.
+static func _crevice_from_block(block: Dictionary, registry: Dictionary) -> Dictionary:
+	var reach: Variant = block.get("crevice_reach", 0)
+	if not (reach is float or reach is int) or int(reach) <= 0:
+		return {}
+	if not registry.has(&"remove_crevice"):
+		return {}
+	var settings := _settings_for_id(&"remove_crevice", registry)
+	if settings == null:
+		return {}
+	settings.crevice_reach = int(reach)
+	var tolerance: Variant = block.get("crevice_tolerance", null)
+	if tolerance is float or tolerance is int:
+		settings.crevice_tolerance = float(tolerance)
+	return {"id": &"remove_crevice", "enabled": true, "settings": settings}
 
 
 ## Folds a retired operation's settings into whichever one took its job over.
@@ -320,6 +352,8 @@ static func _v1_wants(id: StringName, old: _LegacyV1Settings) -> bool:
 			return old.polygons != null and not old.polygons.regions.is_empty()
 		&"island_picker":
 			return old.islands != null and not old.islands.entries.is_empty()
+		&"remove_crevice":
+			return old.crevice_reach > 0
 		&"refine_edges":
 			# The clip was usable without the filter, so either one counts.
 			return old.refine_edges or old.alpha_floor > 0.0 or old.alpha_ceiling < 1.0
@@ -335,14 +369,15 @@ static func _v1_fill(id: StringName, old: _LegacyV1Settings, into: Resource) -> 
 			into.remove_colors = old.remove_colors
 			into.edge_width = old.edge_width
 			into.contiguous = old.contiguous
-			into.crevice_reach = old.crevice_reach
-			into.crevice_tolerance = old.crevice_tolerance
 			into.decontaminate = old.decontaminate
 			into.bleed_radius = old.bleed_radius
 		&"polygon_edit":
 			into.polygons = old.polygons
 		&"island_picker":
 			into.islands = old.islands
+		&"remove_crevice":
+			into.crevice_reach = old.crevice_reach
+			into.crevice_tolerance = old.crevice_tolerance
 		&"refine_edges":
 			# A radius of zero is what "the filter was off" became, so a file that
 			# only wanted the clip keeps only the clip.

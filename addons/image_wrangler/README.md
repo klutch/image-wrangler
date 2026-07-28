@@ -34,6 +34,7 @@ operation did:
 | --- | --- |
 | **Polygon Edit** | Shapes drawn by hand, forced transparent or opaque |
 | **Remove Background** | Keys out flat background colours and mattes the edge |
+| **Remove Crevice** | Squeezes the background into nooks too narrow to flood |
 | **Island Picker** | Regions picked off the preview, removed or protected |
 | **Refine Edges** | Tidies the alpha, then clips its extremes |
 | **Edge Cleanup** | Restores hard edges and draws an outline |
@@ -167,11 +168,16 @@ the image — and two entries of the same operation fold independently.
 | --- | --- | --- |
 | Remove Colors | one white entry at 0.02 | The background colours to key out, each with a tolerance of its own. Only takes where the colour reaches the image border. See below. |
 | Edge Width | 2 | How many pixels of antialiasing to rebuild. 2 suits ordinary antialiasing; raise it for soft edges, glows and drop shadows; 0 gives a hard cutout. The crevice rule and Island Picker matte what they open to this same depth, so every edge in the image agrees. |
-| Crevice Reach | 0 (off) | Lets the flood squeeze into nooks whose opening is nothing but the antialiasing of the two walls meeting. This is how many such pixels it may cross in a row. See below. |
-| Crevice Tolerance | 0.5 | How far from the background colour those squeezed-through pixels may be. Only applies while Crevice Reach is above zero. |
 | Only Outer Background | on | Flood fills from the image border, so background-coloured regions enclosed by the subject — eyes, highlights, the holes in an "o" — stay opaque. Also what confines **Remove Colors** to the border. |
 | Remove Color Fringe | on | Un-blends the background out of partially transparent pixels. This is the setting that actually kills the halo. |
 | Color Bleed | 16 | How far subject colour is pushed into transparent pixels, guarding against filtering dragging the background back in. |
+
+**Remove Crevice**
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Crevice Reach | 1 | How many near-background pixels one path may cross in total, so at least as long as the constriction it has to get through. See below. |
+| Crevice Tolerance | 0.25 | How much further than its own tolerance a colour may stray to get through a squeeze. Added to that tolerance rather than replacing it, so a colour keyed tightly stays keyed tightly. |
 
 **Refine Edges**
 
@@ -281,31 +287,54 @@ antialiasing overlaps and no pixel in the gap is close enough to the background
 colour to pass the flood's test. The flood stops at the mouth, and everything
 behind it stays opaque.
 
-**Crevice Reach** is the remedy — Canny's double-threshold trick applied to
+**Remove Crevice** is the remedy — Canny's double-threshold trick applied to
 region growing instead of edge linking. A pixel within its own key's tolerance is
-solid background and resets the count; one merely within **Crevice Tolerance**
-may still be crossed, but only this many in a row before solid background is
-needed again. That squeezes through a constriction while stopping the flood
-wandering off across a pale subject, which an unbounded loose threshold would do.
+crossed freely; one merely within **Crevice Tolerance** further out is still
+crossable, but **Crevice Reach** of them is all any one path gets. That squeezes
+through a constriction while stopping the flood wandering off across a pale
+subject, which an unbounded loose threshold would do.
 
-It is part of the flood rather than an operation of its own, and has to be: the
-rule is applied against the tolerance of whichever entry the flood is carrying at
-that moment, so it runs once per colour in the list and each one squeezes on its
-own terms. A gap off a tightly toleranced colour does not open up on a loosely
-toleranced one's. Pulled out into a pass over the finished result it could only
-work against one tolerance for the whole image, which is the wrong answer for any
-list longer than one.
+Set the reach to at least the length of the constriction it has to get through —
+a narrow slot 8px long needs roughly that much.
 
-Set it to at least the length of the constriction it has to get through — a
-narrow slot 8px long needs roughly that much reach. It is off by default because
-it is a remedy rather than something every image wants.
+**The budget is spent, not lent.** It is carried down the path and never handed
+back, so the flood cannot alternate between straying and landing on something a
+key claims outright and travel that way for as far as it likes. Recharging it on
+any such pixel is what used to let a white key at a tolerance of nothing cross a
+coloured boundary and eat a subject from the inside: one highlight the far side
+of an edge bought the next crossing, and that one the one after it. A flat-toned
+subject never triggered it, which is why it went unnoticed — a photographed one
+with specular highlights triggers it constantly.
 
-Being generous with it is safer than it sounds. Anywhere the flood reaches only
-by straying is reclassified as **edge**, not background, so it is matted by the
-ordinary coverage maths rather than cut out — and genuine subject measures as
-fully covered there, so it keeps its alpha. Measured across near-white, light
-grey and mid grey subjects at every reach from 1 to 32, not one interior pixel
-was eroded, and a normal antialiased edge came out bit-identical to reach 0.
+**Straying is measured from where the key already reaches**, not in place of it,
+so a colour keyed at 0.02 with a crevice tolerance of 0.25 strays to 0.27 and one
+keyed at 0.2 strays to 0.45. Each entry squeezes on its own terms, and a
+tolerance of nothing strays nothing.
+
+**Two of them in a row on the same settings are one of them at twice the reach.**
+Each stage gets a budget per path, the next seeds from where the last one
+stopped, and the budgets add up. Measured across a 2px neck, a 3px neck and two
+1px necks with a pocket between them, `Remove Crevice > Remove Crevice` at a
+reach of 1 entered every one of them to exactly the pixel a single stage at a
+reach of 2 did. Stacking two identical ones is a slower way of writing a larger
+number.
+
+What two of them do express is *where* and *on what terms*. A tight one above an
+**Island Picker** and a looser one below it are two different rules at two points
+in the stack, which one stage cannot be — and that is the reason it is a stage
+rather than a setting.
+
+**It sets the terms for everything below it.** The reach and the tolerance go
+onto the shared context, so an **Island Picker** underneath squeezes the same
+way — an island getting into a gap the pass beside it could not would be
+arbitrary. A stack with no **Remove Crevice** in it keys strictly within each
+colour's own tolerance, which is what a reach of 0 always meant.
+
+Being generous with the reach is safer than it sounds. Everywhere a flood reaches
+from a stray onwards is reclassified as **edge**, not background, so it is matted
+by the ordinary coverage maths rather than cut out — background beyond a neck
+still measures as background and comes out, and genuine subject measures as fully
+covered and keeps its alpha.
 
 ### Refining the edge
 

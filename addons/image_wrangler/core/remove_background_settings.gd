@@ -37,40 +37,6 @@ extends Resource
 ## the subject (eyes, speech bubbles, specular highlights) stay opaque.
 @export var contiguous: bool = true
 
-## How much further than its own tolerance the flood may stray from a keying colour
-## to squeeze through a gap too narrow to hold a single clean background pixel. Only
-## has an effect while [member crevice_reach] is above zero.
-##
-## Added to whichever entry's tolerance the flood is carrying rather than replacing
-## it, so it reads as "this much further than usual" and a tightly keyed colour stays
-## tightly keyed. Replacing it — which is what taking the larger of the two amounts to
-## — meant a colour keyed at a tolerance of nothing still strayed the whole of this,
-## and the tolerance the user had set said nothing about where the flood went.
-##
-## One number for every key, unlike [member RemoveColorEntry.color_tolerance]. This is
-## not a description of a background — it is how far the flood may leave one behind to
-## get somewhere, and that is a property of the geometry it is squeezing through rather
-## than of the colour it started from.
-@export var crevice_tolerance: float = 0.5
-
-## How many near-background pixels one path of the flood may cross in total, so it must
-## be at least as long as the constriction it has to squeeze through. Zero disables the
-## mechanism, leaving the flood strictly within each key's own tolerance.
-##
-## A total along each path rather than a run that solid background resets, because a
-## resetting count is not a limit at all: alternating between straying and landing on
-## a pixel some key claims outright bought a fresh budget every other step, and a white
-## key at a tolerance of nothing would cross a coloured boundary and keep going. Each
-## path from the border carries its own count, so a second flower reached through clean
-## background still gets a full budget of its own.
-##
-## Setting it generously is safer than it sounds. Everywhere the flood reaches from a
-## stray onwards is reclassified as edge rather than background, so it is matted by the
-## usual coverage maths instead of being cut out — background beyond a crevice measures
-## as background and still comes out, and genuine subject measures as fully covered, so
-## it keeps its alpha. Straying too far wastes work rather than eating the subject.
-@export var crevice_reach: int = 0
-
 ## Un-blend the background out of partially transparent pixels.
 @export var decontaminate: bool = true
 
