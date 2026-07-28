@@ -74,6 +74,19 @@ func get_sample(index: int) -> RemoveColorSample:
 	return samples[index]
 
 
+## Drops the sample at [param index].
+##
+## Emptying an entry this way is the caller's problem to notice rather than this
+## method's to prevent: an entry with no samples keys nothing out, and
+## [method migrate_legacy] would read it on the next load as a file written before
+## entries were groups and quietly put [member color] back. Whoever removes the last
+## one should remove the entry.
+func remove_sample(index: int) -> void:
+	if index < 0 or index >= samples.size():
+		return
+	samples.remove_at(index)
+
+
 ## Appends a sample for [param value] and returns it.
 func add_sample(value: Color, tolerance: float) -> RemoveColorSample:
 	var sample := RemoveColorSample.new()

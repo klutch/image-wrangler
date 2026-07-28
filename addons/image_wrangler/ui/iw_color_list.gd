@@ -83,6 +83,7 @@ var _samples_box: VBoxContainer
 ## off reaches them.
 var _sample_sliders: Array[EditorSpinSlider] = []
 var _sample_swatches: Array[ColorPickerButton] = []
+var _sample_removes: Array[Button] = []
 
 var _hint: Label
 
@@ -427,6 +428,44 @@ func _on_sample_tolerance_changed(value: float, sample_index: int) -> void:
 	colors_changed.emit()
 
 
+## One colour dropped out of the highlighted row.
+##
+## A swept region takes what it finds, and what it finds is not always what was meant —
+## a rim, a shadow, one petal the rectangle clipped. Being able to drop that one colour
+## is the difference between fixing a sweep and doing it again.
+func _on_sample_removed(sample_index: int) -> void:
+	var index := _selected_index()
+	var entry := _selected_entry()
+	if entry == null:
+		return
+	entry.remove_sample(sample_index)
+
+	# The last colour of a row *is* the row. An entry with no samples keys nothing out,
+	# and the loader would read it as a file written before entries held more than one
+	# colour and put the legacy one back — so it goes, and the selection lands somewhere
+	# sensible the way Remove already does.
+	if entry.is_empty():
+		var colors := _color_list()
+		if colors != null:
+			colors.remove_at(index)
+		_refresh()
+		if _list.count() > 0:
+			_select(mini(index, _list.count() - 1))
+		else:
+			_load_editor()
+		_set_hint("")
+		colors_changed.emit()
+		return
+
+	# Every row below the one that went is now bound to the wrong index, so they are
+	# rebuilt rather than redrawn. _load_editor does that, and re-reads the group's
+	# tolerance and count while it is there.
+	_load_editor()
+	_redraw_row(index)
+	_set_hint("")
+	colors_changed.emit()
+
+
 func _select(index: int) -> void:
 	_list.select(index)
 	_load_editor()
@@ -483,6 +522,7 @@ func _rebuild_sample_rows() -> void:
 		child.queue_free()
 	_sample_sliders.clear()
 	_sample_swatches.clear()
+	_sample_removes.clear()
 
 	var entry := _selected_entry()
 	_samples_box.visible = _picks_toggle.visible and _picks_toggle.button_pressed and entry != null
@@ -515,8 +555,24 @@ func _build_sample_row(index: int, sample: RemoveColorSample) -> Control:
 	slider.value_changed.connect(_on_sample_tolerance_changed.bind(index))
 	row.add_child(slider)
 
+	# The same cross the stack entries carry, and grey for the same reason: a column of
+	# these next to every colour a sweep found would read as a column of warnings if it
+	# were red. It brightens under the pointer, which is the moment it matters.
+	var remove := Button.new()
+	remove.flat = true
+	remove.focus_mode = Control.FOCUS_NONE
+	remove.text = "✕"
+	remove.add_theme_color_override(&"font_color", Color(0.62, 0.62, 0.62))
+	remove.add_theme_color_override(&"font_hover_color", Color(0.92, 0.92, 0.92))
+	remove.add_theme_color_override(&"font_pressed_color", Color(1.0, 1.0, 1.0))
+	remove.disabled = not _interactive
+	remove.tooltip_text = "Remove this color from the row.\nRemoving the last one removes the row."
+	remove.pressed.connect(_on_sample_removed.bind(index))
+	row.add_child(remove)
+
 	_sample_sliders.append(slider)
 	_sample_swatches.append(swatch)
+	_sample_removes.append(remove)
 	return row
 
 
@@ -587,3 +643,5 @@ func _update_buttons() -> void:
 		slider.read_only = not _interactive
 	for swatch in _sample_swatches:
 		swatch.disabled = not _interactive
+	for remove in _sample_removes:
+		remove.disabled = not _interactive
