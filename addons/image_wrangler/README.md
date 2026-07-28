@@ -212,9 +212,33 @@ A list rather than a single swatch, because one background colour is an
 assumption rather than a fact. A sprite sheet exported over a white plate and
 later padded with grey has two; a scan has the paper and the shadow under it.
 
-Hit **Pick** and click the preview to sample a colour off the image, or **Add**
-for an entry to set by hand with the swatch. **Remove** and **Clear** take
-entries back out.
+Hit **Pick** and drag a rectangle over a background in the preview to take every
+colour in it — or click once for a single pixel, which is the same gesture one pixel
+wide. **Add** makes an entry to set by hand with the swatch, and **Remove** and
+**Clear** take entries back out.
+
+**A row is a background, not a colour.** A background is rarely one value: a scanned
+white is a cloud of near-whites, and a re-compressed flat panel is a dozen colours
+that all look like one. Sweeping over it takes them together and puts them on one
+row, because switching that background off, or loosening it, is something you mean
+for all of it. Open **Colors** under the list to set one of them on its own; the row
+reads `mixed` once they no longer agree. A single picked pixel is a row of one, which
+is exactly the entry this list used to hold.
+
+**What is swept is thinned before it is kept.** A colour within another's tolerance
+can never claim a pixel that other one did not already claim, so keeping it would be
+writing the same rule twice — and rules are not free, since every colour listed is
+one more the keyer tries against every pixel it cannot place. What survives is a set
+no two of which are within tolerance of each other: one colour for a flat background,
+a handful for a speckled one. Anything the list already covers is dropped too, so
+sweeping the same background twice adds nothing the second time.
+
+Two limits worth knowing. A region larger than 4096 pixels is read on an even grid
+rather than pixel by pixel, and one sweep contributes at most 64 colours — the ones
+most of the region actually was, since the commonest come first. The hint under the
+list says when either bites. And because the thinning happens at the tolerance the
+colours start on, tightening a row afterwards can leave gaps that were covered when
+you picked it; sweep it again rather than widening it back.
 
 **An entry takes where it is reachable from the image border**, while **Only
 Outer Background** is on. This is the one thing to know about the list.
@@ -262,7 +286,7 @@ the colour ignored.
 A partly transparent pixel is *not* treated this way. It is a real antialiased
 edge carrying real coverage, and only exactly zero counts as empty.
 
-**Each entry carries its own tolerance**, and that is the point of the list. One
+**Each colour carries its own tolerance**, and that is the point of the list. One
 global number has to be tuned for the worst background in the image: loose enough
 to swallow a speckled JPEG plate, it eats into the subject beside a clean flat
 one. Separate entries let the speckled one sit at 0.08 while the flat one stays
@@ -271,7 +295,10 @@ entry stays tight even where it runs alongside a loose one — and coverage,
 decontamination and the edge band are all measured against the key that claimed
 each pixel.
 
-Where two entries could both claim a pixel, the higher one wins. That makes the
+Grouping is how colours are managed, not how they are matched: a row of eight
+contributes eight rules in its own order, exactly as eight rows of one would.
+
+Where two colours could both claim a pixel, the higher one wins. That makes the
 list read top to bottom as the ordered set of rules it is, rather than depending
 on which entry happens to fit more tightly.
 
@@ -726,8 +753,10 @@ the processing can never silently disagree.
 
 Every row in **Remove Colors**, **Island Picker** and **Polygon Edit** carries a
 **tick box** on the right. Unticking leaves the entry in the list but out of the
-result — a colour keeps its tolerance, an island keeps its region, a region keeps
-its shape — so something can be tried and untried without being set up again. A
+result — a background keeps its colours and their tolerances, an island keeps its
+region, a region keeps its shape — so something can be tried and untried without
+being set up again. A switched-off background is still counted as covered when you
+sweep, so a colour it holds is not quietly added a second time under it. A
 switched-off island still shows its marker, drawn hollow; a switched-off region
 still shows its outline, drawn without its fill. Clicking a highlighted row again
 clears the selection.

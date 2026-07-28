@@ -50,13 +50,16 @@ func _init() -> void:
 	remove_colors.add(Color.WHITE)
 
 
-## Islands used to be bare coordinates and are now entries carrying a switch and a
-## mode. A file written before that change still has the old array, and the codec
-## cannot tell that the two describe the same thing — so without this every island
-## anyone had picked would quietly vanish.
+## Islands used to be bare coordinates and are now entries holding a group of picks;
+## a Remove Color used to be one colour and is now a group of them. A file written
+## before either change still has the old shape, and the codec cannot tell that the two
+## describe the same thing — so without this every island anyone had picked and every
+## colour they had listed would quietly vanish.
 ##
-## Kept here rather than only on [IslandPickerSettings] because a version 1 file is
-## exactly the kind that predates the change.
+## Kept here rather than only on the split settings because a version 1 file is exactly
+## the kind that predates both changes.
 func migrate_loaded() -> void:
 	if islands != null:
 		islands.migrate_legacy()
+	if remove_colors != null:
+		remove_colors.migrate_legacy()

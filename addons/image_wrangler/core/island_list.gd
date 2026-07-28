@@ -95,9 +95,9 @@ func add(at: Vector2i) -> IslandEntry:
 ## Appends an entry covering [param region] and returns it.
 ##
 ## Every pixel of the rectangle becomes a pick, up to [constant MAX_PICKS]; past that
-## the rectangle is walked on an even stride wide enough to fit. The first and last row
-## and column are always kept whatever the stride, so the entry still describes the
-## rectangle that was actually dragged rather than a slightly smaller one.
+## the rectangle is walked on an even stride wide enough to fit. See [IWRegionScan],
+## which is also what the Remove Colors list sweeps a region with, so the two pickers
+## cannot come to different conclusions about the same gesture.
 ##
 ## The entry starts on the same mode and tolerance as the one before it. Picking
 ## islands is repetitive work — several regions in one image, wanted the same way —
@@ -116,19 +116,9 @@ func add_region(region: Rect2i) -> IslandEntry:
 		tolerance = inherited if inherited >= 0.0 else previous.representative().color_tolerance
 
 	if region.size.x > 0 and region.size.y > 0:
-		var step := 1
-		var area := region.size.x * region.size.y
-		if area > MAX_PICKS:
-			step = maxi(int(ceil(sqrt(float(area) / float(MAX_PICKS)))), 1)
-		var xs := _stops(region.position.x, region.size.x, step)
-		var ys := _stops(region.position.y, region.size.y, step)
-		# Kept as a loop rather than trusted to the square root: the two ends are
-		# always included, so a stride that divides the rectangle awkwardly can still
-		# come out a row or a column over.
-		while xs.size() * ys.size() > MAX_PICKS:
-			step += 1
-			xs = _stops(region.position.x, region.size.x, step)
-			ys = _stops(region.position.y, region.size.y, step)
+		var step := IWRegionScan.stride_for(region, MAX_PICKS)
+		var xs := IWRegionScan.stops(region.position.x, region.size.x, step)
+		var ys := IWRegionScan.stops(region.position.y, region.size.y, step)
 		# Reading order, so the middle of the list is the middle of the rectangle;
 		# see [method IslandEntry.representative].
 		for y in ys:
@@ -137,19 +127,6 @@ func add_region(region: Rect2i) -> IslandEntry:
 
 	entries.append(entry)
 	return entry
-
-
-## Positions along one axis: [param start], then every [param step] pixels, then the
-## far end of the run whether or not the stride landed on it.
-static func _stops(start: int, count: int, step: int) -> PackedInt32Array:
-	var out := PackedInt32Array()
-	var last := start + count - 1
-	var value := start
-	while value < last:
-		out.append(value)
-		value += step
-	out.append(last)
-	return out
 
 
 func remove_at(index: int) -> void:

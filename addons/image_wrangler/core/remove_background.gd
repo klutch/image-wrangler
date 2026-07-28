@@ -197,8 +197,12 @@ func process_context(ctx: IWPipelineContext) -> void:
 	report_progress(1.0)
 
 
-## Registers every enabled Remove Color as a key, and returns the index of the first
-## one — or -1 when the list is empty or entirely switched off.
+## Registers every colour of every enabled Remove Color as a key, and returns the index
+## of the first one — or -1 when the list is empty or entirely switched off.
+##
+## An entry contributes as many keys as it holds colours, in its own order, which is
+## what makes a group of colours picked in one sweep behave as the several rules it
+## actually is. Grouping is how they are managed, not how they are matched.
 ##
 ## Appended to whatever is already registered, so a second one of these adds its
 ## colours instead of replacing the first's. The returned index is where this stage's
@@ -210,9 +214,12 @@ func _build_keys(ctx: IWPipelineContext) -> int:
 	for entry in settings.remove_colors.entries:
 		if entry == null or not entry.enabled:
 			continue
-		var index := ctx.add_key(entry.color, entry.color_tolerance, false)
-		if first < 0:
-			first = index
+		for sample in entry.samples:
+			if sample == null:
+				continue
+			var index := ctx.add_key(sample.color, sample.color_tolerance, false)
+			if first < 0:
+				first = index
 	return first
 
 
@@ -434,9 +441,10 @@ func get_settings_schema() -> Array[Dictionary]:
 			"property": &"remove_colors",
 			"type": SettingType.COLOR_LIST,
 			"tooltip": "The background colors to key out, each with its own tolerance.
-Pick them off the preview, or add one and set it by hand. An image with
-two flat backgrounds needs two entries: one tolerance loose enough for a
-speckled one would eat into the subject beside the clean one.
+Drag a region over the preview to take every color in it, click for a
+single pixel, or add one and set it by hand. An image with two flat
+backgrounds needs two entries: one tolerance loose enough for a speckled
+one would eat into the subject beside the clean one.
 
 The flood spreads through every listed color, so entries work together —
 a white plate around a green stem needs both listed, and taking white out
@@ -496,7 +504,8 @@ without this the background can bleed back into the edge on screen.",
 ## Pulls every Remove Color tolerance into range, on top of what the schema clamps.
 ##
 ## The schema cannot reach these: it names properties on the settings Resource, and a
-## tolerance lives one level down, on an entry. Without this a hand-edited file could
+## tolerance lives two levels down, on a sample inside an entry. Without this a
+## hand-edited file could
 ## carry 50 while the slider clamps its display to
 ## [constant RemoveColorEntry.MAX_TOLERANCE] — the form and the processing silently
 ## disagreeing, which is the exact failure the base method exists to prevent.
@@ -509,5 +518,8 @@ func clamp_settings_to_schema(target: Resource = null) -> void:
 		return
 	if typed.remove_colors != null:
 		for entry in typed.remove_colors.entries:
-			if entry != null:
-				entry.color_tolerance = clampf(entry.color_tolerance, 0.0, RemoveColorEntry.MAX_TOLERANCE)
+			if entry == null:
+				continue
+			for sample in entry.samples:
+				if sample != null:
+					sample.color_tolerance = clampf(sample.color_tolerance, 0.0, RemoveColorEntry.MAX_TOLERANCE)

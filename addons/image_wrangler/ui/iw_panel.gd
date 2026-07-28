@@ -1211,11 +1211,11 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
 	_pick_target = source
 	_overlay_owner = source
 	_preview.pick_mode = true
-	# Only the island picker wants a rectangle. A colour is the one pixel under the
-	# pointer, and a polygon is built corner by corner.
-	_preview.region_pick = source is IslandPicker
+	# Both lists want a rectangle — one takes the pixels inside it, the other the
+	# colours. A polygon is built corner by corner and wants neither.
+	_preview.region_pick = source is IslandPicker or source is ColorList
 	if source is ColorList:
-		_set_status("Click the preview to add that color to the list.")
+		_set_status("Drag a region in the preview to take every color in it, or click one pixel.")
 	elif source is PolygonList:
 		_set_status("Click to place corners. Right-click or Escape closes the region.")
 	else:
@@ -1226,11 +1226,7 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
 func _on_pixel_picked(pixel: Vector2i) -> void:
 	if _source_image == null or _pick_target == null:
 		return
-	if _pick_target is ColorList:
-		var color := _sample_source_color(pixel)
-		(_pick_target as ColorList).add_color(color)
-		_set_status("Picked #%s." % color.to_html(false))
-	elif _pick_target is PolygonList:
+	if _pick_target is PolygonList:
 		# add_vertex reports a click on the first corner, which is a request to close
 		# rather than a corner of its own.
 		if (_pick_target as PolygonList).add_vertex(pixel):
@@ -1239,19 +1235,27 @@ func _on_pixel_picked(pixel: Vector2i) -> void:
 			_update_overlays()
 
 
-## A rectangle swept over the preview. Only the island picker asks for one, which is
-## what the preview's [code]region_pick[/code] is set from.
+## A rectangle swept over the preview. Both lists ask for one, which is what the
+## preview's [code]region_pick[/code] is set from.
 ##
 ## A click is a one by one region rather than a case of its own, so a single pick
 ## reports exactly what it always did.
+##
+## Zero back from either means nothing was added — a repeat of something already
+## listed, or a region with nothing in it. The control has said which in its own hint,
+## and a status line saying nothing happened would be the same news twice.
 func _on_region_picked(region: Rect2i) -> void:
-	if _source_image == null or not (_pick_target is IslandPicker):
+	if _source_image == null:
 		return
+	if _pick_target is IslandPicker:
+		_pick_island_region(region)
+	elif _pick_target is ColorList:
+		_pick_color_region(region)
+
+
+func _pick_island_region(region: Rect2i) -> void:
 	var picked := (_pick_target as IslandPicker).add_region(region)
 	if picked <= 0:
-		# Refused as a repeat of something already in the list, which the picker has
-		# said in its own hint. Overwriting that with a status line saying nothing
-		# happened would be the same news twice.
 		return
 	if region.size == Vector2i.ONE:
 		_set_status("Picked (%d, %d)." % [region.position.x, region.position.y])
@@ -1263,6 +1267,25 @@ func _on_region_picked(region: Rect2i) -> void:
 			region.end.y - 1,
 			picked,
 		])
+
+
+## Reads the colours out of the region and hands them to the list.
+##
+## Sampled here rather than in the control for the same reason a swatch is: the image
+## belongs to the dock, and a settings control that could reach it would be a control
+## that has to be told which image it is looking at.
+func _pick_color_region(region: Rect2i) -> void:
+	var colors := IWRegionScan.colors_in(_source_image, region, RemoveColorList.SCAN_BUDGET)
+	var added := (_pick_target as ColorList).add_region(colors, region)
+	if added <= 0:
+		return
+	# Named only when the pick was one pixel, where the colour taken can only be the
+	# one colour found. Past that the list thins what it was handed, so the first
+	# colour of the sweep is not necessarily among the ones it kept.
+	if region.size == Vector2i.ONE:
+		_set_status("Picked #%s." % colors[0].to_html(false))
+	else:
+		_set_status("Picked %d of the %d colors in that region." % [added, colors.size()])
 
 
 ## Whichever polygon list currently owns the crosshair, or null.

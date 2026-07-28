@@ -22,7 +22,7 @@ extends RefCounted
 ## operation needs no plumbing beyond the operation itself, and persistence has
 ## to follow the same rule as the UI does or that promise is only half true. It
 ## also means a value no schema entry ever names — [member
-## RemoveColorEntry.color_tolerance] is one, sitting a level below the property
+## RemoveColorSample.color_tolerance] is one, sitting two levels below the property
 ## the schema declares — persists anyway, and that a fourteenth tunable cannot be
 ## added and silently not saved.
 
@@ -610,6 +610,14 @@ static func self_test(operation: IWOperation) -> bool:
 					colors.clear()
 					colors.add(Color(0.25, 0.5, 0.75), 0.011)
 					colors.add(Color(0.9, 0.1, 0.2), 0.333)
+					# And a swept group, since an entry is a group of colours now:
+					# a decoder that dropped the inner list would round-trip the two
+					# one-colour entries above without complaint. Far enough apart
+					# that the thinning in add_region keeps both.
+					var swept := colors.add_region(
+							PackedColorArray([Color(0.2, 0.4, 0.6), Color(0.7, 0.2, 0.9)]), 0.05)
+					swept.enabled = false
+					swept.get_sample(1).color_tolerance = 0.222
 				elif nested is PolygonRegionList:
 					# The deepest nesting this codec has to survive: a typed array
 					# of Vector2i inside a Resource inside a typed array of

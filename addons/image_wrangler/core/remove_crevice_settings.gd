@@ -13,7 +13,7 @@ extends Resource
 ## it, so it reads as "this much further than usual" and a tightly keyed colour stays
 ## tightly keyed. See [method IWPipelineContext.flood_key_for].
 ##
-## One number for every key, unlike [member RemoveColorEntry.color_tolerance]. This is
+## One number for every key, unlike [member RemoveColorSample.color_tolerance]. This is
 ## not a description of a background — it is how far a flood may leave one behind to
 ## get somewhere, and that is a property of the geometry being squeezed through rather
 ## than of the colour it started from.

@@ -62,3 +62,14 @@ func duplicate_for_new_image() -> RemoveBackgroundSettings:
 	var copy: RemoveBackgroundSettings = duplicate()
 	copy.remove_colors = remove_colors.duplicate_colors()
 	return copy
+
+
+## Called by [method IWSettingsIO.load_settings] once a sidecar has been decoded.
+##
+## A Remove Color used to be one colour and is now a group of them. A file written
+## before that change still has the old pair on each entry, and the codec cannot tell
+## that the two describe the same thing — so without this every colour anyone had
+## listed would quietly become nothing the first time they reopened an image.
+func migrate_loaded() -> void:
+	if remove_colors != null:
+		remove_colors.migrate_legacy()
