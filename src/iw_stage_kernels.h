@@ -166,6 +166,16 @@ public:
 	// above everything that keys, for the reason given on denoise above.
 	static void smooth_blocks(const Ref<IWPipelineContext> &ctx, double threshold,
 			double amount);
+
+	// SmoothHalos.process_context: flattens the ripples a JPEG leaves beside a hard edge.
+	//
+	// Only squares holding an edge are touched, and inside them a pixel is averaged only
+	// with neighbours on its own side of that edge — so `radius` can be raised without
+	// the average ever reaching across the boundary. The last kernel that rewrites the
+	// source pixels, and it stands down unless it is running above everything that keys,
+	// for the reason given on denoise above.
+	static void smooth_halos(const Ref<IWPipelineContext> &ctx, double threshold,
+			int64_t radius, double strength);
 };
 
 } // namespace godot
