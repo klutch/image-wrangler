@@ -88,8 +88,11 @@ void IWPipelineContext::_bind_methods() {
 // A context over source, decompressed and converted to RGBA8.
 //
 // The one place a run gets its pixels, so every entry point agrees on what a stage may
-// assume about them: eight bits a channel, four channels, never compressed. The source
-// itself is left untouched.
+// assume about them: eight bits a channel, four channels, never compressed. The Image
+// passed in is left untouched.
+//
+// The format is the guarantee, not the contents. Denoise rewrites the bytes — above
+// everything that keys, and only there. See the note on `data`.
 Ref<IWPipelineContext> IWPipelineContext::from_image(const Ref<Image> &source) {
 	Ref<IWPipelineContext> ctx;
 	ctx.instantiate();

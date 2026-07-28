@@ -16,3 +16,9 @@
 *.so binary
 *.dylib binary
 *.png binary
+
+# The vendored Open Image Denoise drop is kept byte-identical to the upstream zip, so
+# that re-vendoring is a clean diff against the new version rather than a whole-tree EOL
+# churn laid on top of the real change. Without this, `* text=auto` above would rewrite
+# its headers and licence files on checkout.
+thirdparty/oidn/** -text

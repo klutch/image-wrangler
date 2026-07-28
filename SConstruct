@@ -31,6 +31,39 @@ else:
     env.Append(CCFLAGS=["-ffp-contract=off", "-fno-fast-math"])
 
 env.Append(CPPPATH=["src/"])
+
+# Intel Open Image Denoise, for the Denoise stage.
+#
+# Vendored and committed under thirdparty/, and deliberately not under src/ — the glob
+# below is flat and would sweep any source there into the build under this project's own
+# flags. Only headers and an import library are needed here; the runtime DLLs are
+# committed straight into addons/image_wrangler/bin/ beside the extension, which is where
+# both Godot's loader and OIDN's own module lookup expect them. See
+# thirdparty/oidn/README-vendored.md.
+env.Append(CPPPATH=["thirdparty/oidn/include"])
+env.Append(LIBPATH=["thirdparty/oidn/lib"])
+env.Append(LIBS=["OpenImageDenoise"])
+
+if env.get("is_msvc", False):
+    # The CRTs do not match, and that is all right.
+    #
+    # godot-cpp defaults use_static_cpp=yes, which is /MT; Intel's prebuilt OIDN is built
+    # against the dynamic CRT. What a mismatch rules out is sharing CRT state across the
+    # boundary — memory one side allocates and the other frees, a FILE*, a locale. The
+    # denoise kernel does none of it: every buffer handed over is ours, passed by
+    # oidnSetSharedFilterImage and freed by us, and nothing OIDN allocates ever leaves
+    # OIDN. An import library links no foreign CRT objects either.
+    #
+    # Switching to use_static_cpp=no would silence the warning and cost every exported
+    # game a dependency on the VC++ redistributable. Not a trade worth making — and see
+    # the README, because OIDN's own DLLs impose that dependency regardless.
+    #
+    # godot-cpp has already put /WX on the linker, so an advisory warning here is a
+    # failed build. These two are named rather than the flag being dropped: 4098 is the
+    # CRT remark above, 4099 is "no PDB for OpenImageDenoise.lib" — there is not one, and
+    # godot-cpp defaults debug_symbols=no in any case.
+    env.Append(LINKFLAGS=["/IGNORE:4098", "/IGNORE:4099"])
+
 sources = Glob("src/*.cpp")
 
 library = env.SharedLibrary(

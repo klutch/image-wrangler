@@ -111,6 +111,25 @@ public:
 			const PackedFloat32Array &inner,
 			const PackedFloat32Array &outer,
 			int64_t radius);
+
+	// Denoise.process_context: replaces ctx->data with an Open Image Denoise pass over
+	// its RGB. Alpha is not colour, is never shown to the filter, and comes through
+	// byte-for-byte.
+	//
+	// The one kernel that rewrites the source pixels. What makes that admissible is
+	// entirely a property of its caller: the stage stands down unless it is running
+	// above everything that keys, so no map has yet been derived from the bytes it
+	// replaces. See Denoise.prerequisite_note.
+	//
+	// `quality` is a DenoiseSettings.Quality index rather than an OIDN constant — the
+	// two are mapped by hand in iw_denoise_kernels.cpp, because OIDN's own values are
+	// neither zero-based nor consecutive. `blend` mixes the result back over the
+	// original, 0 to 1, and 0 is an exact identity.
+	//
+	// Returns false and leaves ctx->data alone when OIDN could not be brought up or the
+	// filter failed, having pushed an error saying which. A failure is a stage that did
+	// nothing, never a corrupted image.
+	static bool denoise(const Ref<IWPipelineContext> &ctx, int64_t quality, double blend);
 };
 
 } // namespace godot

@@ -13,3 +13,46 @@ reloadable = false
 windows.editor.x86_64 = "res://addons/image_wrangler/bin/image_wrangler.windows.editor.x86_64.dll"
 windows.debug.x86_64 = "res://addons/image_wrangler/bin/image_wrangler.windows.template_debug.x86_64.dll"
 windows.release.x86_64 = "res://addons/image_wrangler/bin/image_wrangler.windows.template_release.x86_64.dll"
+
+; The Open Image Denoise runtime the Denoise stage links against, copied on export.
+;
+; Only consulted when exporting — in the editor the extension's own directory is already
+; on the DLL search path, which is why these are committed beside it rather than anywhere
+; tidier. The destination is deliberately empty: it means "next to the executable", and a
+; subdirectory would separate them from image_wrangler.dll and break both that search
+; path and OIDN's own lookup of its device module. See thirdparty/oidn/README-vendored.md.
+;
+; Listed per configuration because that is the only granularity this section has. All
+; three ship the same runtime.
+
+[dependencies]
+
+windows.editor.x86_64 = {
+"res://addons/image_wrangler/bin/OpenImageDenoise.dll" : "",
+"res://addons/image_wrangler/bin/OpenImageDenoise_core.dll" : "",
+"res://addons/image_wrangler/bin/OpenImageDenoise_device_cpu.dll" : "",
+"res://addons/image_wrangler/bin/tbb12.dll" : "",
+"res://addons/image_wrangler/bin/tbbbind.dll" : "",
+"res://addons/image_wrangler/bin/tbbbind_2_0.dll" : "",
+"res://addons/image_wrangler/bin/tbbbind_2_5.dll" : ""
+}
+
+windows.debug.x86_64 = {
+"res://addons/image_wrangler/bin/OpenImageDenoise.dll" : "",
+"res://addons/image_wrangler/bin/OpenImageDenoise_core.dll" : "",
+"res://addons/image_wrangler/bin/OpenImageDenoise_device_cpu.dll" : "",
+"res://addons/image_wrangler/bin/tbb12.dll" : "",
+"res://addons/image_wrangler/bin/tbbbind.dll" : "",
+"res://addons/image_wrangler/bin/tbbbind_2_0.dll" : "",
+"res://addons/image_wrangler/bin/tbbbind_2_5.dll" : ""
+}
+
+windows.release.x86_64 = {
+"res://addons/image_wrangler/bin/OpenImageDenoise.dll" : "",
+"res://addons/image_wrangler/bin/OpenImageDenoise_core.dll" : "",
+"res://addons/image_wrangler/bin/OpenImageDenoise_device_cpu.dll" : "",
+"res://addons/image_wrangler/bin/tbb12.dll" : "",
+"res://addons/image_wrangler/bin/tbbbind.dll" : "",
+"res://addons/image_wrangler/bin/tbbbind_2_0.dll" : "",
+"res://addons/image_wrangler/bin/tbbbind_2_5.dll" : ""
+}

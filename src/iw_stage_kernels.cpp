@@ -53,6 +53,10 @@ void IWStageKernels::_bind_methods() {
 	ClassDB::bind_static_method("IWStageKernels",
 			D_METHOD("auto_stroke_colors", "ctx", "alpha", "inner", "outer", "radius"),
 			&IWStageKernels::auto_stroke_colors);
+	// Defined in iw_denoise_kernels.cpp, which is the only file here that includes a
+	// third-party header; bound here so every entry point is in one list.
+	ClassDB::bind_static_method("IWStageKernels",
+			D_METHOD("denoise", "ctx", "quality", "blend"), &IWStageKernels::denoise);
 }
 
 // Rasterises this stage's shapes and folds them into whatever is already declared.
@@ -678,8 +682,10 @@ PackedInt32Array IWStageKernels::flood_protect(
 
 	for (int64_t s = 0; s < seeds.size(); s++) {
 		// Sampled here rather than carried in, which is the same answer: the source
-		// pixels are immutable for the whole run, so reading one now and reading it
-		// before the first flood started cannot differ.
+		// pixels are immutable from the first key onwards, so reading one now and
+		// reading it before the first flood started cannot differ. Denoise is the only
+		// stage that rewrites them, and it stands down below anything that keys — so it
+		// cannot have run between those two moments.
 		const Color key = ctx->color_at(seed_ptr[s]);
 		const double tolerance = tol_ptr[s];
 		int64_t head = 0;

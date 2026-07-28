@@ -59,7 +59,9 @@ extends IWStackOperation
 ## Their alpha is zero, but bilinear filtering and mipmaps still sample their RGB,
 ## which is how the background creeps back into an edge that looked clean in the
 ## file. Both are settings here and both are applied by [IWCompose], which is the
-## only pass that writes colour.
+## only pass that writes colour [i]out[/i]. [Denoise] rewrites the colour going
+## [i]in[/i], which is why it only runs above this stage: the keys sampled here are
+## sampled from whatever it left behind.
 ##
 ## [b]Running it twice.[/b] A source pixel that arrives fully transparent is treated
 ## as open ground: it is already removed, so every flood crosses it, it grows no edge

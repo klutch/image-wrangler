@@ -14,6 +14,7 @@ const StackView := preload("res://addons/image_wrangler/ui/iw_stack_view.gd")
 ## Every [IWStackOperation] the stack can hold, in the order the Create dropdown
 ## offers them. Add new stack operations here.
 const OPERATION_SCRIPTS := [
+	"res://addons/image_wrangler/core/denoise.gd",
 	"res://addons/image_wrangler/core/remove_background.gd",
 	"res://addons/image_wrangler/core/remove_crevice.gd",
 	"res://addons/image_wrangler/core/refine_edges.gd",
@@ -29,6 +30,10 @@ const OPERATION_SCRIPTS := [
 ## it can steer where the colour bleed takes its replacements from, the alpha stages
 ## want a classification to exist, and the stroke has to come last because it follows
 ## whatever silhouette everything else settled on.
+##
+## [Denoise] is deliberately absent. It costs seconds per image, it changes what every
+## tolerance below it means, and it is wrong for the clean vector-exported source that
+## most of this is pointed at. It is a stage you go and add.
 const DEFAULT_STACK := [
 	"res://addons/image_wrangler/core/polygon_edit_op.gd",
 	"res://addons/image_wrangler/core/remove_background.gd",
@@ -1247,11 +1252,19 @@ func _store_stack(path: String) -> void:
 ## Answered without a run, so it can only speak about the stack rather than about the
 ## image: whether something above establishes keys, and whether a classification will
 ## exist by the time each stage is reached.
+##
+## Both directions, because there are two ways to be in the wrong place. Most stages need
+## something above them and say so when there is nothing; a stage that rewrites the source
+## pixels needs nothing above it and says so when there is something. The two flags gate
+## the one call rather than the note being worked out from position alone, so a stage is
+## never handed a complaint about a problem it does not have.
 func _refresh_notes() -> void:
 	var keying := false
 	for entry: Control in _stack_view.entries():
 		var stage: IWStackOperation = entry.stage
-		entry.set_note("" if keying or not stage.needs_keying() else stage.prerequisite_note(null))
+		var misplaced := (stage.needs_keying() and not keying) \
+				or (stage.precedes_keying() and keying)
+		entry.set_note(stage.prerequisite_note(null) if misplaced else "")
 		if stage.enabled and stage.establishes_keying():
 			keying = true
 
