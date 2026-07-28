@@ -169,7 +169,7 @@ func get_settings_schema() -> Array[Dictionary]:
 			"label": "Remove Old Files",
 			"group": "Format",
 			"type": SettingType.BOOL,
-			"tooltip": "Delete each source once its copy has been written.\nYou are asked first, every copy is checked against its source by checksum,\nand nothing is deleted unless all of them match. The originals go to the\nsystem trash, not straight out.\n\nA matching .json file counts as part of the image: it is copied to the new\nname and removed under the same checks.",
+			"tooltip": "Delete each source once its copy has been written.\nYou are asked first, every copy is checked against its source by checksum,\nand nothing is deleted unless all of them match. The originals go to the\nsystem trash, not straight out.\n\nA matching _wrangler.json sidecar counts as part of the image: it is copied to\nthe new name and removed under the same checks.",
 		},
 	]
 

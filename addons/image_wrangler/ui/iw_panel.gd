@@ -2377,9 +2377,9 @@ func _output_name_for(path: String) -> String:
 ## Sidecar paths that sources outside [param jobs] still read from.
 ##
 ## A sidecar is named from the basename alone, so [code]flower.png[/code] and
-## [code]flower.jpg[/code] in one folder share [code]flower.json[/code]. Renaming
-## only one of them must not carry that file away from the other, which would
-## strip settings off an image this run never touched.
+## [code]flower.jpg[/code] in one folder share [code]flower_wrangler.json[/code].
+## Renaming only one of them must not carry that file away from the other, which
+## would strip settings off an image this run never touched.
 func _sidecars_held_outside(jobs: Dictionary) -> Dictionary:
 	var held := {}
 	for path in _sources:
@@ -2395,9 +2395,9 @@ func _sidecars_held_outside(jobs: Dictionary) -> Dictionary:
 ## The sidecar describes the image, so a rename that left it behind would strand
 ## every per-image setting the moment the dock was reopened — and, with Remove Old
 ## Files ticked, orphan it beside a file now in the trash. Whatever sits at the
-## sidecar path travels, ours or not: [code]sprite.json[/code] beside
-## [code]sprite.png[/code] is as likely to be an Aseprite atlas descriptor, and
-## that belongs with the image just as much.
+## sidecar path travels, ours or not — the name is distinctive enough now that it
+## almost certainly is ours, and a stranger's file named for this image belongs with
+## it just as much.
 ##
 ## Returns the empty String when the sidecar was carried or there was none, and
 ## the name of the file left behind otherwise. Never fails the image: by the time

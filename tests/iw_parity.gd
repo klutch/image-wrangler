@@ -151,7 +151,7 @@ func _build_cases() -> Array:
 		push_warning("Parity: %s missing; skipping the real-image cases." % Fixtures.SHEET_PNG)
 		return cases
 
-	var sidecar := _stack_from_sidecar(Fixtures.SHEET_JSON)
+	var sidecar := _stack_from_sidecar(Fixtures.SHEET_PNG)
 	if not sidecar.is_empty():
 		cases.append({"name": "sheet_sidecar", "image": sheet, "stack": sidecar, "dump": false})
 	var size := maxi(sheet.get_width(), sheet.get_height())
@@ -171,6 +171,11 @@ func _build_cases() -> Array:
 ## Deliberately the same route rather than a shortcut: a sidecar that stops loading is
 ## as much a regression as a flood that stops flooding, and this is the only place the
 ## harness would notice.
+##
+## [param path] is the [i]image[/i], not its sidecar, because that is what the codec
+## takes. This used to be handed the sidecar and worked anyway, on the coincidence that
+## the name was the image's with the extension swapped — so replacing an extension with
+## [code].json[/code] twice landed on the same file. It is not a coincidence any more.
 func _stack_from_sidecar(path: String) -> Array[IWStackOperation]:
 	var stages: Array[IWStackOperation] = []
 	var registry := {}

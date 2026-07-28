@@ -17,7 +17,12 @@ extends RefCounted
 ## The one real fixture, copied out of the (gitignored) sample folder so the harness
 ## does not depend on data that is not in the repo.
 const SHEET_PNG := "res://tests/fixtures/sheet.png"
-const SHEET_JSON := "res://tests/fixtures/sheet.json"
+
+## Where [method IWSettingsIO.sidecar_path] resolves [constant SHEET_PNG] to. Named here
+## so the file is findable by grep, and never passed to the codec — that takes the image's
+## path and works the sidecar's out, and handing it this one would send it looking for
+## [code]sheet_wrangler_wrangler.json[/code].
+const SHEET_JSON := "res://tests/fixtures/sheet_wrangler.json"
 
 const OP_REMOVE_BACKGROUND := "res://addons/image_wrangler/core/remove_background.gd"
 const OP_REMOVE_CREVICE := "res://addons/image_wrangler/core/remove_crevice.gd"

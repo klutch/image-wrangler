@@ -3,8 +3,8 @@ extends RefCounted
 
 ## Reads and writes the JSON sidecar that carries one image's settings.
 ##
-## The sidecar sits beside the image with its extension replaced:
-## [code]flower.png[/code] → [code]flower.json[/code]. It holds a block per
+## The sidecar sits beside the image, named for it: [code]flower.png[/code] →
+## [code]flower_wrangler.json[/code]. See [constant SIDECAR_SUFFIX]. It holds a block per
 ## operation, keyed by [method IWOperation.get_operation_id], so a second
 ## operation can start saving its own settings without breaking the format:
 ## [codeblock]
@@ -61,9 +61,25 @@ const _V1_ORDER := [
 const _RETIRED_IDS := {}
 
 
-## Sidecar path for a source image: the same path with its extension replaced.
+## What a sidecar's name is the image's basename plus.
+##
+## [code]flower.png[/code] → [code]flower_wrangler.json[/code], where this used to write
+## a bare [code]flower.json[/code]. The suffix is the whole point. A plain
+## [code].json[/code] beside an image is one of the most contested names on disk —
+## [code]sprite.json[/code] beside [code]sprite.png[/code] is exactly what Aseprite calls
+## its atlas descriptor — and this addon works in precisely those folders. Claiming a name
+## nothing else wants is a better answer than being careful with a name everything wants,
+## which is what [method is_sidecar] and the refusals below were left doing alone.
+##
+## They stay anyway. The suffix makes a collision unlikely rather than impossible, and the
+## cost of being wrong is somebody else's file overwritten.
+const SIDECAR_SUFFIX := "_wrangler.json"
+
+
+## Sidecar path for a source image: its path with the extension replaced by
+## [constant SIDECAR_SUFFIX].
 static func sidecar_path(source_path: String) -> String:
-	return source_path.get_basename() + ".json"
+	return source_path.get_basename() + SIDECAR_SUFFIX
 
 
 ## Whether the file at [param path] is a sidecar this addon wrote.
@@ -118,10 +134,9 @@ static func load_settings(source_path: String, operation: IWOperation) -> Resour
 ## operation's id, leaving any other operation's block alone.
 ##
 ## Returns [code]OK[/code], or a failure code. Refuses [code]ERR_FILE_CORRUPT[/code]
-## when a file of that name already exists and was written by something else —
-## [code]sprite.json[/code] beside [code]sprite.png[/code] is exactly what
-## Aseprite names its atlas descriptor, and this addon works in precisely those
-## folders.
+## when a file of that name already exists and was written by something else. Unlikely
+## now that the name carries [constant SIDECAR_SUFFIX], and kept because unlikely is not
+## the same as impossible and the cost of being wrong is somebody else's file.
 static func save_settings(source_path: String, operation: IWOperation, settings: Resource) -> Error:
 	var path := sidecar_path(source_path)
 	var envelope := {}
@@ -281,9 +296,8 @@ static func _absorb_retired(stack: Array, retired: Array) -> void:
 ## the file alone.
 ##
 ## Returns [code]OK[/code], or a failure code. Refuses [code]ERR_FILE_CORRUPT[/code]
-## when a file of that name already exists and was written by something else —
-## [code]sprite.json[/code] beside [code]sprite.png[/code] is exactly what Aseprite
-## names its atlas descriptor, and this addon works in precisely those folders.
+## when a file of that name already exists and was written by something else. See
+## [method save_settings] for why that check survives [constant SIDECAR_SUFFIX].
 static func save_stack(source_path: String, stack: Array) -> Error:
 	var path := sidecar_path(source_path)
 	var envelope := {}
@@ -463,9 +477,10 @@ static func _read_envelope(path: String) -> Dictionary:
 
 ## Parsed envelope, or an empty Dictionary when the text is not JSON or not one of ours.
 ##
-## The format check is what keeps this off somebody else's file — [code]sprite.json[/code]
-## beside [code]sprite.png[/code] is what Aseprite names its atlas descriptor — and, now
-## that a stack can arrive on the clipboard, off whatever else the user last copied.
+## The format check is what keeps this off somebody else's file, whatever it is called,
+## and off whatever the user last copied now that a stack can arrive on the clipboard.
+## [constant SIDECAR_SUFFIX] makes the first of those unlikely; it does nothing at all
+## about the second.
 ##
 ## Parsed through a [JSON] instance rather than [method JSON.parse_string], which prints
 ## an engine error on anything that is not JSON. That was invisible while the only input
