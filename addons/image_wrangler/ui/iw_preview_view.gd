@@ -49,6 +49,13 @@ const MARKER_SELECTED_COLOR := Color(1.0, 0.85, 0.2)
 ## highlighted. Thin and faint on purpose: this sits over the edges the tool exists to
 ## judge, so it has to be readable without being what you look at.
 const MARKER_WIDTH := 1.5
+
+## Dash length on a flooded island's outline, in screen pixels.
+##
+## Held in screen pixels rather than image ones so the dashes stay the same size at
+## every zoom: they are a property of the mark, not of the image under it, and dashes
+## that grew with a zoom would turn into a solid line long before the pixels did.
+const MARKER_DASH := 5.0
 const MARKER_FILL_ALPHA := 0.14
 
 ## Half-width of a polygon's draggable corner handle, in screen pixels, and how
@@ -268,6 +275,10 @@ var _image_size := Vector2i.ZERO
 var _markers: Array[Rect2i] = []
 ## A byte per marker: zero means the island is switched off and draws hollow.
 var _marker_enabled := PackedByteArray()
+
+## A byte per marker: one means the rectangle is where a run found the flood reached
+## rather than where the pick was made, and is dashed to say so.
+var _marker_flooded := PackedByteArray()
 var _selected_marker := -1
 
 ## The sweep in progress: where the button went down, and where the pointer is now.
@@ -413,11 +424,22 @@ func set_original(image: Image) -> void:
 ## [param enabled] runs alongside, a byte per marker. A switched-off island keeps
 ## its marker rather than vanishing — where it is remains worth seeing while it is
 ## set aside — but is drawn hollow so the list and the image agree.
-func set_markers(markers: Array[Rect2i], selected: int, enabled := PackedByteArray()) -> void:
+##
+## [param flooded] runs alongside too, and says which rectangles are where a run found
+## the flood reached rather than where the user picked. Those are dashed, because the
+## two are different claims about the image and only one of them is something the user
+## chose. Without it every marker is taken to be a pick, which is what it is until a
+## run has said otherwise.
+func set_markers(
+		markers: Array[Rect2i],
+		selected: int,
+		enabled := PackedByteArray(),
+		flooded := PackedByteArray()) -> void:
 	# Copied, not aliased: the caller's array belongs to the operation and can
 	# change underneath us without a redraw being requested.
 	_markers = markers.duplicate()
 	_marker_enabled = enabled.duplicate()
+	_marker_flooded = flooded.duplicate()
 	_selected_marker = selected
 	_canvas.queue_redraw()
 
@@ -1061,7 +1083,9 @@ func _draw_markers() -> void:
 		var color := MARKER_SELECTED_COLOR if selected else MARKER_COLOR
 		if not on:
 			color = Color(color, 0.45)
-		if region.size == Vector2i.ONE:
+		if i < _marker_flooded.size() and _marker_flooded[i] != 0:
+			_draw_flood_marker(region, color, selected, on)
+		elif region.size == Vector2i.ONE:
 			_draw_point_marker(region.position, color, selected, on)
 		else:
 			_draw_region_marker(region, color, selected, on)
@@ -1097,6 +1121,46 @@ func _draw_region_marker(region: Rect2i, color: Color, selected: bool, on: bool)
 	# dark art alike.
 	_canvas.draw_rect(box, Color(0, 0, 0, 0.75), false, MARKER_WIDTH + 2.0)
 	_canvas.draw_rect(box, color, false, MARKER_WIDTH + (1.0 if selected else 0.0))
+
+
+## What an island's flood actually reached, as a dashed box round its bounds.
+##
+## Dashed rather than solid because it is a different claim from the outline beside it.
+## A picked rectangle is where the user drew; this is how far the image then let the
+## flood get, which is the thing worth seeing — a click is one pixel, and one pixel says
+## nothing about how much keying it took out. Dashes also survive lying on top of the
+## edge they are describing, where a solid line of the same weight reads as part of it.
+##
+## Faintly shaded when it is the highlighted row, exactly as a picked region is, since
+## the question there — which of these is the one I have selected — is the same.
+func _draw_flood_marker(region: Rect2i, color: Color, selected: bool, on: bool) -> void:
+	var scale := _scale()
+	var box := Rect2(
+		_content_origin + Vector2(region.position) * scale,
+		Vector2(region.size) * scale,
+	)
+	if selected and on:
+		_canvas.draw_rect(box, Color(color, MARKER_FILL_ALPHA), true)
+	# The same dark backing every other marker carries, dashed in step with the line
+	# over it so it reads as a shadow rather than as a second dashed box.
+	_draw_dashed_rect(box, Color(0, 0, 0, 0.75), MARKER_WIDTH + 2.0)
+	_draw_dashed_rect(box, color, MARKER_WIDTH + (1.0 if selected else 0.0))
+
+
+## A dashed rectangle, drawn as its four sides.
+##
+## Each side is dashed from its own start, which is what keeps the corners closed: with
+## [code]aligned[/code] every line begins and ends on a dash, so the four meet instead
+## of leaving a gap at each corner where two runs of dashes happened to land.
+func _draw_dashed_rect(box: Rect2, color: Color, width: float) -> void:
+	var top_left := box.position
+	var top_right := box.position + Vector2(box.size.x, 0.0)
+	var bottom_right := box.position + box.size
+	var bottom_left := box.position + Vector2(0.0, box.size.y)
+	_canvas.draw_dashed_line(top_left, top_right, color, width, MARKER_DASH)
+	_canvas.draw_dashed_line(top_right, bottom_right, color, width, MARKER_DASH)
+	_canvas.draw_dashed_line(bottom_right, bottom_left, color, width, MARKER_DASH)
+	_canvas.draw_dashed_line(bottom_left, top_left, color, width, MARKER_DASH)
 
 
 ## The rectangle being swept, drawn as it is dragged.

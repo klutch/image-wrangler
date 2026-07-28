@@ -145,6 +145,29 @@ func process_context(ctx: IWPipelineContext) -> void:
 	report_progress(1.0)
 
 
+## Brings each island's flooded extent home from the copy that ran, so the preview can
+## outline what the flood actually took rather than the pixel it was seeded from.
+##
+## Positional, and abandoned outright when the counts disagree: entry [code]i[/code]
+## here is entry [code]i[/code] there only for as long as nobody adds or removes an
+## island mid-run. An edit that changes the list also asks for another run, so the
+## marks catch up on the next answer rather than being drawn against the wrong island
+## in the meantime.
+func absorb_run_report(from: IWStackOperation) -> void:
+	var source := from as IslandPickerOp
+	if source == null or source.settings == null:
+		return
+	if settings.islands == null or source.settings.islands == null:
+		return
+	var mine := settings.islands.entries
+	var theirs := source.settings.islands.entries
+	if mine.size() != theirs.size():
+		return
+	for i in mine.size():
+		if mine[i] != null and theirs[i] != null:
+			mine[i].flooded_bounds = theirs[i].flooded_bounds
+
+
 func _has(mode: int) -> bool:
 	for entry in settings.islands.entries:
 		if entry != null and entry.enabled and entry.mode == mode:
@@ -169,7 +192,12 @@ func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 	# within one. The same shape [method _protect] uses, for the same reason.
 	var seeds := PackedInt32Array()
 	var seed_tolerances := PackedFloat32Array()
-	for entry in settings.islands.entries:
+	# Which entry each seed came from, parallel to the seeds themselves. Built here
+	# because the flattening is the last place the grouping still exists, and the
+	# preview wants what the flood took reported per group rather than per pixel.
+	var seed_entries := PackedInt32Array()
+	for e in settings.islands.entries.size():
+		var entry: IslandEntry = settings.islands.entries[e]
 		if entry == null or not entry.enabled or entry.mode != IWAlphaMode.Mode.SUBTRACT:
 			continue
 		for pick in entry.picks:
@@ -181,8 +209,94 @@ func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 				continue
 			seeds.append(point.y * width + point.x)
 			seed_tolerances.append(pick.color_tolerance)
+			seed_entries.append(e)
 
-	return IWStageKernels.flood_islands(ctx, seeds, seed_tolerances)
+	# Read before the flood, because what it adds from here on is exactly the keys the
+	# attribution below has to account for.
+	var key_base := ctx.keys.size()
+	var touched := IWStageKernels.flood_islands(ctx, seeds, seed_tolerances)
+	_record_subtract_bounds(ctx, touched, seeds, seed_entries, key_base)
+	return touched
+
+
+## Works out how much of the image each Subtract island took, and records it on the
+## entry the user manages it as.
+##
+## Done afterwards, off what the flood wrote, rather than by flooding one entry at a
+## time. The flood has to stay one call for every seed at once: a pixel one seed claimed
+## is never offered to the next, and the budget deciding what merely squeezed through is
+## shared across the lot — splitting it would change the result, which is the very bug
+## the note on [code]weak_steps[/code] in the kernel records.
+##
+## What makes the attribution possible is that every seed which actually floods
+## registers a key of its own, in seed order, and stamps it on each pixel it claims. A
+## seed landing somewhere already taken registers nothing — which is why the keys are
+## walked rather than indexed: they are consecutive, but the seeds owning them are not.
+func _record_subtract_bounds(
+		ctx: IWPipelineContext,
+		touched: PackedInt32Array,
+		seeds: PackedInt32Array,
+		seed_entries: PackedInt32Array,
+		key_base: int) -> void:
+	if touched.is_empty():
+		return
+	var key_of := ctx.key_of
+
+	# Key -> the entry that seeded it, as a flat table rather than a Dictionary: it is
+	# read once per claimed pixel, and a hashed lookup there costs more than the whole
+	# rest of this.
+	var key_entries := PackedInt32Array()
+	var next_key := key_base
+	for s in seeds.size():
+		# A seed whose own pixel does not carry the next key never flooded: the pixel
+		# was already claimed, and what it carries is the key of whatever claimed it —
+		# always one registered earlier, so it can never be mistaken for this one.
+		if key_of[seeds[s]] != next_key:
+			continue
+		key_entries.append(seed_entries[s])
+		next_key += 1
+	if key_entries.is_empty():
+		return
+
+	var entry_count := settings.islands.entries.size()
+	var min_x := PackedInt32Array()
+	min_x.resize(entry_count)
+	min_x.fill(0x7fffffff)
+	var min_y := min_x.duplicate()
+	var max_x := PackedInt32Array()
+	max_x.resize(entry_count)
+	max_x.fill(-1)
+	var max_y := max_x.duplicate()
+
+	# One pass over what the flood took. This includes the matte band grown off it,
+	# whose pixels carry the claiming island's key too — deliberately kept, since the
+	# band is part of what the island changed.
+	var width := ctx.width
+	for t in touched.size():
+		var index := touched[t]
+		var key := key_of[index]
+		if key < key_base or key >= next_key:
+			continue
+		var e := key_entries[key - key_base]
+		var x := index % width
+		@warning_ignore("integer_division")
+		var y := index / width
+		if x < min_x[e]:
+			min_x[e] = x
+		if x > max_x[e]:
+			max_x[e] = x
+		if y < min_y[e]:
+			min_y[e] = y
+		if y > max_y[e]:
+			max_y[e] = y
+
+	for e in entry_count:
+		if max_x[e] < 0:
+			continue
+		var entry: IslandEntry = settings.islands.entries[e]
+		if entry != null:
+			entry.flooded_bounds = Rect2i(
+				min_x[e], min_y[e], max_x[e] - min_x[e] + 1, max_y[e] - min_y[e] + 1)
 
 
 ## Floods every Add island and marks what it protects.
@@ -195,14 +309,23 @@ func _protect(ctx: IWPipelineContext) -> PackedInt32Array:
 	var width := ctx.width
 	var height := ctx.height
 
-	# Float64 here where the Subtract side collects float32, because that is what each
-	# side always did and the difference reaches the last bit of every tolerance
-	# comparison in the flood below.
-	var seeds := PackedInt32Array()
-	var seed_tolerances := PackedFloat64Array()
-	for entry in settings.islands.entries:
+	# One call per entry rather than one for the lot, which the Subtract side cannot do
+	# and this side can: the only thing carried between seeds here is [code]protect[/code]
+	# itself, and that lives on the context and survives the call. Entries are still
+	# visited in order and seeds within them in order, so a pixel an earlier seed
+	# protected is skipped exactly as it was — the flood is handed the same seeds in the
+	# same sequence and finds the same buffer under it. What it buys is attribution:
+	# each call comes back with that entry's own pixels rather than everyone's.
+	var touched := PackedInt32Array()
+	for entry: IslandEntry in settings.islands.entries:
 		if entry == null or not entry.enabled or entry.mode != IWAlphaMode.Mode.ADD:
 			continue
+
+		# Float64 here where the Subtract side collects float32, because that is what each
+		# side always did and the difference reaches the last bit of every tolerance
+		# comparison in the flood below.
+		var seeds := PackedInt32Array()
+		var seed_tolerances := PackedFloat64Array()
 		for pick in entry.picks:
 			if pick == null:
 				continue
@@ -211,5 +334,38 @@ func _protect(ctx: IWPipelineContext) -> PackedInt32Array:
 				continue
 			seeds.append(point.y * width + point.x)
 			seed_tolerances.append(pick.color_tolerance)
+		if seeds.is_empty():
+			continue
 
-	return IWStageKernels.flood_protect(ctx, seeds, seed_tolerances)
+		var own := IWStageKernels.flood_protect(ctx, seeds, seed_tolerances)
+		_record_bounds(entry, own, width)
+		touched.append_array(own)
+
+	return touched
+
+
+## Records the extent of [param indices] on [param entry].
+##
+## The Add side needs no attribution pass: its flood is asked for one entry at a time,
+## so what comes back is already that entry's and nobody else's.
+func _record_bounds(entry: IslandEntry, indices: PackedInt32Array, width: int) -> void:
+	if indices.is_empty():
+		return
+	var min_x := 0x7fffffff
+	var min_y := 0x7fffffff
+	var max_x := -1
+	var max_y := -1
+	for i in indices.size():
+		var index := indices[i]
+		var x := index % width
+		@warning_ignore("integer_division")
+		var y := index / width
+		if x < min_x:
+			min_x = x
+		if x > max_x:
+			max_x = x
+		if y < min_y:
+			min_y = y
+		if y > max_y:
+			max_y = y
+	entry.flooded_bounds = Rect2i(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)

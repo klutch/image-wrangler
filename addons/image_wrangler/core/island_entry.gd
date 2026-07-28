@@ -45,6 +45,19 @@ extends Resource
 @export var point: Vector2i = Vector2i.ZERO
 @export var color_tolerance: float = IslandPick.DEFAULT_TOLERANCE
 
+## Where this island's floods actually reached on the last run that ran them, or a
+## zero-sized rect when no run has.
+##
+## Includes the matte band grown off what the flood opened, since that band exists
+## because of this island and is part of what it changed.
+##
+## [b]Deliberately not exported.[/b] It is an observation about one run of one image
+## rather than part of what the island is, so the codec — which reflects over storage
+## properties — leaves it out of the sidecar, and the copy the worker runs on starts
+## empty every time. It travels the other way: see
+## [method IslandPickerOp.absorb_run_report].
+var flooded_bounds := Rect2i()
+
 
 func _init() -> void:
 	# Assigned here as well as inline, so an entry duplicated for another image
@@ -106,6 +119,21 @@ func bounds() -> Rect2i:
 		to.x = maxi(to.x, pick.point.x)
 		to.y = maxi(to.y, pick.point.y)
 	return Rect2i(from, to - from + Vector2i.ONE)
+
+
+## Whether a run has said where this island's flood reached.
+func has_flooded_bounds() -> bool:
+	return flooded_bounds.size.x > 0 and flooded_bounds.size.y > 0
+
+
+## What the preview should outline for this island: where the flood reached if a run
+## has said, and where it was picked if none has.
+##
+## The two answer different questions and the first is the one worth asking — a click
+## is one pixel, and one pixel says nothing about how much of the image keying it took
+## out. Until a run has said, the picks are all there is to go on.
+func marker_bounds() -> Rect2i:
+	return flooded_bounds if has_flooded_bounds() else bounds()
 
 
 ## The pick that best stands for the group, for the row swatch: the one nearest the

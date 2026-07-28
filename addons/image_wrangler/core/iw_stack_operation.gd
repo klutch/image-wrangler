@@ -63,6 +63,22 @@ func process_context(_ctx: IWPipelineContext) -> void:
 	pass
 
 
+## Takes back whatever the run learned that the dock wants to show.
+##
+## [param from] is the throwaway copy of this stage that actually ran. The preview works
+## on a private snapshot of the stack — see [method IWPipeline.process_image] and the
+## dock's snapshot — so anything a stage observed about the image is recorded over
+## there, on settings nothing is looking at. This is the one seam that brings such an
+## observation home to the instance the UI is editing.
+##
+## [b]Observations only.[/b] A stage must not copy settings back through here. The copy
+## carries the user's own values from the moment the run started, and by the time this
+## is called they may be a slider-drag out of date — writing them back would undo an
+## edit made while the run was going.
+func absorb_run_report(_from: IWStackOperation) -> void:
+	pass
+
+
 ## Whether this stage needs a background to have been keyed out above it.
 ##
 ## [code]true[/code] for anything measuring against a key — which is most of them,

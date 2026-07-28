@@ -225,14 +225,28 @@ func add_region(region: Rect2i) -> int:
 	return entry.size()
 
 
-## Every island's bounds, for the dock to mark on the preview.
+## Every island's bounds, for the dock to mark on the preview: where its flood reached
+## once a run has said, and where it was picked until one has.
 func get_islands() -> Array[Rect2i]:
 	var out: Array[Rect2i] = []
 	var islands := _island_list()
 	if islands == null:
 		return out
 	for entry in islands.entries:
-		out.append(entry.bounds() if entry != null else Rect2i())
+		out.append(entry.marker_bounds() if entry != null else Rect2i())
+	return out
+
+
+## Whether each island's rectangle is where its flood reached rather than where it was
+## picked, in the same order, so the dock can draw the two as the different statements
+## they are.
+func get_flooded_flags() -> PackedByteArray:
+	var out := PackedByteArray()
+	var islands := _island_list()
+	if islands == null:
+		return out
+	for entry in islands.entries:
+		out.append(1 if entry != null and entry.has_flooded_bounds() else 0)
 	return out
 
 

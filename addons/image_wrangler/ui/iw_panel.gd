@@ -1431,6 +1431,7 @@ func _region_owner(index: int) -> Array:
 func _update_overlays() -> void:
 	var islands: Array[Rect2i] = []
 	var island_flags := PackedByteArray()
+	var island_flooded := PackedByteArray()
 	var selected_island := -1
 
 	var regions := []
@@ -1448,6 +1449,7 @@ func _update_overlays() -> void:
 					selected_island = islands.size() + picker.selected_index()
 				islands.append_array(own)
 				island_flags.append_array(picker.get_enabled_flags())
+				island_flooded.append_array(picker.get_flooded_flags())
 			elif control is PolygonList:
 				var list := control as PolygonList
 				var own_regions := list.get_polygons()
@@ -1461,7 +1463,7 @@ func _update_overlays() -> void:
 				region_colors.append_array(list.get_colors())
 				region_flags.append_array(list.get_enabled_flags())
 
-	_preview.set_markers(islands, selected_island, island_flags)
+	_preview.set_markers(islands, selected_island, island_flags, island_flooded)
 	_preview.set_polygons(regions, region_colors, selected_region, draft_region, region_flags)
 
 
@@ -1642,6 +1644,9 @@ func _on_preview_done(source: Image, result: Image, elapsed: int) -> void:
 		# which is the whole of the difference by the time an answer gets here.
 		_preview_thread.wait_to_finish()
 		_preview_thread = null
+	# Held on to for the report below: it is the only handle on the stack that actually
+	# ran, and everything it observed is recorded on that copy rather than on the live one.
+	var worker := _preview_worker_op
 	_preview_worker_op = null
 	# Before the restart below rather than after, since that sets it again.
 	_preview_running = false
@@ -1663,6 +1668,11 @@ func _on_preview_done(source: Image, result: Image, elapsed: int) -> void:
 			_set_status(note)
 		_update_preview_texture()
 		_update_detail_label()
+		# After the picture rather than before it, and only for a run being kept: a
+		# superseded run's answer is a picture of something the user has moved on from,
+		# and so is anything it observed on the way.
+		_absorb_run_report(worker)
+		_update_overlays()
 
 	# Straight into the next run rather than clearing the overlay first, so a held
 	# slider does not strobe it off and on between every pass.
@@ -1671,6 +1681,23 @@ func _on_preview_done(source: Image, result: Image, elapsed: int) -> void:
 	else:
 		_preview_pending = false
 		_preview.set_busy(false)
+
+
+## Lets every stage take back whatever the run learned that the dock wants to show.
+##
+## Positional, because the two stacks are the same stack: [method _snapshot_pipeline]
+## builds one worker stage per live stage, in order, enabled or not. A mismatch means
+## the stack was rebuilt while the run was going, and there is nothing to line the two
+## up by — the next run reports against the stack as it now is.
+func _absorb_run_report(worker: IWOperation) -> void:
+	var pipeline := worker as IWPipeline
+	if pipeline == null:
+		return
+	var live: Array = _stack_view.stages()
+	if live.size() != pipeline.stages.size():
+		return
+	for i in live.size():
+		(live[i] as IWStackOperation).absorb_run_report(pipeline.stages[i])
 
 
 ## What the status line calls the run: how many stages actually did anything.
