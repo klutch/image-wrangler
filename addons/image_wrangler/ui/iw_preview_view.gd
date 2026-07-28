@@ -42,24 +42,36 @@ const CHECKER_SIZE := 8
 const CHECKER_DARK := Color(0.16, 0.16, 0.18)
 const CHECKER_LIGHT := Color(0.24, 0.24, 0.27)
 const MARKER_RADIUS := 5.0
-const MARKER_COLOR := Color(1, 1, 1)
-const MARKER_SELECTED_COLOR := Color(1.0, 0.85, 0.2)
+
+## What a marker is drawn in, alpha included.
+##
+## The alpha belongs here rather than being mixed in at each draw. There is one answer
+## to how present a marker should be, and every place that built its own from a bare
+## colour was another place for that answer to drift — the dashes ended up softer than
+## the dot for no reason anyone had decided on. A marker that should read differently is
+## a colour of its own, below, not the same colour re-alphaed on the way past.
+##
+## Softer than solid on purpose: these sit over the edges the tool exists to judge, and
+## have to be readable without being what you look at.
+const MARKER_COLOR := Color(1, 1, 1, 0.6)
+const MARKER_SELECTED_COLOR := Color(1.0, 1.0, 0.2, 1)
+
+## The same two for an island that has been switched off.
+##
+## It keeps its marker rather than vanishing — where it is stays worth seeing while it
+## is set aside — but drops back far enough that the image agrees with the greyed row in
+## the list.
+const MARKER_DISABLED_COLOR := Color(1, 1, 1, 0.27)
+const MARKER_DISABLED_SELECTED_COLOR := Color(1.0, 1.0, 0.2, 0.27)
+
+## The dark backing every marker is laid over, so an outline reads against light and
+## dark art alike. Drawn as the same shape, one step thicker.
+const MARKER_SHADOW_COLOR := Color(0, 0, 0, 0.75)
 
 ## The outline of a picked rectangle, and the shading inside the one being swept or
 ## highlighted. Thin and faint on purpose: this sits over the edges the tool exists to
 ## judge, so it has to be readable without being what you look at.
 const MARKER_WIDTH := 1.5
-
-## How solid a flooded island's outline is drawn.
-##
-## Softer than the markers around it on purpose: this one is a report rather than
-## something the user placed, it can be large, and there may be several at once. At full
-## strength a box round every island competes with the edges they are drawn over, which
-## are the thing actually being looked at.
-##
-## Applied as a scale on whatever alpha the marker already carries, so a switched-off
-## island stays the fainter of the two.
-const MARKER_DASH_ALPHA := 0.6
 
 ## Dash length on a flooded island's outline, in screen pixels.
 ##
@@ -1093,7 +1105,7 @@ func _draw_markers() -> void:
 		var on := i >= _marker_enabled.size() or _marker_enabled[i] != 0
 		var color := MARKER_SELECTED_COLOR if selected else MARKER_COLOR
 		if not on:
-			color = Color(color, 0.45)
+			color = MARKER_DISABLED_SELECTED_COLOR if selected else MARKER_DISABLED_COLOR
 		if i < _marker_flooded.size() and _marker_flooded[i] != 0:
 			_draw_flood_marker(region, color, selected)
 		elif region.size == Vector2i.ONE:
@@ -1107,7 +1119,7 @@ func _draw_point_marker(point: Vector2i, color: Color, selected: bool, on: bool)
 	var center := _content_origin + (Vector2(point) + Vector2(0.5, 0.5)) * _scale()
 	var radius := MARKER_RADIUS + (1.0 if selected else 0.0)
 	# Dark ring underneath so the marker reads against light and dark art.
-	_canvas.draw_arc(center, radius + 1.0, 0.0, TAU, 24, Color(0, 0, 0, 0.75), 3.0)
+	_canvas.draw_arc(center, radius + 1.0, 0.0, TAU, 24, MARKER_SHADOW_COLOR, 3.0)
 	_canvas.draw_arc(center, radius, 0.0, TAU, 24, color, 1.5)
 	# Hollow when switched off, so a marker that is only a reminder cannot be
 	# mistaken for one that is doing something.
@@ -1128,9 +1140,7 @@ func _draw_region_marker(region: Rect2i, color: Color, selected: bool, on: bool)
 	)
 	if selected and on:
 		_canvas.draw_rect(box, Color(color, MARKER_FILL_ALPHA), true)
-	# The same dark backing the dot carries, so the outline reads against light and
-	# dark art alike.
-	_canvas.draw_rect(box, Color(0, 0, 0, 0.75), false, MARKER_WIDTH + 2.0)
+	_canvas.draw_rect(box, MARKER_SHADOW_COLOR, false, MARKER_WIDTH + 2.0)
 	_canvas.draw_rect(box, color, false, MARKER_WIDTH + (1.0 if selected else 0.0))
 
 
@@ -1153,15 +1163,10 @@ func _draw_flood_marker(region: Rect2i, color: Color, selected: bool) -> void:
 		_content_origin + Vector2(region.position) * scale,
 		Vector2(region.size) * scale,
 	)
-	# Scaled rather than set, so a switched-off island stays fainter than a live one:
-	# the alpha it arrives with is the only thing left saying which is which now that
-	# there is no fill to go hollow.
-	var line := Color(color, color.a * MARKER_DASH_ALPHA)
-	# The dark backing every other marker carries, dashed in step with the line over it
-	# so it reads as a shadow rather than as a second dashed box — and let down by the
-	# same amount, since a full-strength shadow under a softened line is just a dark box.
-	_draw_dashed_rect(box, Color(0, 0, 0, 0.75 * MARKER_DASH_ALPHA), MARKER_WIDTH + 2.0)
-	_draw_dashed_rect(box, line, MARKER_WIDTH + (1.0 if selected else 0.0))
+	# The backing dashed in step with the line over it, so it reads as a shadow rather
+	# than as a second dashed box.
+	_draw_dashed_rect(box, MARKER_SHADOW_COLOR, MARKER_WIDTH + 2.0)
+	_draw_dashed_rect(box, color, MARKER_WIDTH + (1.0 if selected else 0.0))
 
 
 ## A dashed rectangle, drawn as its four sides.
@@ -1191,7 +1196,7 @@ func _draw_region_band() -> void:
 		Vector2(region.size) * scale,
 	)
 	_canvas.draw_rect(box, Color(MARKER_SELECTED_COLOR, MARKER_FILL_ALPHA), true)
-	_canvas.draw_rect(box, Color(0, 0, 0, 0.75), false, MARKER_WIDTH + 2.0)
+	_canvas.draw_rect(box, MARKER_SHADOW_COLOR, false, MARKER_WIDTH + 2.0)
 	_canvas.draw_rect(box, MARKER_SELECTED_COLOR, false, MARKER_WIDTH)
 
 
