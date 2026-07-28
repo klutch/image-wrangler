@@ -461,6 +461,7 @@ func _build_preview_column() -> Control:
 	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_preview.pixel_picked.connect(_on_pixel_picked)
+	_preview.region_picked.connect(_on_region_picked)
 	_preview.pick_cancelled.connect(_on_pick_cancelled)
 	_preview.vertex_dragged.connect(_on_vertex_dragged)
 	_preview.vertex_drag_ended.connect(_on_vertex_drag_ended)
@@ -1023,6 +1024,7 @@ func _release_pick_if_disabled() -> void:
 func _release_pick() -> void:
 	_pick_target = null
 	_preview.pick_mode = false
+	_preview.region_pick = false
 	for control: Control in _pick_controls:
 		if control is PolygonList:
 			# Committed rather than abandoned: leaving a half-drawn shape open would
@@ -1190,6 +1192,7 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
 		if _pick_target == source:
 			_pick_target = null
 			_preview.pick_mode = false
+			_preview.region_pick = false
 			if source is PolygonList:
 				(source as PolygonList).finish_polygon()
 				_update_overlays()
@@ -1208,12 +1211,15 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
 	_pick_target = source
 	_overlay_owner = source
 	_preview.pick_mode = true
+	# Only the island picker wants a rectangle. A colour is the one pixel under the
+	# pointer, and a polygon is built corner by corner.
+	_preview.region_pick = source is IslandPicker
 	if source is ColorList:
 		_set_status("Click the preview to add that color to the list.")
 	elif source is PolygonList:
 		_set_status("Click to place corners. Right-click or Escape closes the region.")
 	else:
-		_set_status("Click a spot in the preview to add it to the list.")
+		_set_status("Drag a region in the preview to add it to the list, or click one pixel.")
 	_update_overlays()
 
 
@@ -1231,9 +1237,32 @@ func _on_pixel_picked(pixel: Vector2i) -> void:
 			_finish_polygon()
 		else:
 			_update_overlays()
-	elif _pick_target is IslandPicker:
-		(_pick_target as IslandPicker).add_island(pixel)
-		_set_status("Picked (%d, %d)." % [pixel.x, pixel.y])
+
+
+## A rectangle swept over the preview. Only the island picker asks for one, which is
+## what the preview's [code]region_pick[/code] is set from.
+##
+## A click is a one by one region rather than a case of its own, so a single pick
+## reports exactly what it always did.
+func _on_region_picked(region: Rect2i) -> void:
+	if _source_image == null or not (_pick_target is IslandPicker):
+		return
+	var picked := (_pick_target as IslandPicker).add_region(region)
+	if picked <= 0:
+		# Refused as a repeat of something already in the list, which the picker has
+		# said in its own hint. Overwriting that with a status line saying nothing
+		# happened would be the same news twice.
+		return
+	if region.size == Vector2i.ONE:
+		_set_status("Picked (%d, %d)." % [region.position.x, region.position.y])
+	else:
+		_set_status("Picked (%d, %d)–(%d, %d), %d pixels." % [
+			region.position.x,
+			region.position.y,
+			region.end.x - 1,
+			region.end.y - 1,
+			picked,
+		])
 
 
 ## Whichever polygon list currently owns the crosshair, or null.
@@ -1322,9 +1351,9 @@ func _region_owner(index: int) -> Array:
 ## its owner, and only one control's selection is shown at a time. See
 ## [member _overlay_owner].
 func _update_overlays() -> void:
-	var points: Array[Vector2i] = []
-	var point_flags := PackedByteArray()
-	var selected_point := -1
+	var islands: Array[Rect2i] = []
+	var island_flags := PackedByteArray()
+	var selected_island := -1
 
 	var regions := []
 	var region_colors := PackedColorArray()
@@ -1338,9 +1367,9 @@ func _update_overlays() -> void:
 				var picker := control as IslandPicker
 				var own := picker.get_islands()
 				if picker == _overlay_owner and picker.selected_index() >= 0:
-					selected_point = points.size() + picker.selected_index()
-				points.append_array(own)
-				point_flags.append_array(picker.get_enabled_flags())
+					selected_island = islands.size() + picker.selected_index()
+				islands.append_array(own)
+				island_flags.append_array(picker.get_enabled_flags())
 			elif control is PolygonList:
 				var list := control as PolygonList
 				var own_regions := list.get_polygons()
@@ -1354,7 +1383,7 @@ func _update_overlays() -> void:
 				region_colors.append_array(list.get_colors())
 				region_flags.append_array(list.get_enabled_flags())
 
-	_preview.set_markers(points, selected_point, point_flags)
+	_preview.set_markers(islands, selected_island, island_flags)
 	_preview.set_polygons(regions, region_colors, selected_region, draft_region, region_flags)
 
 

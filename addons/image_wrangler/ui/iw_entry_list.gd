@@ -119,7 +119,7 @@ func update_row(index: int, entry: Dictionary) -> void:
 	_loading = true
 	var swatch := row.get_meta(&"swatch") as TextureRect
 	var label := row.get_meta(&"label") as Label
-	swatch.texture = _swatch(entry.get("color", Color.MAGENTA))
+	swatch.texture = make_swatch(entry.get("color", Color.MAGENTA))
 	label.text = String(entry.get("text", ""))
 	var box := row.get_meta(&"check") as CheckBox
 	box.button_pressed = bool(entry.get("enabled", true))
@@ -157,7 +157,7 @@ func _build_row(index: int, entry: Dictionary) -> PanelContainer:
 	row.add_child(line)
 
 	var swatch := TextureRect.new()
-	swatch.texture = _swatch(entry.get("color", Color.MAGENTA))
+	swatch.texture = make_swatch(entry.get("color", Color.MAGENTA))
 	swatch.custom_minimum_size = Vector2(SWATCH_SIZE, SWATCH_SIZE)
 	swatch.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
 	line.add_child(swatch)
@@ -249,7 +249,11 @@ func _row_style(selected: bool) -> StyleBox:
 
 
 ## Small bordered colour chip, so a white entry is still visible on its row.
-static func _swatch(color: Color) -> Texture2D:
+##
+## Public because the island picker draws the same chip beside each pixel inside a
+## group, and two of these drifting apart would be two sizes of the same thing in one
+## control.
+static func make_swatch(color: Color) -> Texture2D:
 	var image := Image.create_empty(SWATCH_SIZE, SWATCH_SIZE, false, Image.FORMAT_RGBA8)
 	image.fill(Color(0, 0, 0, 1))
 	image.fill_rect(Rect2i(1, 1, SWATCH_SIZE - 2, SWATCH_SIZE - 2), color)

@@ -10,20 +10,27 @@ extends IWStackOperation
 ## a region a loose tolerance ate cannot be argued back by tightening the
 ## tolerance, because that would give the rest of the image back too.
 ##
-## An island answers both. It floods outwards from the pixel the user clicked,
-## through anything within its own tolerance of the colour it landed on, and then
-## either removes that region or forces it opaque. Subtract and Add are the same
-## gesture pointed the other way, bounded by the same edges.
+## An island answers both. It floods outwards from every pixel the user picked,
+## through anything within that pixel's own tolerance of the colour it landed on, and
+## then either removes what it reached or forces it opaque. Subtract and Add are the
+## same gesture pointed the other way, bounded by the same edges.
 ##
-## [b]Each island brings its own tolerance.[/b] An island is pointed at one region
+## [b]An island is a region picked, not a pixel picked.[/b] The user drags a rectangle
+## and every pixel in it seeds a flood, which is what gets a patchy region out in one
+## gesture — a speckled highlight is a dozen colours, and one seed only ever finds the
+## one it landed on. The floods do not multiply the work: a pixel one seed claimed is
+## never offered to the next, so the seeds inside a region a flood already took cost a
+## test each. See [IslandEntry] for why they are grouped rather than listed flat.
+##
+## [b]Each pick brings its own tolerance.[/b] An island is pointed at one region
 ## of one image, and how clean that region is says nothing about the one beside it.
 ## Borrowing a number from a Remove Colors list would be worse still, since those
 ## entries describe colours an island by definition is not — or the flood would
 ## have reached it already.
 ##
-## [b]Its key is sampled, not stored.[/b] The colour is read off the pixel the
-## island sits on at the moment it runs, so it always removes exactly what was
-## clicked even if the stages above it changed what is there.
+## [b]Its keys are sampled, not stored.[/b] Each colour is read off the pixel its pick
+## sits on at the moment it runs, so an island always removes exactly what was
+## picked even if the stages above it changed what is there.
 ##
 ## [b]A Subtract island reaches as far as the border flood would.[/b] It spreads
 ## through anything the Remove Colors above it claim, not only through its own
@@ -66,15 +73,15 @@ func get_settings_schema() -> Array[Dictionary]:
 		{
 			"property": &"islands",
 			"type": SettingType.ISLAND_PICKER,
-			"tooltip": "Regions picked off the preview, one click each.\n\nSubtract removes the region, which is how an enclosed background — an eye, a\ngap in lettering, a highlight — comes out, since no Remove Color ever reaches\nit. Add forces the region opaque, which is how a region a loose tolerance ate\ncomes back.\n\nEach one keys out the color of the pixel you clicked at its own tolerance, so\nan island need not match anything in Remove Background.",
+			"tooltip": "Regions picked off the preview: drag a rectangle, or click for a single pixel.\n\nSubtract removes the region, which is how an enclosed background — an eye, a\ngap in lettering, a highlight — comes out, since no Remove Color ever reaches\nit. Add forces the region opaque, which is how a region a loose tolerance ate\ncomes back.\n\nEvery pixel you picked keys out its own color at its own tolerance, so an\nisland need not match anything in Remove Background.",
 		},
 	]
 
 
-## Pulls every island tolerance into range, on top of what the schema clamps.
+## Pulls every pick's tolerance into range, on top of what the schema clamps.
 ##
 ## The schema cannot reach these: it names properties on the settings Resource, and a
-## tolerance lives one level down, on an entry.
+## tolerance lives two levels down, on a pick inside an entry.
 func clamp_settings_to_schema(target: Resource = null) -> void:
 	super(target)
 	if target == null:
@@ -83,8 +90,11 @@ func clamp_settings_to_schema(target: Resource = null) -> void:
 	if typed == null or typed.islands == null:
 		return
 	for island in typed.islands.entries:
-		if island != null:
-			island.color_tolerance = clampf(island.color_tolerance, 0.0, RemoveColorEntry.MAX_TOLERANCE)
+		if island == null:
+			continue
+		for pick in island.picks:
+			if pick != null:
+				pick.color_tolerance = clampf(pick.color_tolerance, 0.0, RemoveColorEntry.MAX_TOLERANCE)
 
 
 func stage_weight() -> float:
@@ -158,28 +168,44 @@ func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 	var weak_steps := PackedInt32Array()
 	weak_steps.resize(pixel_count)
 
+	# Flattened out of the groups they are managed in, because the flood does not care
+	# which rectangle a seed was drawn in: what matters is that a pixel one seed claimed
+	# is never offered to the next, and that holds across entries exactly as it holds
+	# within one. The same shape [method _protect] uses, for the same reason.
+	var seeds := PackedInt32Array()
+	var seed_tolerances := PackedFloat32Array()
 	for entry in settings.islands.entries:
 		if entry == null or not entry.enabled or entry.mode != IWAlphaMode.Mode.SUBTRACT:
 			continue
-		var point := entry.point
-		if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
-			continue
-		var seed := point.y * width + point.x
-		# Already swallowed by something above, so it adds nothing. Its key is not
-		# registered either — an unused key would still be offered to every pixel by
-		# claiming_key if it were not flagged as an island, and flagging a key
-		# nothing seeded is just clutter.
+		for pick in entry.picks:
+			if pick == null:
+				continue
+			var point := pick.point
+			# Picks made on a different image, or on this one before it was cropped.
+			if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
+				continue
+			seeds.append(point.y * width + point.x)
+			seed_tolerances.append(pick.color_tolerance)
+
+	for s in seeds.size():
+		var seed := seeds[s]
+		# Already swallowed by something above, or by an earlier seed of this very
+		# region, so it adds nothing. This is what keeps a dragged rectangle cheap: the
+		# first seed floods the region and every other seed inside it costs one test.
+		# Its key is not registered either — an unused key would still be offered to
+		# every pixel by claiming_key if it were not flagged as an island, and flagging
+		# a key nothing seeded is just clutter.
 		if mask[seed] == IWPipelineContext.MASK_BACKGROUND:
 			continue
 
-		# Sampled now rather than stored, so it removes exactly what was clicked.
-		var key := ctx.add_key(ctx.color_at(seed), entry.color_tolerance, true)
+		# Sampled now rather than stored, so it removes exactly what was picked.
+		var key := ctx.add_key(ctx.color_at(seed), seed_tolerances[s], true)
 		var head := 0
 		var tail := 0
-		# Not cleared between islands, though each still starts on a full budget: a
-		# pixel one island claimed is never offered to the next, so no island can read
-		# another's count, and what it records is read once at the end for every island
-		# at once. Clearing it here left all but the last island's squeezed-through
+		# Not cleared between seeds, though each still starts on a full budget: a
+		# pixel one seed claimed is never offered to the next, so no seed can read
+		# another's count, and what it records is read once at the end for every seed
+		# at once. Clearing it here left all but the last seed's squeezed-through
 		# pixels classed as hard background.
 		mask[seed] = IWPipelineContext.MASK_BACKGROUND
 		key_of[seed] = key
@@ -285,13 +311,16 @@ func _protect(ctx: IWPipelineContext) -> PackedInt32Array:
 	for entry in settings.islands.entries:
 		if entry == null or not entry.enabled or entry.mode != IWAlphaMode.Mode.ADD:
 			continue
-		var point := entry.point
-		if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
-			continue
-		var index := point.y * width + point.x
-		seeds.append(index)
-		seed_keys.append(ctx.color_at(index))
-		seed_tolerances.append(entry.color_tolerance)
+		for pick in entry.picks:
+			if pick == null:
+				continue
+			var point := pick.point
+			if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
+				continue
+			var index := point.y * width + point.x
+			seeds.append(index)
+			seed_keys.append(ctx.color_at(index))
+			seed_tolerances.append(pick.color_tolerance)
 	if seeds.is_empty():
 		return PackedInt32Array()
 

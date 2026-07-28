@@ -16,7 +16,7 @@ extends Resource
 ## Tight, because a Remove Color is a colour the user chose and can see: it should take
 ## what was asked for and no more, and widening it is a deliberate act. An island
 ## starts much looser and for a different reason; see
-## [constant IslandEntry.DEFAULT_TOLERANCE].
+## [constant IslandPick.DEFAULT_TOLERANCE].
 const DEFAULT_TOLERANCE := 0.02
 
 ## Widest tolerance offered. The max-channel metric this is compared against

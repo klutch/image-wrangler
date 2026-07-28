@@ -2,13 +2,27 @@
 class_name IslandList
 extends Resource
 
-## Image positions the user picked off the preview, each standing for a region an
+## Image regions the user picked off the preview, each standing for an area an
 ## operation should act on. See [IslandEntry].
 ##
 ## A Resource rather than a bare array so that it can be swapped as a unit when
 ## the dock changes image, and so per-island data can be added without changing
 ## the shape of the settings that hold it — which is exactly what happened when a
-## pick grew an on/off switch and an add/subtract mode.
+## pick grew an on/off switch and a mode, and again when it grew from one pixel
+## into a dragged rectangle.
+
+## Most picks one dragged region may hold.
+##
+## A cap rather than a promise to store every pixel, because there is nothing to stop
+## a drag covering the whole image: a thousand by thousand rectangle is a million
+## picks, which is a megabyte of sidecar per island and a list the dock cannot draw.
+## Past the cap the rectangle is sampled on an even stride instead — see
+## [method add_region] — which loses nothing a flood would have found, since a seed
+## only has to land inside a region rather than on every pixel of it.
+##
+## Sized so that anything up to sixty-four by sixty-four is stored pixel for pixel,
+## which covers the eyes, gaps and highlights this tool is actually pointed at.
+const MAX_PICKS := 4096
 
 @export var entries: Array[IslandEntry] = []
 
@@ -28,18 +42,23 @@ func _init() -> void:
 	points = []
 
 
-## Folds any legacy [member points] into [member entries], newest format wins.
+## Folds any legacy [member points] into [member entries], newest format wins, and
+## gives every entry the same chance to fold a legacy point of its own.
 ##
 ## Called after a settings Resource is decoded. Entries already present mean the
 ## file was written in the new format and the legacy array is either absent or
 ## stale, so it is discarded rather than appended.
 func migrate_legacy() -> void:
-	if points.is_empty():
-		return
-	if entries.is_empty():
-		for point in points:
-			add(point)
-	points = []
+	if not points.is_empty():
+		if entries.is_empty():
+			for point in points:
+				add(point)
+		points = []
+	# Two formats back the entries themselves were single points. An entry decoded
+	# from such a file has no picks, and nothing else would notice.
+	for entry in entries:
+		if entry != null:
+			entry.migrate_legacy()
 
 
 func size() -> int:
@@ -56,11 +75,10 @@ func get_at(index: int) -> IslandEntry:
 	return entries[index]
 
 
-## Index of the first entry at [param at], or -1. Compared on position alone,
-## since that is what makes a second pick there redundant.
+## Index of the first entry covering [param at], or -1. See [method IslandEntry.covers].
 func find(at: Vector2i) -> int:
 	for i in entries.size():
-		if entries[i] != null and entries[i].point == at:
+		if entries[i] != null and entries[i].covers(at):
 			return i
 	return -1
 
@@ -69,22 +87,69 @@ func has(at: Vector2i) -> bool:
 	return find(at) >= 0
 
 
-## Appends an entry at [param at] and returns it.
+## Appends an entry holding the single pixel [param at] and returns it.
+func add(at: Vector2i) -> IslandEntry:
+	return add_region(Rect2i(at, Vector2i.ONE))
+
+
+## Appends an entry covering [param region] and returns it.
 ##
-## It starts on the same mode and tolerance as the entry before it. Picking
-## islands is repetitive work — several spots in one image, wanted the same way —
-## and setting the same two controls again after every click is exactly the sort
+## Every pixel of the rectangle becomes a pick, up to [constant MAX_PICKS]; past that
+## the rectangle is walked on an even stride wide enough to fit. The first and last row
+## and column are always kept whatever the stride, so the entry still describes the
+## rectangle that was actually dragged rather than a slightly smaller one.
+##
+## The entry starts on the same mode and tolerance as the one before it. Picking
+## islands is repetitive work — several regions in one image, wanted the same way —
+## and setting the same two controls again after every gesture is exactly the sort
 ## of thing the list should remember for you. The first entry has nothing to
 ## follow and takes the defaults.
-func add(at: Vector2i) -> IslandEntry:
+func add_region(region: Rect2i) -> IslandEntry:
 	var entry := IslandEntry.new()
-	entry.point = at
+	var tolerance := IslandPick.DEFAULT_TOLERANCE
 	var previous := get_at(entries.size() - 1)
 	if previous != null:
 		entry.mode = previous.mode
-		entry.color_tolerance = previous.color_tolerance
+		# A group the user has since tuned pick by pick has no one tolerance to
+		# inherit, so the new entry falls back to the one it shows for that group.
+		var inherited := previous.shared_tolerance()
+		tolerance = inherited if inherited >= 0.0 else previous.representative().color_tolerance
+
+	if region.size.x > 0 and region.size.y > 0:
+		var step := 1
+		var area := region.size.x * region.size.y
+		if area > MAX_PICKS:
+			step = maxi(int(ceil(sqrt(float(area) / float(MAX_PICKS)))), 1)
+		var xs := _stops(region.position.x, region.size.x, step)
+		var ys := _stops(region.position.y, region.size.y, step)
+		# Kept as a loop rather than trusted to the square root: the two ends are
+		# always included, so a stride that divides the rectangle awkwardly can still
+		# come out a row or a column over.
+		while xs.size() * ys.size() > MAX_PICKS:
+			step += 1
+			xs = _stops(region.position.x, region.size.x, step)
+			ys = _stops(region.position.y, region.size.y, step)
+		# Reading order, so the middle of the list is the middle of the rectangle;
+		# see [method IslandEntry.representative].
+		for y in ys:
+			for x in xs:
+				entry.add_pick(Vector2i(x, y), tolerance)
+
 	entries.append(entry)
 	return entry
+
+
+## Positions along one axis: [param start], then every [param step] pixels, then the
+## far end of the run whether or not the stride landed on it.
+static func _stops(start: int, count: int, step: int) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	var last := start + count - 1
+	var value := start
+	while value < last:
+		out.append(value)
+		value += step
+	out.append(last)
+	return out
 
 
 func remove_at(index: int) -> void:

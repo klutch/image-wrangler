@@ -235,8 +235,8 @@ there. If a colour that looks right clears nothing at all, this is usually why.
 
 So a grey panel walled off by *opaque subject* is not removed by adding grey to
 the list, however exactly you match it — there is no path to it. That region is
-what the **Island Picker** is for: click it and it floods from there, keying out
-against its own colour. The rule of thumb is that the list describes background
+what the **Island Picker** is for: drag a rectangle over it and it floods from every
+pixel you covered, each keying out against its own colour. The rule of thumb is that the list describes background
 the flood can walk to, and the picker describes background it cannot.
 
 Turning **Only Outer Background** off removes every listed colour wherever it
@@ -504,21 +504,39 @@ keyer alone would have given.
 region, because it cannot tell an eye highlight from a gap you wanted gone.
 The **Island Picker** is the manual override.
 
-Hit **Pick** in the settings panel, then click any enclosed region in the
-preview. It's added to the list as `(x, y)`, marked with a ring on the preview,
-and removed on the next pass. Highlight a row to see which marker it is;
-**Remove** and **Clear** take entries back out.
+Hit **Pick** in the settings panel, then drag a rectangle over any enclosed region
+in the preview — or click once for a single pixel, which is the same gesture one
+pixel wide. It's added to the list as one row, outlined on the preview, and removed
+on the next pass. Highlight a row to see which region it is; **Remove** and
+**Clear** take entries back out.
 
-**Each island keys out its own colour** — the colour of the pixel you clicked,
-shown as the swatch on its row. So an island need not match anything in **Remove
-Colors**: a white plate with a red panel inside the subject takes one entry and
-one pick. The colour is sampled from the image at process time rather than
+**A row is a region, not a pixel.** Every pixel of the rectangle you dragged seeds a
+flood of its own, which is how a patchy region comes out in one gesture — a speckled
+highlight is a dozen colours, and a single seed only ever finds the one it landed
+on. They stay grouped under one row because a rectangle is one decision: switching
+it off, or turning it from Subtract to Add, is meant for the patch you drew rather
+than for its nine-hundredth pixel. A single click is a group of one, which is
+exactly the island this tool used to take.
+
+The extra seeds are close to free — a pixel one flood claimed is never offered to
+the next, so every seed inside a region that has already come out costs one test.
+Past 4096 pixels the rectangle is seeded on an even grid rather than pixel by pixel,
+and the list says so when it happens; a seed only has to land inside a region, not
+on every pixel of it.
+
+**Each picked pixel keys out its own colour**, and the swatch on the row shows one
+of them, sampled from the middle of the region. So an island need not match anything
+in **Remove Colors**: a white plate with a red panel inside the subject takes one
+entry and one pick. The colour is sampled from the image at process time rather than
 stored, so a swatch can never disagree with what it will actually remove.
 
-**Each island has its own tolerance**, on the slider under the list, applying to
-whichever row is highlighted. How clean one region is says nothing about the one
-beside it — a speckled patch wants a loose tolerance where the flat panel next to
-it would be eaten by the same number.
+**Each picked pixel has its own tolerance.** The slider under the list writes every
+pixel of the highlighted region at once, which is what keeps the common case to one
+gesture; open **Pixels** underneath it to set one of them on its own, for when a
+rectangle straddles a flat panel and the speckle beside it. The row reads `mixed`
+once they no longer agree. How clean one region is says nothing about the one beside
+it — a speckled patch wants a loose tolerance where the flat panel next to it would
+be eaten by the same number.
 
 It starts at **0.2**, much looser than a **Remove Colors** entry's 0.02, because the
 two are aimed at different things. A Remove Color is a colour you chose and can see,
@@ -526,7 +544,7 @@ so it starts tight and takes only what you asked for. An island is a spot you po
 at, and what you meant was the region under the pointer — so it has to swallow that
 region's own variation without being told what it is. Starting tight would make every
 island a handful of pixels you then had to widen by hand, which is the wrong default
-for a control whose whole point is one click.
+for a control whose whole point is one gesture.
 
 Loosening a **Remove Colors** entry does not loosen the islands, and never did:
 the entries there describe colours an island by definition is not, or the border
@@ -534,13 +552,14 @@ flood would have reached it already.
 
 **A new island starts where the last one left off**, taking the previous row's
 tolerance and its Subtract/Add mode. Picking islands is repetitive — several
-spots in one image, wanted the same way — and setting the same two controls after
-every click is exactly the sort of thing the list should remember. The same goes
+regions in one image, wanted the same way — and setting the same two controls after
+every gesture is exactly the sort of thing the list should remember. The same goes
 for a new **Polygon Edit** region and its mode.
 
-One consequence: clicking the subject by mistake keys out *that* colour and eats
-part of the subject. The preview shows it at once, and removing the row undoes
-it.
+One consequence: dragging over the subject by mistake keys out *those* colours and
+eats part of the subject — and a rectangle that overshoots its region takes the
+colours it overshot onto with it. The preview shows it at once, and removing the row
+undoes it.
 
 Press **H** with the pointer over the dock to hide and show the markers — they
 sit right on top of the edges you are trying to judge. The shortcut is scoped to
@@ -707,7 +726,7 @@ the processing can never silently disagree.
 
 Every row in **Remove Colors**, **Island Picker** and **Polygon Edit** carries a
 **tick box** on the right. Unticking leaves the entry in the list but out of the
-result — a colour keeps its tolerance, an island keeps its spot, a region keeps
+result — a colour keeps its tolerance, an island keeps its region, a region keeps
 its shape — so something can be tried and untried without being set up again. A
 switched-off island still shows its marker, drawn hollow; a switched-off region
 still shows its outline, drawn without its fill. Clicking a highlighted row again
@@ -717,8 +736,8 @@ clears the selection.
 Subtract is the default and is what both tools have always done: the affected
 area becomes transparent. Add reverses it — the same area is forced **opaque**,
 whatever the keying decided. An Add island floods exactly as a Subtract one does,
-outwards from the pixel you clicked through anything close to its colour, so
-clicking a region a loose tolerance ate brings it back bounded by the same edges
+outwards from every pixel you picked through anything close to its colour, so
+picking a region a loose tolerance ate brings it back bounded by the same edges
 that would have bounded its removal.
 
 **Add wins wherever the two overlap**, whatever order the rows are in. Protection

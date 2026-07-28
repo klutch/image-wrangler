@@ -73,6 +73,16 @@ var key_tolerances: Array[float] = []
 ## pixel of that colour in the image. See [method claiming_key].
 var key_is_island := PackedByteArray()
 
+## Indices into [member keys] of everything [method claiming_key] may answer with,
+## in the order they were added — which is to say every key that is not an island.
+##
+## Kept alongside the flag rather than derived from it because the flag has to be
+## tested per key per pixel, and the number of island keys is no longer small: one
+## picked region contributes a key per pixel it seeds, so a single drag can put
+## thousands of entries in [member keys] that this function must never return. Walking
+## past them for every pixel of the image is the difference between a run and a hang.
+var _claiming := PackedInt32Array()
+
 ## Largest per-channel distance from [code]keys[0][/code], per pixel. Empty until
 ## a stage builds it.
 ##
@@ -229,21 +239,19 @@ func key_distance(index: int, k: int) -> float:
 ## the one the user can see at the top of the list.
 ##
 ## Islands are deliberately skipped, for the reason given on [member key_is_island].
+## They are skipped by not being walked at all — see [member _claiming] — rather than
+## by a test inside the loop, which is what keeps this independent of how many pixels
+## the user has picked.
 ##
-## The first key is unrolled out of the loop. This is called once per pixel by both
-## the nearest-subject map and the non-contiguous classification, and for the
-## overwhelmingly common single-colour list that leaves it an array lookup and a
-## compare rather than a nested call per pixel.
+## The map for the first key is read inline rather than through [method key_distance].
+## This is called once per pixel by both the nearest-subject map and the non-contiguous
+## classification, and for the overwhelmingly common single-colour list that leaves it
+## an array lookup and a compare rather than a nested call per pixel.
 func claiming_key(index: int) -> int:
-	var count := keys.size()
-	if count == 0:
-		return KEY_NONE
-	if key_is_island[0] == 0 and key_dist[index] <= key_tolerances[0]:
-		return 0
-	for k in range(1, count):
-		if key_is_island[k] != 0:
-			continue
-		if distance_at(index, keys[k]) <= key_tolerances[k]:
+	for i in _claiming.size():
+		var k := _claiming[i]
+		var distance := key_dist[index] if k == 0 else distance_at(index, keys[k])
+		if distance <= key_tolerances[k]:
 			return k
 	return KEY_NONE
 
@@ -392,9 +400,12 @@ func add_key(key: Color, tolerance: float, island: bool) -> int:
 	keys.append(key)
 	key_tolerances.append(tolerance)
 	key_is_island.append(1 if island else 0)
+	var index := keys.size() - 1
+	if not island:
+		_claiming.append(index)
 	has_keying = true
 	ensure_key_dist()
-	return keys.size() - 1
+	return index
 
 
 ## Builds [member key_dist] against the first key, if it is not built already.

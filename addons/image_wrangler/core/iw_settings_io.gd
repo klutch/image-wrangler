@@ -589,12 +589,19 @@ static func self_test(operation: IWOperation) -> bool:
 					var islands := nested as IslandList
 					islands.clear()
 					islands.add(Vector2i(128, 64))
-					# Driven off the defaults on both counts, so an entry that
-					# failed to round-trip cannot coincidentally match.
-					var picked := islands.add(Vector2i(3, 900))
+					# A dragged region as well as a single click, since an entry is
+					# a group of picks now: a decoder that dropped the inner list,
+					# or handed every entry the same one, would round-trip a
+					# one-pick island without complaint.
+					var picked := islands.add_region(Rect2i(3, 900, 3, 2))
+					# Driven off the defaults on every count, so an entry that
+					# failed to round-trip cannot coincidentally match — and the two
+					# picks driven apart from each other, for the reason the colour
+					# list's two entries are.
 					picked.enabled = false
 					picked.mode = IWAlphaMode.Mode.ADD
-					picked.color_tolerance = 0.077
+					picked.get_pick(0).color_tolerance = 0.077
+					picked.get_pick(picked.size() - 1).color_tolerance = 0.311
 				elif nested is RemoveColorList:
 					# Two entries with different tolerances, because one would not
 					# catch a decoder that returned the same instance for every

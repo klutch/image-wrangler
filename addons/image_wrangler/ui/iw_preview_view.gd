@@ -9,8 +9,17 @@ extends Control
 ## with transparent margins around it; above, scrollbars appear and it is shown
 ## at exactly the requested zoom.
 
-## Emitted when the user clicks the image while [member pick_mode] is on.
+## Emitted when the user clicks the image while [member pick_mode] is on and
+## [member region_pick] is not.
 signal pixel_picked(pixel: Vector2i)
+
+## Emitted when a sweep under [member region_pick] ends, with the rectangle of image
+## pixels it covered.
+##
+## Never empty: pressing and releasing on one pixel reports that pixel as a one by one
+## rectangle, so a caller can treat a click as the degenerate drag it is rather than as
+## a separate gesture.
+signal region_picked(region: Rect2i)
 
 ## Emitted when the user right-clicks while [member pick_mode] is on.
 ##
@@ -35,6 +44,12 @@ const CHECKER_LIGHT := Color(0.24, 0.24, 0.27)
 const MARKER_RADIUS := 5.0
 const MARKER_COLOR := Color(1, 1, 1)
 const MARKER_SELECTED_COLOR := Color(1.0, 0.85, 0.2)
+
+## The outline of a picked rectangle, and the shading inside the one being swept or
+## highlighted. Thin and faint on purpose: this sits over the edges the tool exists to
+## judge, so it has to be readable without being what you look at.
+const MARKER_WIDTH := 1.5
+const MARKER_FILL_ALPHA := 0.14
 
 ## Half-width of a polygon's draggable corner handle, in screen pixels, and how
 ## near the pointer has to be to grab one. Generous on purpose: at low zoom a
@@ -147,7 +162,26 @@ var pick_mode := false:
 		if pick_mode == value:
 			return
 		pick_mode = value
+		_cancel_region()
 		_update_cursor()
+
+## While set, a left drag in [member pick_mode] sweeps a rectangle and reports it
+## through [signal region_picked] rather than reporting the pressed pixel through
+## [signal pixel_picked].
+##
+## A property rather than a second pick mode, because everything else about picking is
+## the same — the crosshair, who owns it, how Ctrl takes the button back for panning.
+## What differs is only whether the gesture is a click or a sweep, and that is the
+## tool's business: the island picker wants a region, the colour picker wants the one
+## pixel under the pointer and would have nothing to do with a rectangle.
+var region_pick := false:
+	set(value):
+		if region_pick == value:
+			return
+		region_pick = value
+		# A sweep in flight belongs to the tool that had the crosshair. Letting it
+		# survive the handover would report it to whoever holds it next.
+		_cancel_region()
 
 ## Whether the overlays — island markers and drawn regions — are drawn. They
 ## sit right on top of the edges being judged, so being able to blink them away
@@ -205,10 +239,18 @@ var _original_texture: Texture2D
 
 var _checker: Texture2D
 var _image_size := Vector2i.ZERO
-var _markers: Array[Vector2i] = []
+
+## Picked regions, in image coordinates. A one by one rectangle is a single picked
+## pixel and is drawn as the marker it always was.
+var _markers: Array[Rect2i] = []
 ## A byte per marker: zero means the island is switched off and draws hollow.
 var _marker_enabled := PackedByteArray()
 var _selected_marker := -1
+
+## The sweep in progress: where the button went down, and where the pointer is now.
+## An anchor of (-1, -1) means there is no sweep.
+var _region_anchor := Vector2i(-1, -1)
+var _region_cursor := Vector2i(-1, -1)
 
 ## Drawn regions, as an Array of PackedVector2Array in image coordinates.
 var _polygons: Array = []
@@ -324,10 +366,14 @@ func set_original(image: Image) -> void:
 
 ## Marks [param markers] on the image, emphasising [param selected].
 ##
+## Rectangles rather than points, since an island is a region picked rather than a
+## pixel picked. A one by one rectangle draws as the ringed dot a single pick always
+## was, so the two read as the same kind of thing at either size.
+##
 ## [param enabled] runs alongside, a byte per marker. A switched-off island keeps
 ## its marker rather than vanishing — where it is remains worth seeing while it is
 ## set aside — but is drawn hollow so the list and the image agree.
-func set_markers(markers: Array[Vector2i], selected: int, enabled := PackedByteArray()) -> void:
+func set_markers(markers: Array[Rect2i], selected: int, enabled := PackedByteArray()) -> void:
 	# Copied, not aliased: the caller's array belongs to the operation and can
 	# change underneath us without a redraw being requested.
 	_markers = markers.duplicate()
@@ -638,6 +684,10 @@ func _on_canvas_gui_input(event: InputEvent) -> void:
 	# Panning claims Ctrl+left before picking can see it, so the two never fight.
 	if _handle_pan(event):
 		return
+	# After panning for that reason, and before everything below because a sweep owns
+	# the left button outright for as long as it is held.
+	if _handle_region_pick(event):
+		return
 
 	# Tracked only while a shape is open, so ordinary hovering over the image does
 	# not queue a redraw for every motion event.
@@ -665,6 +715,95 @@ func _on_canvas_gui_input(event: InputEvent) -> void:
 	elif pick_mode and event.button_index == MOUSE_BUTTON_RIGHT:
 		pick_cancelled.emit()
 		_canvas.accept_event()
+
+
+## Sweeps a rectangle with the left button while [member region_pick] is set. Returns
+## whether the event was consumed.
+##
+## The gesture is one thing from press to release, so a click is not a case of its own:
+## a press and release without motion leaves the anchor and the cursor on the same
+## pixel and reports a one by one rectangle.
+func _handle_region_pick(event: InputEvent) -> bool:
+	if not pick_mode or not region_pick:
+		return false
+
+	var button := event as InputEventMouseButton
+	if button != null and button.button_index == MOUSE_BUTTON_LEFT:
+		if button.pressed:
+			# Starting off the image is not a sweep of nothing, it is a miss — the
+			# same answer a click there has always given.
+			var pixel := _pixel_at(button.position)
+			if pixel.x < 0:
+				return false
+			_region_anchor = pixel
+			_region_cursor = pixel
+			_canvas.queue_redraw()
+			_canvas.accept_event()
+			return true
+		if _region_anchor.x < 0:
+			return false
+		_finish_region()
+		_canvas.accept_event()
+		return true
+
+	if _region_anchor.x < 0 or not (event is InputEventMouseMotion):
+		return false
+
+	# A release swallowed elsewhere — an alt-tab mid-drag — would otherwise leave the
+	# band stuck to the cursor. The sweep is reported rather than dropped: it happened,
+	# and only its ending went missing.
+	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		_finish_region()
+		return false
+
+	# Clamped rather than dropped, so a rectangle dragged off the edge of the image
+	# stops at it instead of freezing where the pointer last was inside.
+	var moved := _pixel_at_clamped(event.position)
+	if moved != _region_cursor:
+		_region_cursor = moved
+		_canvas.queue_redraw()
+	_canvas.accept_event()
+	return true
+
+
+## Ends the sweep and reports it.
+func _finish_region() -> void:
+	var region := _region_bounds()
+	_region_anchor = Vector2i(-1, -1)
+	_region_cursor = Vector2i(-1, -1)
+	_canvas.queue_redraw()
+	if region.size.x > 0 and region.size.y > 0:
+		region_picked.emit(region)
+
+
+## Drops the sweep without reporting it, for the cases where the tool it belonged to
+## has gone away underneath it.
+func _cancel_region() -> void:
+	if _region_anchor.x < 0:
+		return
+	_region_anchor = Vector2i(-1, -1)
+	_region_cursor = Vector2i(-1, -1)
+	if _canvas != null:
+		_canvas.queue_redraw()
+
+
+## The rectangle between the anchor and the cursor, inclusive of both, or an empty one
+## when no sweep is in progress.
+##
+## Inclusive because the two ends are pixels the user pointed at rather than corners
+## between pixels: dragging from (4, 4) to (6, 6) means nine pixels, not four.
+func _region_bounds() -> Rect2i:
+	if _region_anchor.x < 0 or _region_cursor.x < 0:
+		return Rect2i()
+	var from := Vector2i(
+		mini(_region_anchor.x, _region_cursor.x),
+		mini(_region_anchor.y, _region_cursor.y),
+	)
+	var to := Vector2i(
+		maxi(_region_anchor.x, _region_cursor.x),
+		maxi(_region_anchor.y, _region_cursor.y),
+	)
+	return Rect2i(from, to - from + Vector2i.ONE)
 
 
 ## Grab-and-drag of a polygon corner. Returns whether the event was consumed.
@@ -851,6 +990,10 @@ func _draw_canvas() -> void:
 		_canvas.draw_texture_rect(_original_texture, frame, false, Color(1, 1, 1, original_fade))
 	_draw_markers()
 	_draw_polygons()
+	# Deliberately outside the markers_visible test the two above obey: H is for
+	# getting the overlays off the edges being judged, and a sweep in progress is not
+	# an overlay but the thing the user is doing this instant.
+	_draw_region_band()
 	# Over everything, including the overlays, since it is about the whole view
 	# rather than about anything drawn on it.
 	_draw_busy()
@@ -859,26 +1002,68 @@ func _draw_canvas() -> void:
 func _draw_markers() -> void:
 	if not markers_visible:
 		return
-	var scale := _scale()
+	var frame := Rect2i(Vector2i.ZERO, _image_size)
 	for i in _markers.size():
-		var point := _markers[i]
-		# Points picked on a different image may fall outside this one.
-		if point.x < 0 or point.y < 0 or point.x >= _image_size.x or point.y >= _image_size.y:
+		var region := _markers[i]
+		# Regions picked on a different image may fall outside this one.
+		if region.size.x <= 0 or region.size.y <= 0 or not frame.intersects(region):
 			continue
-		var center := _content_origin + (Vector2(point) + Vector2(0.5, 0.5)) * scale
 		var selected := i == _selected_marker
 		var on := i >= _marker_enabled.size() or _marker_enabled[i] != 0
 		var color := MARKER_SELECTED_COLOR if selected else MARKER_COLOR
 		if not on:
 			color = Color(color, 0.45)
-		var radius := MARKER_RADIUS + (1.0 if selected else 0.0)
-		# Dark ring underneath so the marker reads against light and dark art.
-		_canvas.draw_arc(center, radius + 1.0, 0.0, TAU, 24, Color(0, 0, 0, 0.75), 3.0)
-		_canvas.draw_arc(center, radius, 0.0, TAU, 24, color, 1.5)
-		# Hollow when switched off, so a marker that is only a reminder cannot be
-		# mistaken for one that is doing something.
-		if on:
-			_canvas.draw_circle(center, 1.5, color)
+		if region.size == Vector2i.ONE:
+			_draw_point_marker(region.position, color, selected, on)
+		else:
+			_draw_region_marker(region, color, selected, on)
+
+
+## A single picked pixel: the ringed dot the picker has always drawn.
+func _draw_point_marker(point: Vector2i, color: Color, selected: bool, on: bool) -> void:
+	var center := _content_origin + (Vector2(point) + Vector2(0.5, 0.5)) * _scale()
+	var radius := MARKER_RADIUS + (1.0 if selected else 0.0)
+	# Dark ring underneath so the marker reads against light and dark art.
+	_canvas.draw_arc(center, radius + 1.0, 0.0, TAU, 24, Color(0, 0, 0, 0.75), 3.0)
+	_canvas.draw_arc(center, radius, 0.0, TAU, 24, color, 1.5)
+	# Hollow when switched off, so a marker that is only a reminder cannot be
+	# mistaken for one that is doing something.
+	if on:
+		_canvas.draw_circle(center, 1.5, color)
+
+
+## A picked rectangle: outlined rather than filled, because what is underneath it is
+## the whole point — a fill over the region would hide the edge being judged.
+##
+## Faintly shaded when it is the highlighted row, which is the one case where saying
+## which region is which beats seeing through it.
+func _draw_region_marker(region: Rect2i, color: Color, selected: bool, on: bool) -> void:
+	var scale := _scale()
+	var box := Rect2(
+		_content_origin + Vector2(region.position) * scale,
+		Vector2(region.size) * scale,
+	)
+	if selected and on:
+		_canvas.draw_rect(box, Color(color, MARKER_FILL_ALPHA), true)
+	# The same dark backing the dot carries, so the outline reads against light and
+	# dark art alike.
+	_canvas.draw_rect(box, Color(0, 0, 0, 0.75), false, MARKER_WIDTH + 2.0)
+	_canvas.draw_rect(box, color, false, MARKER_WIDTH + (1.0 if selected else 0.0))
+
+
+## The rectangle being swept, drawn as it is dragged.
+func _draw_region_band() -> void:
+	var region := _region_bounds()
+	if region.size.x <= 0 or region.size.y <= 0:
+		return
+	var scale := _scale()
+	var box := Rect2(
+		_content_origin + Vector2(region.position) * scale,
+		Vector2(region.size) * scale,
+	)
+	_canvas.draw_rect(box, Color(MARKER_SELECTED_COLOR, MARKER_FILL_ALPHA), true)
+	_canvas.draw_rect(box, Color(0, 0, 0, 0.75), false, MARKER_WIDTH + 2.0)
+	_canvas.draw_rect(box, MARKER_SELECTED_COLOR, false, MARKER_WIDTH)
 
 
 ## Draws every drawn region: finished ones closed and shaded, the one being
