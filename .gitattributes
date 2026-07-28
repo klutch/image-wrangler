@@ -1,2 +1,18 @@
 # Normalize EOL for all files that Git considers text files.
 * text=auto eol=lf
+
+# Everything below is byte-exact and must never be touched by EOL normalisation.
+#
+# The rule above is why these are needed rather than left to Git's own guess:
+# `text=auto` applies to every path, and Git's binary detection only looks at the
+# first 8000 bytes — a PNG or a DLL that happens to be NUL-free that far in would
+# be silently rewritten. For the parity fixtures that would change the pixels the
+# golden hashes were taken from; for the extension binaries it would corrupt them
+# outright.
+*.dll binary
+*.lib binary
+*.exp binary
+*.pdb binary
+*.so binary
+*.dylib binary
+*.png binary

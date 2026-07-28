@@ -1,0 +1,28 @@
+{
+	"format": "image_wrangler",
+	"operations": {
+		"remove_background": {
+			"alpha_ceiling": 0.8,
+			"alpha_floor": 0.41,
+			"bleed_radius": 16,
+			"contiguous": true,
+			"crevice_reach": 1,
+			"crevice_tolerance": 0.17,
+			"decontaminate": true,
+			"edge_width": 2,
+			"islands": {
+				"points": []
+			},
+			"key_color": [
+				1.0,
+				1.0,
+				1.0,
+				1.0
+			],
+			"refine_edges": true,
+			"refine_radius": 2,
+			"tolerance": 0.05
+		}
+	},
+	"version": 1
+}

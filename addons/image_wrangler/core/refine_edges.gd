@@ -126,62 +126,13 @@ func process_context(ctx: IWPipelineContext) -> void:
 	var alpha_floor := settings.alpha_floor
 	var alpha_ceiling := settings.alpha_ceiling
 
+	# Both passes are native; what stays here is the decision about whether each runs at
+	# all, which is a question about the settings rather than about the pixels.
 	if radius > 0 and not ctx.key_dist.is_empty():
-		ctx.coverage = _guided_refine(ctx.coverage, ctx.key_dist, ctx.width, ctx.height, radius)
+		ctx.coverage = IWStageKernels.guided_refine(
+				ctx.coverage, ctx.key_dist, ctx.width, ctx.height, radius)
 	if not report_progress(0.8):
 		return
 	if alpha_floor > 0.0 or alpha_ceiling < 1.0:
-		_clip_alpha(ctx, alpha_floor, alpha_ceiling)
+		IWStageKernels.clip_alpha(ctx, alpha_floor, alpha_ceiling)
 	report_progress(1.0)
-
-
-## Stretches alpha so [param low] and below lands on clear and [param high] and
-## above on solid. Edits the coverage in place.
-func _clip_alpha(ctx: IWPipelineContext, low: float, high: float) -> void:
-	# Letting the ceiling sit at or under the floor is a legitimate request for a
-	# hard cutoff at that value, so it is honoured rather than rejected — just not
-	# by dividing by zero.
-	var span := maxf(high - low, IWPipelineContext.EPSILON)
-	var coverage := ctx.coverage
-	for i in coverage.size():
-		coverage[i] = clampf((coverage[i] - low) / span, 0.0, 1.0)
-	ctx.coverage = coverage
-
-
-func _guided_refine(coverage: PackedFloat32Array, guide: PackedFloat32Array, width: int, height: int, radius: int) -> PackedFloat32Array:
-	var pixel_count := width * height
-
-	var guide_squared := PackedFloat32Array()
-	guide_squared.resize(pixel_count)
-	var guide_times_alpha := PackedFloat32Array()
-	guide_times_alpha.resize(pixel_count)
-	for i in pixel_count:
-		guide_squared[i] = guide[i] * guide[i]
-		guide_times_alpha[i] = guide[i] * coverage[i]
-
-	var mean_guide := IWPixelMath.box_mean(guide, width, height, radius)
-	var mean_alpha := IWPixelMath.box_mean(coverage, width, height, radius)
-	var mean_guide_squared := IWPixelMath.box_mean(guide_squared, width, height, radius)
-	var mean_guide_alpha := IWPixelMath.box_mean(guide_times_alpha, width, height, radius)
-
-	var slope := PackedFloat32Array()
-	slope.resize(pixel_count)
-	var offset := PackedFloat32Array()
-	offset.resize(pixel_count)
-	for i in pixel_count:
-		var variance := mean_guide_squared[i] - mean_guide[i] * mean_guide[i]
-		var covariance := mean_guide_alpha[i] - mean_guide[i] * mean_alpha[i]
-		# The regularisation is what decides how hard an edge has to be before
-		# the filter follows it rather than smoothing across it.
-		var a := covariance / (variance + _REFINE_EPSILON)
-		slope[i] = a
-		offset[i] = mean_alpha[i] - a * mean_guide[i]
-
-	var mean_slope := IWPixelMath.box_mean(slope, width, height, radius)
-	var mean_offset := IWPixelMath.box_mean(offset, width, height, radius)
-
-	var refined := PackedFloat32Array()
-	refined.resize(pixel_count)
-	for i in pixel_count:
-		refined[i] = clampf(mean_slope[i] * guide[i] + mean_offset[i], 0.0, 1.0)
-	return refined

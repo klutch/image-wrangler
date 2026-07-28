@@ -898,16 +898,61 @@ separately because most operations answer `false` to both. `needs_keying()` may
 also be answered from the settings, as Island Picker does: only a Subtract island
 needs anything above it.
 
-Three things worth knowing about the context:
+Four things worth knowing about the context:
 
 - **`ctx.data` is immutable.** Everything an operation decides goes into
   `ctx.coverage`, `ctx.mask` or `ctx.key_of`.
 - **Invalidate what you disturb.** Moving a pixel out of subject makes
   `ctx.nearest` stale; call `ctx.rebuild_nearest()` and then
   `ctx.compute_coverage(...)` over what could have changed.
-- **Bind before you loop.** Reaching through `ctx.` inside a per-pixel loop is an
-  object property lookup a few million times over. Copy what you need into locals
-  at the top, the way the existing operations do.
+- **Bind before you loop.** Reaching through `ctx.` inside a per-pixel loop is a
+  property lookup a few million times over. Copy what you need into locals at the
+  top, the way the existing operations do.
+- **Write back what you change.** `var mask := ctx.mask` now hands you a *copy*,
+  because the context is native — mutating the local does nothing until you assign
+  it back. This used to be a live reference, so a stage could get away with mutating
+  and never writing back; nothing can now, and the failure is silent.
+
+### Where the pixels are actually crunched
+
+The operations are GDScript. Their inner loops are not: they live in a C++
+GDExtension under `src/`, and each stage reads its settings, flattens whatever lists
+it holds into packed arrays, and hands them to one call in `IWStageKernels`. The
+context, the two shared kernels in `IWPixelMath`, and the final write in `IWCompose`
+are native too.
+
+The split is deliberate. Settings Resources, the schema the dock builds its form
+from, progress and cancellation all stay in GDScript, because the sidecar codec
+filters on `PROPERTY_USAGE_SCRIPT_VARIABLE` — which a GDExtension property never
+carries — and the dock's worker snapshot rebuilds each stage through
+`stage.get_script().new()`, which returns null for a native class and would silently
+drop the stage from the preview.
+
+**The addon requires the built library.** There is no GDScript fallback; two
+implementations of the same flood would only ever drift. To build it:
+
+```
+git submodule update --init
+scons target=editor custom_api_file=extension_api.json
+```
+
+`extension_api.json` is the API dumped from the exact engine build this targets, so
+the bindings cannot drift from the editor running them. Godot holds the DLL open
+while it is running, so close the editor before rebuilding.
+
+**Every change to that code is gated on `tests/iw_parity.gd`**, which hashes the
+final image and every context buffer after every stage, for ten fixtures, against
+recorded baselines in `tests/golden/`. Run it headless:
+
+```
+godot --headless --path . --script res://tests/iw_parity.gd
+```
+
+It exists because the failure mode here is silent: a flood that claims one pixel
+differently, or a quantise that rounds a half the other way, looks fine in the
+preview and is permanent. It has already caught two real ones — Godot's `roundi`
+is `floor(x + 0.5)` rather than `std::round`, and the aliasing difference in the
+bullet above.
 
 **A file operation** — something that changes where the pixels go, not what they
 are. Subclass `IWOperation` directly, return `false` from `transforms_pixels()`,

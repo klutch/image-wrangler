@@ -1,0 +1,15 @@
+[configuration]
+
+entry_symbol = "image_wrangler_library_init"
+compatibility_minimum = "4.7"
+
+; Godot holds the library open on Windows, and hot reload would mean it keeps holding
+; a stale one. The parity harness runs in its own process and exits, so the build loop
+; never needs the editor to let go mid-session.
+reloadable = false
+
+[libraries]
+
+windows.editor.x86_64 = "res://addons/image_wrangler/bin/image_wrangler.windows.editor.x86_64.dll"
+windows.debug.x86_64 = "res://addons/image_wrangler/bin/image_wrangler.windows.template_debug.x86_64.dll"
+windows.release.x86_64 = "res://addons/image_wrangler/bin/image_wrangler.windows.template_release.x86_64.dll"

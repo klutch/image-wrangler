@@ -102,58 +102,28 @@ func process_context(ctx: IWPipelineContext) -> void:
 	report_progress(1.0)
 
 
-## Rasterises this stage's shapes and folds them into whatever is already declared.
+## Flattens this stage's shapes and hands them to the scanline fill.
+##
+## The regions are walked once here, into plain packed arrays, and the rasterising
+## itself happens in [method IWStageKernels.rasterise_regions]. The split is the same
+## one every stage makes: reading a [PolygonRegion] is a Resource property lookup, and a
+## scanline fill would do one per vertex per row.
 func _merge_into_blacked(ctx: IWPipelineContext) -> void:
-	var width := ctx.width
-	var height := ctx.height
-
-	var marked := ctx.blacked
-	if marked.size() != ctx.pixel_count:
-		marked = PackedByteArray()
-		marked.resize(ctx.pixel_count)
+	var points := PackedInt32Array()
+	var starts := PackedInt32Array()
+	var counts := PackedInt32Array()
+	var adding := PackedByteArray()
 
 	for region in settings.polygons.regions:
 		if region == null or not region.is_active():
 			continue
-		var adding := region.mode == IWAlphaMode.Mode.ADD
-		var value := IWPipelineContext.REGION_KEEP if adding else IWPipelineContext.REGION_CUT
-		var points := region.points
-		var count := points.size()
-		var box := region.bounds()
-		var first_row := maxi(box.position.y, 0)
-		var last_row := mini(box.position.y + box.size.y - 1, height - 1)
+		@warning_ignore("integer_division")
+		var start := points.size() / 2
+		starts.append(start)
+		counts.append(region.points.size())
+		adding.append(1 if region.mode == IWAlphaMode.Mode.ADD else 0)
+		for point in region.points:
+			points.append(point.x)
+			points.append(point.y)
 
-		for y in range(first_row, last_row + 1):
-			# Sampled at the row's centre, so a vertex landing exactly on an
-			# integer row cannot be counted as a crossing twice.
-			var line := y + 0.5
-			var crossings := PackedFloat32Array()
-			for e in count:
-				var a := points[e]
-				var b := points[(e + 1) % count]
-				# Half-open on purpose: a vertex is counted by the edge below it
-				# and not the one above, which is what stops a shared vertex
-				# registering as two crossings and inverting the rest of the row.
-				if (a.y > line) == (b.y > line):
-					continue
-				var t := (line - a.y) / float(b.y - a.y)
-				crossings.append(a.x + t * (b.x - a.x))
-			if crossings.size() < 2:
-				continue
-			crossings.sort()
-
-			var row := y * width
-			var pair := 0
-			while pair + 1 < crossings.size():
-				# Pixel centres, so a span is filled where it actually covers the
-				# middle of a pixel rather than merely touching its edge.
-				var from_x := maxi(ceili(crossings[pair] - 0.5), 0)
-				var to_x := mini(floori(crossings[pair + 1] - 0.5), width - 1)
-				for x in range(from_x, to_x + 1):
-					# Add overwrites whatever is there; Subtract yields to an Add
-					# already written. One pass, and row order stops mattering.
-					if adding or marked[row + x] != IWPipelineContext.REGION_KEEP:
-						marked[row + x] = value
-				pair += 2
-
-	ctx.blacked = marked
+	IWStageKernels.rasterise_regions(ctx, points, starts, counts, adding)

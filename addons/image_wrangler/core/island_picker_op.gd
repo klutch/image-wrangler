@@ -153,20 +153,15 @@ func _has(mode: int) -> bool:
 
 
 ## Floods every Subtract island into the background and mattes what it opened.
+##
+## Only the seed gathering happens here. The picks live on Resources — an entry, its
+## mode and switch, then a list of picks with a point and a tolerance each — and reading
+## one is a property lookup the flood cannot afford per pixel, so they are flattened
+## into packed arrays first. That was already true when the flood was GDScript; the only
+## thing that changed is where the flood is.
 func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 	var width := ctx.width
 	var height := ctx.height
-	var pixel_count := ctx.pixel_count
-	var touched := PackedInt32Array()
-
-	var mask := ctx.mask
-	var key_of := ctx.key_of
-	var queue := PackedInt32Array()
-	queue.resize(pixel_count)
-	# The same double threshold the border flood obeys; see
-	# [method IWPipelineContext.flood_key_for].
-	var weak_steps := PackedInt32Array()
-	weak_steps.resize(pixel_count)
 
 	# Flattened out of the groups they are managed in, because the flood does not care
 	# which rectangle a seed was drawn in: what matters is that a pixel one seed claimed
@@ -187,111 +182,7 @@ func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 			seeds.append(point.y * width + point.x)
 			seed_tolerances.append(pick.color_tolerance)
 
-	for s in seeds.size():
-		var seed := seeds[s]
-		# Already swallowed by something above, or by an earlier seed of this very
-		# region, so it adds nothing. This is what keeps a dragged rectangle cheap: the
-		# first seed floods the region and every other seed inside it costs one test.
-		# Its key is not registered either — an unused key would still be offered to
-		# every pixel by claiming_key if it were not flagged as an island, and flagging
-		# a key nothing seeded is just clutter.
-		if mask[seed] == IWPipelineContext.MASK_BACKGROUND:
-			continue
-
-		# Sampled now rather than stored, so it removes exactly what was picked.
-		var key := ctx.add_key(ctx.color_at(seed), seed_tolerances[s], true)
-		var head := 0
-		var tail := 0
-		# Not cleared between seeds, though each still starts on a full budget: a
-		# pixel one seed claimed is never offered to the next, so no seed can read
-		# another's count, and what it records is read once at the end for every seed
-		# at once. Clearing it here left all but the last seed's squeezed-through
-		# pixels classed as hard background.
-		mask[seed] = IWPipelineContext.MASK_BACKGROUND
-		key_of[seed] = key
-		touched.append(seed)
-		queue[tail] = seed
-		tail += 1
-
-		# 4-connected on purpose: 8-connectivity leaks through diagonal hairlines in
-		# thin subjects such as lettering or wire-frame art. Written out four times
-		# for the reason given in [method RemoveBackground._classify].
-		while head < tail:
-			var index := queue[head]
-			head += 1
-			var claimed_by := key_of[index]
-			var weak_here := weak_steps[index]
-			var x := index % width
-			@warning_ignore("integer_division")
-			var y := index / width
-			if x > 0:
-				var left := index - 1
-				if mask[left] != IWPipelineContext.MASK_BACKGROUND:
-					var took := ctx.flood_key_for(left, claimed_by, weak_here)
-					if took != IWPipelineContext.KEY_NONE:
-						mask[left] = IWPipelineContext.MASK_BACKGROUND
-						key_of[left] = took
-						weak_steps[left] = ctx.flood_weak
-						touched.append(left)
-						queue[tail] = left
-						tail += 1
-			if x < width - 1:
-				var right := index + 1
-				if mask[right] != IWPipelineContext.MASK_BACKGROUND:
-					var took := ctx.flood_key_for(right, claimed_by, weak_here)
-					if took != IWPipelineContext.KEY_NONE:
-						mask[right] = IWPipelineContext.MASK_BACKGROUND
-						key_of[right] = took
-						weak_steps[right] = ctx.flood_weak
-						touched.append(right)
-						queue[tail] = right
-						tail += 1
-			if y > 0:
-				var up := index - width
-				if mask[up] != IWPipelineContext.MASK_BACKGROUND:
-					var took := ctx.flood_key_for(up, claimed_by, weak_here)
-					if took != IWPipelineContext.KEY_NONE:
-						mask[up] = IWPipelineContext.MASK_BACKGROUND
-						key_of[up] = took
-						weak_steps[up] = ctx.flood_weak
-						touched.append(up)
-						queue[tail] = up
-						tail += 1
-			if y < height - 1:
-				var down := index + width
-				if mask[down] != IWPipelineContext.MASK_BACKGROUND:
-					var took := ctx.flood_key_for(down, claimed_by, weak_here)
-					if took != IWPipelineContext.KEY_NONE:
-						mask[down] = IWPipelineContext.MASK_BACKGROUND
-						key_of[down] = took
-						weak_steps[down] = ctx.flood_weak
-						touched.append(down)
-						queue[tail] = down
-						tail += 1
-
-	ctx.mask = mask
-	ctx.key_of = key_of
-	if touched.is_empty():
-		return touched
-	# What the flood only squeezed through is edge, not background, along with
-	# everything it reached afterwards — exactly as in the border flood, and for the
-	# reason given there. Remembered on the context as well, so a [RemoveCrevice] below
-	# this can carry on from where an island's own squeeze stopped.
-	if ctx.crevice_reach > 0:
-		var strayed := ctx.strayed
-		if strayed.size() != ctx.pixel_count:
-			strayed.resize(ctx.pixel_count)
-		for i in touched:
-			if mask[i] == IWPipelineContext.MASK_BACKGROUND and weak_steps[i] > 0 \
-					and key_of[i] >= 0:
-				mask[i] = IWPipelineContext.MASK_EDGE
-				strayed[i] = 1
-		ctx.mask = mask
-		ctx.strayed = strayed
-	# The band has to grow from what this opened, or an island region would have a
-	# hard rim where every other edge in the image has a matte.
-	touched.append_array(ctx.grow_edge_band(touched, ctx.edge_width))
-	return touched
+	return IWStageKernels.flood_islands(ctx, seeds, seed_tolerances)
 
 
 ## Floods every Add island and marks what it protects.
@@ -303,11 +194,12 @@ func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 func _protect(ctx: IWPipelineContext) -> PackedInt32Array:
 	var width := ctx.width
 	var height := ctx.height
-	var pixel_count := ctx.pixel_count
 
+	# Float64 here where the Subtract side collects float32, because that is what each
+	# side always did and the difference reaches the last bit of every tolerance
+	# comparison in the flood below.
 	var seeds := PackedInt32Array()
-	var seed_keys: Array[Color] = []
-	var seed_tolerances: Array[float] = []
+	var seed_tolerances := PackedFloat64Array()
 	for entry in settings.islands.entries:
 		if entry == null or not entry.enabled or entry.mode != IWAlphaMode.Mode.ADD:
 			continue
@@ -317,66 +209,7 @@ func _protect(ctx: IWPipelineContext) -> PackedInt32Array:
 			var point := pick.point
 			if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
 				continue
-			var index := point.y * width + point.x
-			seeds.append(index)
-			seed_keys.append(ctx.color_at(index))
+			seeds.append(point.y * width + point.x)
 			seed_tolerances.append(pick.color_tolerance)
-	if seeds.is_empty():
-		return PackedInt32Array()
 
-	var protect := ctx.protect
-	if protect.size() != pixel_count:
-		protect.resize(pixel_count)
-	var touched := PackedInt32Array()
-	var queue := PackedInt32Array()
-	queue.resize(pixel_count)
-
-	for s in seeds.size():
-		var key: Color = seed_keys[s]
-		var tolerance: float = seed_tolerances[s]
-		var head := 0
-		var tail := 0
-		if protect[seeds[s]] == 0:
-			protect[seeds[s]] = 1
-			touched.append(seeds[s])
-			queue[tail] = seeds[s]
-			tail += 1
-		# 4-connected, matching the background flood, so a diagonal hairline is no
-		# more of a bridge here than it is there.
-		while head < tail:
-			var index := queue[head]
-			head += 1
-			var x := index % width
-			@warning_ignore("integer_division")
-			var y := index / width
-			if x > 0:
-				var left := index - 1
-				if protect[left] == 0 and ctx.distance_at(left, key) <= tolerance:
-					protect[left] = 1
-					touched.append(left)
-					queue[tail] = left
-					tail += 1
-			if x < width - 1:
-				var right := index + 1
-				if protect[right] == 0 and ctx.distance_at(right, key) <= tolerance:
-					protect[right] = 1
-					touched.append(right)
-					queue[tail] = right
-					tail += 1
-			if y > 0:
-				var up := index - width
-				if protect[up] == 0 and ctx.distance_at(up, key) <= tolerance:
-					protect[up] = 1
-					touched.append(up)
-					queue[tail] = up
-					tail += 1
-			if y < height - 1:
-				var down := index + width
-				if protect[down] == 0 and ctx.distance_at(down, key) <= tolerance:
-					protect[down] = 1
-					touched.append(down)
-					queue[tail] = down
-					tail += 1
-
-	ctx.protect = protect
-	return touched
+	return IWStageKernels.flood_protect(ctx, seeds, seed_tolerances)

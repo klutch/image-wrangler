@@ -128,7 +128,10 @@ func process_context(ctx: IWPipelineContext) -> void:
 	if not report_progress(0.05):
 		return
 
-	var touched := _squeeze(ctx)
+	# The squeeze itself is native: it is one 4-connected flood asking
+	# [method IWPipelineContext.flood_key_for] about four neighbours of every pixel it
+	# pops, which is the shape this whole extension exists for.
+	var touched := IWStageKernels.squeeze(ctx)
 	if touched.is_empty():
 		report_progress(1.0)
 		return
@@ -142,136 +145,3 @@ func process_context(ctx: IWPipelineContext) -> void:
 	ctx.rebuild_nearest()
 	ctx.compute_coverage(ctx.dilate(touched, ctx.search_radius))
 	report_progress(1.0)
-
-
-## Crosses every neck the budget allows and returns every pixel it claimed.
-func _squeeze(ctx: IWPipelineContext) -> PackedInt32Array:
-	var width := ctx.width
-	var height := ctx.height
-	var pixel_count := ctx.pixel_count
-	var background := IWPipelineContext.MASK_BACKGROUND
-	var key_none := IWPipelineContext.KEY_NONE
-
-	var mask := ctx.mask
-	var key_of := ctx.key_of
-	var strayed := ctx.strayed
-	if strayed.size() != pixel_count:
-		strayed.resize(pixel_count)
-
-	var touched := PackedInt32Array()
-	# Each pixel enters the queue at most once — a seed or a claim, never both, which
-	# is what [code]queued[/code] is for — so it can be sized up front and used as a
-	# plain FIFO with no wraparound.
-	var queue := PackedInt32Array()
-	queue.resize(pixel_count)
-	var queued := PackedByteArray()
-	queued.resize(pixel_count)
-	# How many weak pixels the path to each pixel has crossed. Fresh per stage, which
-	# is exactly what gives a second one of these a budget of its own.
-	var weak_steps := PackedInt32Array()
-	weak_steps.resize(pixel_count)
-	var head := 0
-	var tail := 0
-
-	# Seeded from the background as it already stands, each seed carrying the key that
-	# claimed it, so every squeeze is measured on that colour's own terms.
-	#
-	# Somewhere a previous one of these squeezed to is a seed as well, which is what
-	# lets two in a row reach further than one. The rest of the edge band is not: it is
-	# the antialiasing of a silhouette rather than somewhere background got to, and
-	# seeding from it would walk this stage a pixel into the subject everywhere at
-	# once, every time it ran.
-	#
-	# A pixel that arrived transparent has no key to squeeze on and is skipped, the way
-	# it is skipped by the band pass for the same reason.
-	for i in pixel_count:
-		if key_of[i] < 0:
-			continue
-		if mask[i] != background and strayed[i] == 0:
-			continue
-		queued[i] = 1
-		queue[tail] = i
-		tail += 1
-
-	# 4-connected on purpose: 8-connectivity leaks through diagonal hairlines in thin
-	# subjects such as lettering or wire-frame art. Written out four times for the
-	# reason given in [method RemoveBackground._classify].
-	while head < tail:
-		var index := queue[head]
-		head += 1
-		var claimed_by := key_of[index]
-		if claimed_by < 0:
-			continue
-		var weak_here := weak_steps[index]
-		var x := index % width
-		@warning_ignore("integer_division")
-		var y := index / width
-		if x > 0:
-			var left := index - 1
-			if queued[left] == 0 and mask[left] != background:
-				var took := ctx.flood_key_for(left, claimed_by, weak_here)
-				if took != key_none:
-					queued[left] = 1
-					mask[left] = background
-					key_of[left] = took
-					weak_steps[left] = ctx.flood_weak
-					touched.append(left)
-					queue[tail] = left
-					tail += 1
-		if x < width - 1:
-			var right := index + 1
-			if queued[right] == 0 and mask[right] != background:
-				var took := ctx.flood_key_for(right, claimed_by, weak_here)
-				if took != key_none:
-					queued[right] = 1
-					mask[right] = background
-					key_of[right] = took
-					weak_steps[right] = ctx.flood_weak
-					touched.append(right)
-					queue[tail] = right
-					tail += 1
-		if y > 0:
-			var up := index - width
-			if queued[up] == 0 and mask[up] != background:
-				var took := ctx.flood_key_for(up, claimed_by, weak_here)
-				if took != key_none:
-					queued[up] = 1
-					mask[up] = background
-					key_of[up] = took
-					weak_steps[up] = ctx.flood_weak
-					touched.append(up)
-					queue[tail] = up
-					tail += 1
-		if y < height - 1:
-			var down := index + width
-			if queued[down] == 0 and mask[down] != background:
-				var took := ctx.flood_key_for(down, claimed_by, weak_here)
-				if took != key_none:
-					queued[down] = 1
-					mask[down] = background
-					key_of[down] = took
-					weak_steps[down] = ctx.flood_weak
-					touched.append(down)
-					queue[tail] = down
-					tail += 1
-
-	ctx.mask = mask
-	ctx.key_of = key_of
-	if touched.is_empty():
-		return touched
-
-	# Everything here was reached by straying — a pixel beside background and inside
-	# its tolerance would have been flooded already — so all of it is handed to the
-	# coverage maths rather than cut out, and remembered as somewhere a squeeze got to
-	# so the next one of these can carry on from it.
-	for i in touched:
-		if weak_steps[i] > 0 and key_of[i] >= 0:
-			mask[i] = IWPipelineContext.MASK_EDGE
-			strayed[i] = 1
-	ctx.mask = mask
-	ctx.strayed = strayed
-
-	# The band has to grow from what this opened, or a nook would have a hard rim where
-	# every other edge in the image has a matte.
-	touched.append_array(ctx.grow_edge_band(touched, ctx.edge_width))
-	return touched

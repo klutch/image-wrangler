@@ -1,0 +1,1567 @@
+{
+	"enclosed_full": {
+		"final": "5f5986ba86284e1b158c399b0a540c31edcc5f8d07bfe34591f53a1db63c4070",
+		"pipeline": "5f5986ba86284e1b158c399b0a540c31edcc5f8d07bfe34591f53a1db63c4070",
+		"stages": [
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "0:empty",
+					"force_opaque": "0:empty",
+					"key_dist": "0:empty",
+					"key_is_island": "0:empty",
+					"key_of": "0:empty",
+					"mask": "0:empty",
+					"nearest": "0:empty",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "polygon_edit",
+				"key_tolerances": "0:empty",
+				"keys": "0:empty",
+				"scalars": {
+					"bleed_radius": 0,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": false,
+					"edge_width": 0,
+					"has_keying": false,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 2,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:b6b2d66359812b4a6f83e7d4b55a03500521a441d8142d6ab85b60faa23166e1",
+					"force_opaque": "0:empty",
+					"key_dist": "16384:51e67ca881cceedb92d596a8f271dd24760873cc6991e7f19279ee86407def09",
+					"key_is_island": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"key_of": "16384:3cf3466c55f1e89703b0707dd71025431a792488daa4f03133390c053c5f6336",
+					"mask": "4096:b7e83e4126f3fa94a0ba9d43eac879ff04e883d5f84468e095cef9ecfe0ec0c4",
+					"nearest": "16384:bc6039838b47f88c20711b02c0ae34805071ab025f9e79adcdf62cd8ad71515a",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_background",
+				"key_tolerances": "8:7f925b2036e92fe2f1f0697c3aedfff74d719c1ee2cb6b739d7c30484e75972c",
+				"keys": "16:f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:31aa4101aa774fdac78b38f61e0b9638a050fb3c3a4e173764a4aad624b36eb3",
+					"force_opaque": "0:empty",
+					"key_dist": "16384:51e67ca881cceedb92d596a8f271dd24760873cc6991e7f19279ee86407def09",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "16384:b791e073ce442dccf2ea7558c151a94aa320265b4e69302fc71ad9ef4e1dcdce",
+					"mask": "4096:9f9d4d8c831dfce632e3859b9f1f5fa4f800d7128cf8a83123f3d33844d478a6",
+					"nearest": "16384:58c4b096a581983b80380a097372e6a3d6a30db5cc43d059502614f7d2b55825",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "island_picker",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:4f05df05f8da9356bd66425351f166a5f7305b7c805e6900d9ec0f50790c9886",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:31aa4101aa774fdac78b38f61e0b9638a050fb3c3a4e173764a4aad624b36eb3",
+					"force_opaque": "0:empty",
+					"key_dist": "16384:51e67ca881cceedb92d596a8f271dd24760873cc6991e7f19279ee86407def09",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "16384:b791e073ce442dccf2ea7558c151a94aa320265b4e69302fc71ad9ef4e1dcdce",
+					"mask": "4096:9f9d4d8c831dfce632e3859b9f1f5fa4f800d7128cf8a83123f3d33844d478a6",
+					"nearest": "16384:58c4b096a581983b80380a097372e6a3d6a30db5cc43d059502614f7d2b55825",
+					"protect": "0:empty",
+					"strayed": "4096:ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_crevice",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:4f05df05f8da9356bd66425351f166a5f7305b7c805e6900d9ec0f50790c9886",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:31aa4101aa774fdac78b38f61e0b9638a050fb3c3a4e173764a4aad624b36eb3",
+					"force_opaque": "0:empty",
+					"key_dist": "16384:51e67ca881cceedb92d596a8f271dd24760873cc6991e7f19279ee86407def09",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "16384:b791e073ce442dccf2ea7558c151a94aa320265b4e69302fc71ad9ef4e1dcdce",
+					"mask": "4096:9f9d4d8c831dfce632e3859b9f1f5fa4f800d7128cf8a83123f3d33844d478a6",
+					"nearest": "16384:58c4b096a581983b80380a097372e6a3d6a30db5cc43d059502614f7d2b55825",
+					"protect": "0:empty",
+					"strayed": "4096:ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "refine_edges",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:4f05df05f8da9356bd66425351f166a5f7305b7c805e6900d9ec0f50790c9886",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:31aa4101aa774fdac78b38f61e0b9638a050fb3c3a4e173764a4aad624b36eb3",
+					"force_opaque": "4096:ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7",
+					"key_dist": "16384:51e67ca881cceedb92d596a8f271dd24760873cc6991e7f19279ee86407def09",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "16384:b791e073ce442dccf2ea7558c151a94aa320265b4e69302fc71ad9ef4e1dcdce",
+					"mask": "4096:9f9d4d8c831dfce632e3859b9f1f5fa4f800d7128cf8a83123f3d33844d478a6",
+					"nearest": "16384:58c4b096a581983b80380a097372e6a3d6a30db5cc43d059502614f7d2b55825",
+					"protect": "0:empty",
+					"strayed": "4096:ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "16384:bdf0d96dbc01a4798862140f607b0f81f7a7984792d284e5db494c35365b8140",
+					"stroke_outer": "16384:88f11dd8b17fa1615801dacc9138f4a4736d7d6778cb1a13f482b9bb74a41908"
+				},
+				"id": "edge_cleanup",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:4f05df05f8da9356bd66425351f166a5f7305b7c805e6900d9ec0f50790c9886",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,1.0",
+					"width": 64
+				}
+			}
+		]
+	},
+	"flat_full": {
+		"final": "1bf3d5b8ddaa1c6a3d32dd6286fbc3c52542fb7f151f7b0eb0f643a0c66d6aec",
+		"pipeline": "1bf3d5b8ddaa1c6a3d32dd6286fbc3c52542fb7f151f7b0eb0f643a0c66d6aec",
+		"stages": [
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "0:empty",
+					"force_opaque": "0:empty",
+					"key_dist": "0:empty",
+					"key_is_island": "0:empty",
+					"key_of": "0:empty",
+					"mask": "0:empty",
+					"nearest": "0:empty",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "polygon_edit",
+				"key_tolerances": "0:empty",
+				"keys": "0:empty",
+				"scalars": {
+					"bleed_radius": 0,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": false,
+					"edge_width": 0,
+					"has_keying": false,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 2,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:43cac5e65fe0cfff7a74b4ae5c778f6a70f7715dbc1965979b5cb227cd0ee86f",
+					"force_opaque": "0:empty",
+					"key_dist": "16384:5ce609651c820d70055dc8b81514f8f090ddadd89cde35ac238e574c6de157a9",
+					"key_is_island": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"key_of": "16384:b61ef831758a64a5270d15f1e57ec01229f09434f552dc52636063f6117cd1bb",
+					"mask": "4096:5daf4e549e5dd4c4300c6e43af5a08099ac0be382dec36e2e88bf99da6dcb7c7",
+					"nearest": "16384:94ee8d0b3e216c84c7ef036725922024118128fd94726964facf3945cbaed1c9",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_background",
+				"key_tolerances": "8:7f925b2036e92fe2f1f0697c3aedfff74d719c1ee2cb6b739d7c30484e75972c",
+				"keys": "16:f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:4fe7b59af6de3b665b67788cc2f99892ab827efae3a467342b3bb4e3bc8e5bfe",
+					"force_opaque": "0:empty",
+					"key_dist": "16384:5ce609651c820d70055dc8b81514f8f090ddadd89cde35ac238e574c6de157a9",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "16384:ecaa035ab8b7267db1bcb39abcadaa9d4b90adde6a55d635c38a9325855db9b2",
+					"mask": "4096:ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7",
+					"nearest": "16384:0fbba07a833d4dcfc7024eaf313661a0ba8f80a05c6d29b8801c612e10e60dee",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "island_picker",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:5cda6208b2deb47a43b55649f94ebff3331009dc8df95c3cd1ecdbd6758bbe93",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:4fe7b59af6de3b665b67788cc2f99892ab827efae3a467342b3bb4e3bc8e5bfe",
+					"force_opaque": "0:empty",
+					"key_dist": "16384:5ce609651c820d70055dc8b81514f8f090ddadd89cde35ac238e574c6de157a9",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "16384:ecaa035ab8b7267db1bcb39abcadaa9d4b90adde6a55d635c38a9325855db9b2",
+					"mask": "4096:ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7",
+					"nearest": "16384:0fbba07a833d4dcfc7024eaf313661a0ba8f80a05c6d29b8801c612e10e60dee",
+					"protect": "0:empty",
+					"strayed": "4096:ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_crevice",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:5cda6208b2deb47a43b55649f94ebff3331009dc8df95c3cd1ecdbd6758bbe93",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:4fe7b59af6de3b665b67788cc2f99892ab827efae3a467342b3bb4e3bc8e5bfe",
+					"force_opaque": "0:empty",
+					"key_dist": "16384:5ce609651c820d70055dc8b81514f8f090ddadd89cde35ac238e574c6de157a9",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "16384:ecaa035ab8b7267db1bcb39abcadaa9d4b90adde6a55d635c38a9325855db9b2",
+					"mask": "4096:ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7",
+					"nearest": "16384:0fbba07a833d4dcfc7024eaf313661a0ba8f80a05c6d29b8801c612e10e60dee",
+					"protect": "0:empty",
+					"strayed": "4096:ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "refine_edges",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:5cda6208b2deb47a43b55649f94ebff3331009dc8df95c3cd1ecdbd6758bbe93",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:4fe7b59af6de3b665b67788cc2f99892ab827efae3a467342b3bb4e3bc8e5bfe",
+					"force_opaque": "4096:ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7",
+					"key_dist": "16384:5ce609651c820d70055dc8b81514f8f090ddadd89cde35ac238e574c6de157a9",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "16384:ecaa035ab8b7267db1bcb39abcadaa9d4b90adde6a55d635c38a9325855db9b2",
+					"mask": "4096:ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7",
+					"nearest": "16384:0fbba07a833d4dcfc7024eaf313661a0ba8f80a05c6d29b8801c612e10e60dee",
+					"protect": "0:empty",
+					"strayed": "4096:ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "edge_cleanup",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:5cda6208b2deb47a43b55649f94ebff3331009dc8df95c3cd1ecdbd6758bbe93",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,1.0",
+					"width": 64
+				}
+			}
+		]
+	},
+	"flat_minimal": {
+		"final": "8b5fc77906f209b02a426335536f58c277fd05a2ea614dd84640d6e96c7631d4",
+		"pipeline": "8b5fc77906f209b02a426335536f58c277fd05a2ea614dd84640d6e96c7631d4",
+		"stages": [
+			{
+				"buffers": {
+					"blacked": "0:empty",
+					"coverage": "16384:43cac5e65fe0cfff7a74b4ae5c778f6a70f7715dbc1965979b5cb227cd0ee86f",
+					"force_opaque": "0:empty",
+					"key_dist": "16384:5ce609651c820d70055dc8b81514f8f090ddadd89cde35ac238e574c6de157a9",
+					"key_is_island": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"key_of": "16384:470a4fdded59b3628581aecae95a8b83b4420686995143d845ac0bb5eb125eb2",
+					"mask": "4096:5daf4e549e5dd4c4300c6e43af5a08099ac0be382dec36e2e88bf99da6dcb7c7",
+					"nearest": "16384:94ee8d0b3e216c84c7ef036725922024118128fd94726964facf3945cbaed1c9",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_background",
+				"key_tolerances": "8:7f925b2036e92fe2f1f0697c3aedfff74d719c1ee2cb6b739d7c30484e75972c",
+				"keys": "16:f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			}
+		]
+	},
+	"gradient_auto_stroke": {
+		"final": "2dde54d037f93a62dd353a5537446c9c2a8895fe99954772e4a30f74363a6937",
+		"pipeline": "2dde54d037f93a62dd353a5537446c9c2a8895fe99954772e4a30f74363a6937",
+		"stages": [
+			{
+				"buffers": {
+					"blacked": "1024:c704dcc35f6dc46a9a90b7b9cba8a55b63ca8d4886df7fa36c18336a27de0370",
+					"coverage": "0:empty",
+					"force_opaque": "0:empty",
+					"key_dist": "0:empty",
+					"key_is_island": "0:empty",
+					"key_of": "0:empty",
+					"mask": "0:empty",
+					"nearest": "0:empty",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "polygon_edit",
+				"key_tolerances": "0:empty",
+				"keys": "0:empty",
+				"scalars": {
+					"bleed_radius": 0,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": false,
+					"edge_width": 0,
+					"has_keying": false,
+					"height": 32,
+					"pixel_count": 1024,
+					"search_radius": 2,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 32
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "1024:c704dcc35f6dc46a9a90b7b9cba8a55b63ca8d4886df7fa36c18336a27de0370",
+					"coverage": "4096:8fa4d226cdcb9eb4a75218956699672f07356f5b8ad9cd60e45a1b3b38dbe5a0",
+					"force_opaque": "0:empty",
+					"key_dist": "4096:0d43ce140121aff6771927a978a4e0133bf7d4dd9f4f0f2d5567da93fdb2ed1b",
+					"key_is_island": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"key_of": "4096:0317a3c06d1e84b7ec4fbd38159e2d2d24ee8442419bc3fb067fddba9031e30f",
+					"mask": "1024:50203a6b514d34948875928787b8fb871d6701abd343ad17ab925df51727ce38",
+					"nearest": "4096:ba4b3e8842ac22e75f73027270a3f1f1833bbc14ce24d3f3cecd68a29d77f7bf",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_background",
+				"key_tolerances": "8:7f925b2036e92fe2f1f0697c3aedfff74d719c1ee2cb6b739d7c30484e75972c",
+				"keys": "16:f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 32,
+					"pixel_count": 1024,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 32
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "1024:c704dcc35f6dc46a9a90b7b9cba8a55b63ca8d4886df7fa36c18336a27de0370",
+					"coverage": "4096:6317ad9a7ee05cdca196efff4c9fafffa4ddb6cbda44ce09acf8ef1394d70d05",
+					"force_opaque": "0:empty",
+					"key_dist": "4096:0d43ce140121aff6771927a978a4e0133bf7d4dd9f4f0f2d5567da93fdb2ed1b",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "4096:cd2f3bb12f3fa5036862f4bca008b1960d74e7230c48e0906b21bbb0212adefc",
+					"mask": "1024:61cf95ebdf55617b09595104206725fc21b78b6185a62c8cdf39e1ce14da5281",
+					"nearest": "4096:ebc25dc2096aff79013f98deed225f6bc006a0de0ade2adcc14d8bcc578264d3",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "island_picker",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:3f53780b785260591e65157ec5c450e23c8184522fabc1477c50ef7fc9e0acf2",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 32,
+					"pixel_count": 1024,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 32
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "1024:c704dcc35f6dc46a9a90b7b9cba8a55b63ca8d4886df7fa36c18336a27de0370",
+					"coverage": "4096:6317ad9a7ee05cdca196efff4c9fafffa4ddb6cbda44ce09acf8ef1394d70d05",
+					"force_opaque": "0:empty",
+					"key_dist": "4096:0d43ce140121aff6771927a978a4e0133bf7d4dd9f4f0f2d5567da93fdb2ed1b",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "4096:cd2f3bb12f3fa5036862f4bca008b1960d74e7230c48e0906b21bbb0212adefc",
+					"mask": "1024:61cf95ebdf55617b09595104206725fc21b78b6185a62c8cdf39e1ce14da5281",
+					"nearest": "4096:ebc25dc2096aff79013f98deed225f6bc006a0de0ade2adcc14d8bcc578264d3",
+					"protect": "0:empty",
+					"strayed": "1024:28122fdbe824ba3a37bcdd90ca99b4e601652478e061327add4ed2873268f7b7",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_crevice",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:3f53780b785260591e65157ec5c450e23c8184522fabc1477c50ef7fc9e0acf2",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 32,
+					"pixel_count": 1024,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 32
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "1024:c704dcc35f6dc46a9a90b7b9cba8a55b63ca8d4886df7fa36c18336a27de0370",
+					"coverage": "4096:db9c9aa4a557ca44a9b9b0f8367198997aa964393d652250348176e8ac0e72f5",
+					"force_opaque": "0:empty",
+					"key_dist": "4096:0d43ce140121aff6771927a978a4e0133bf7d4dd9f4f0f2d5567da93fdb2ed1b",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "4096:cd2f3bb12f3fa5036862f4bca008b1960d74e7230c48e0906b21bbb0212adefc",
+					"mask": "1024:61cf95ebdf55617b09595104206725fc21b78b6185a62c8cdf39e1ce14da5281",
+					"nearest": "4096:ebc25dc2096aff79013f98deed225f6bc006a0de0ade2adcc14d8bcc578264d3",
+					"protect": "0:empty",
+					"strayed": "1024:28122fdbe824ba3a37bcdd90ca99b4e601652478e061327add4ed2873268f7b7",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "refine_edges",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:3f53780b785260591e65157ec5c450e23c8184522fabc1477c50ef7fc9e0acf2",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 32,
+					"pixel_count": 1024,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 32
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "1024:c704dcc35f6dc46a9a90b7b9cba8a55b63ca8d4886df7fa36c18336a27de0370",
+					"coverage": "4096:ff13c0ee720a2ef398571022bb90fe7758491b166db57725f39cb8db7a4ed844",
+					"force_opaque": "1024:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+					"key_dist": "4096:0d43ce140121aff6771927a978a4e0133bf7d4dd9f4f0f2d5567da93fdb2ed1b",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "4096:cd2f3bb12f3fa5036862f4bca008b1960d74e7230c48e0906b21bbb0212adefc",
+					"mask": "1024:61cf95ebdf55617b09595104206725fc21b78b6185a62c8cdf39e1ce14da5281",
+					"nearest": "4096:ebc25dc2096aff79013f98deed225f6bc006a0de0ade2adcc14d8bcc578264d3",
+					"protect": "0:empty",
+					"strayed": "1024:28122fdbe824ba3a37bcdd90ca99b4e601652478e061327add4ed2873268f7b7",
+					"stroke_colors": "12288:7ef2f193564664c8d1be7d7a642420f243f189ce454462dbcc9933d93e3c70a9",
+					"stroke_inner": "4096:4ad751ee8289356caa0bd2ffe7bb1d477598fe2992afc63aae9fe941203926d5",
+					"stroke_outer": "4096:c2b945be057c2f9b5c1e3cc1723dfef2643323f3e82eaa1b1d66bddd1886da0c"
+				},
+				"id": "edge_cleanup",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:3f53780b785260591e65157ec5c450e23c8184522fabc1477c50ef7fc9e0acf2",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 32,
+					"pixel_count": 1024,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,1.0",
+					"width": 32
+				}
+			}
+		]
+	},
+	"kernels": {
+		"box_mean": {
+			"0": "140:68dafbfc666d2bf4d454670f28c39207df5ab4ecb33bffdae6eb44e4550a7de1",
+			"1": "140:74833f8b141ec81f4351e859f7d5a7d905adad1e1fd2205a8bf6c7c3771937db",
+			"2": "140:662229c5220a72c234390b69eeacb4a0bdf73f3f012f23440ddbd76933c6b6f9",
+			"9": "140:d9ef6b489086fd6033938c10d2703c866ad66a8d0f13cbd8e4ed27f4255059a5"
+		},
+		"box_mean_large": "140:8f0244d7364d814575d061664ccdf199be855fdba7be49b01a8442e409822ee3",
+		"grassfire": {
+			"0": "140:59931a9a49e6c268e0a01f8dffacc46c2a98608501990de2ff1f33e22b063813",
+			"1": "140:c16c8cb4eadae2a0ada613160609c497f639753fcf751fb01d8d0114297256ca",
+			"3": "140:4656092fd5dbfd75491db4c36c9a8dd2b8313a5f3a9daacae7ba5c95550a50fb",
+			"99": "140:d3108fe10570b20f755f0422be149f9822a91c27d8d2db718125ada0af8aaa8a"
+		},
+		"grassfire_empty": "140:55bc213a5c81ab0420998d11a2bbbe5d6eb75e5b030602de376cefcca5fab23f"
+	},
+	"math": {
+		"clampf": [
+			"0.5",
+			"0.0",
+			"1.0",
+			"1.0",
+			"0.0"
+		],
+		"float32": [
+			"0.1",
+			"0.33333334",
+			"0.5",
+			"16777216.0",
+			"1e-45"
+		],
+		"lerpf": [
+			"0.2",
+			"0.0",
+			"1.0",
+			"5e+15",
+			"0.16999999999999998"
+		],
+		"native": {
+			"clampf": [
+				"0.5",
+				"0.0",
+				"1.0",
+				"1.0",
+				"0.0"
+			],
+			"float32": [
+				"0.1",
+				"0.33333334",
+				"0.5",
+				"16777216.0",
+				"1e-45"
+			],
+			"lerpf": [
+				"0.2",
+				"0.0",
+				"1.0",
+				"5e+15",
+				"0.16999999999999998"
+			],
+			"roundi": [
+				-3,
+				-2,
+				-1,
+				0,
+				0,
+				1,
+				1,
+				2,
+				3,
+				3
+			]
+		},
+		"roundi": [
+			-3,
+			-2,
+			-1,
+			0,
+			0,
+			1,
+			1,
+			2,
+			3,
+			3
+		]
+	},
+	"sheet_full": {
+		"final": "f5e24a395fcb3ba8481e4c43643093e52e1ae7dc78059a75e0294865195b7868",
+		"pipeline": "f5e24a395fcb3ba8481e4c43643093e52e1ae7dc78059a75e0294865195b7868",
+		"stages": [
+			{
+				"buffers": {
+					"blacked": "262144:cfde672deab304ed99eb52cdf889ae8d47ab66b506d984000e55d65251500b1c",
+					"coverage": "0:empty",
+					"force_opaque": "0:empty",
+					"key_dist": "0:empty",
+					"key_is_island": "0:empty",
+					"key_of": "0:empty",
+					"mask": "0:empty",
+					"nearest": "0:empty",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "polygon_edit",
+				"key_tolerances": "0:empty",
+				"keys": "0:empty",
+				"scalars": {
+					"bleed_radius": 0,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": false,
+					"edge_width": 0,
+					"has_keying": false,
+					"height": 512,
+					"pixel_count": 262144,
+					"search_radius": 2,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 512
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "262144:cfde672deab304ed99eb52cdf889ae8d47ab66b506d984000e55d65251500b1c",
+					"coverage": "1048576:109acee17d40cee2eb2dd4b1d70c0a03f2ecad77fbab1787d7b2606a8f31090f",
+					"force_opaque": "0:empty",
+					"key_dist": "1048576:c6626c0f9aa6f8a2f428ad1d52d5fde66f4ac11ff68174e4355bdcc7806c0851",
+					"key_is_island": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"key_of": "1048576:ace60e487540b195ce5162a48a300f0e99bb78e44db59af7062869059beed359",
+					"mask": "262144:caa04ad8328ef9f3c17a40dbf5311eb38b9109ae812d247016b9f09633e30c3d",
+					"nearest": "1048576:6bb143dd53ca280a04a04280be68c139919e69a6e5529301823bdad1fe5d9354",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_background",
+				"key_tolerances": "8:7f925b2036e92fe2f1f0697c3aedfff74d719c1ee2cb6b739d7c30484e75972c",
+				"keys": "16:f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 512,
+					"pixel_count": 262144,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 512
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "262144:cfde672deab304ed99eb52cdf889ae8d47ab66b506d984000e55d65251500b1c",
+					"coverage": "1048576:071e2aa57595d39570adf2a67ac534ba125b06c66608ebe99074eae9bcfde1b4",
+					"force_opaque": "0:empty",
+					"key_dist": "1048576:c6626c0f9aa6f8a2f428ad1d52d5fde66f4ac11ff68174e4355bdcc7806c0851",
+					"key_is_island": "171:1cbbb8b73526ba426eb055108f8243e06fdf3a8a7ac951374ddd5087918cb5b3",
+					"key_of": "1048576:54ba3df2c8e1d5e0e9928190ab20f6891d91de6c9e47a3a58b3406a9316b6305",
+					"mask": "262144:77915a1d64d27db5822563f3e7428ebedd7760c501919c192fa45c97587870e0",
+					"nearest": "1048576:8b52708948cf4ce5b7e119cc19fa3499eef13a4a4c4c1dfa01a890842865ffff",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "island_picker",
+				"key_tolerances": "1368:120a3f031a401c0321d17d342b3714f0786f9e5666ddeb31b3224247230ecbd4",
+				"keys": "2736:8915ed1cc3d5c09a98c3213e3fcbb365aaac97cc0802b8802322a4c74ea68acc",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 512,
+					"pixel_count": 262144,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 512
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "262144:cfde672deab304ed99eb52cdf889ae8d47ab66b506d984000e55d65251500b1c",
+					"coverage": "1048576:22b789199c0de1ea26db6f6ddd46c3484dc23571a77d249bbbc93300bcc2c58d",
+					"force_opaque": "0:empty",
+					"key_dist": "1048576:c6626c0f9aa6f8a2f428ad1d52d5fde66f4ac11ff68174e4355bdcc7806c0851",
+					"key_is_island": "171:1cbbb8b73526ba426eb055108f8243e06fdf3a8a7ac951374ddd5087918cb5b3",
+					"key_of": "1048576:bf39b465f0bf2389c38c4257af9b228ca411bc53525182b86b3ec95284d71143",
+					"mask": "262144:9f39036c01a0c281492f428c5a3ddbc97ef27fedb101a6d49a84022f1f99afe3",
+					"nearest": "1048576:1e9d5557886746c54039311fd0d98a7ee0a60ca910709ff4d40dcdfe4dd8d740",
+					"protect": "0:empty",
+					"strayed": "262144:762604c023319945cdd8b8ba4156422d433fc34603380f496f8b131b3e716422",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_crevice",
+				"key_tolerances": "1368:120a3f031a401c0321d17d342b3714f0786f9e5666ddeb31b3224247230ecbd4",
+				"keys": "2736:8915ed1cc3d5c09a98c3213e3fcbb365aaac97cc0802b8802322a4c74ea68acc",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 512,
+					"pixel_count": 262144,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 512
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "262144:cfde672deab304ed99eb52cdf889ae8d47ab66b506d984000e55d65251500b1c",
+					"coverage": "1048576:d1a995e343b5ec7f511a2f6464dac0ef72ccc33f8b3a6ff76ee45c6d2674d85e",
+					"force_opaque": "0:empty",
+					"key_dist": "1048576:c6626c0f9aa6f8a2f428ad1d52d5fde66f4ac11ff68174e4355bdcc7806c0851",
+					"key_is_island": "171:1cbbb8b73526ba426eb055108f8243e06fdf3a8a7ac951374ddd5087918cb5b3",
+					"key_of": "1048576:bf39b465f0bf2389c38c4257af9b228ca411bc53525182b86b3ec95284d71143",
+					"mask": "262144:9f39036c01a0c281492f428c5a3ddbc97ef27fedb101a6d49a84022f1f99afe3",
+					"nearest": "1048576:1e9d5557886746c54039311fd0d98a7ee0a60ca910709ff4d40dcdfe4dd8d740",
+					"protect": "0:empty",
+					"strayed": "262144:762604c023319945cdd8b8ba4156422d433fc34603380f496f8b131b3e716422",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "refine_edges",
+				"key_tolerances": "1368:120a3f031a401c0321d17d342b3714f0786f9e5666ddeb31b3224247230ecbd4",
+				"keys": "2736:8915ed1cc3d5c09a98c3213e3fcbb365aaac97cc0802b8802322a4c74ea68acc",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 512,
+					"pixel_count": 262144,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 512
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "262144:cfde672deab304ed99eb52cdf889ae8d47ab66b506d984000e55d65251500b1c",
+					"coverage": "1048576:e59f5124e882996ce3daa1863ac3057e0572ef717c595af8590c518823567ffd",
+					"force_opaque": "262144:8a39d2abd3999ab73c34db2476849cddf303ce389b35826850f9a700589b4a90",
+					"key_dist": "1048576:c6626c0f9aa6f8a2f428ad1d52d5fde66f4ac11ff68174e4355bdcc7806c0851",
+					"key_is_island": "171:1cbbb8b73526ba426eb055108f8243e06fdf3a8a7ac951374ddd5087918cb5b3",
+					"key_of": "1048576:bf39b465f0bf2389c38c4257af9b228ca411bc53525182b86b3ec95284d71143",
+					"mask": "262144:9f39036c01a0c281492f428c5a3ddbc97ef27fedb101a6d49a84022f1f99afe3",
+					"nearest": "1048576:1e9d5557886746c54039311fd0d98a7ee0a60ca910709ff4d40dcdfe4dd8d740",
+					"protect": "0:empty",
+					"strayed": "262144:762604c023319945cdd8b8ba4156422d433fc34603380f496f8b131b3e716422",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "1048576:5756585b87d6ffe1db11a96e8ad81117774fbae6871d8ba7323bfe681a1886f0",
+					"stroke_outer": "1048576:f520f6f9425f699ab6c72fc7ab014f55f99754768003ff269386d6c5efb60f48"
+				},
+				"id": "edge_cleanup",
+				"key_tolerances": "1368:120a3f031a401c0321d17d342b3714f0786f9e5666ddeb31b3224247230ecbd4",
+				"keys": "2736:8915ed1cc3d5c09a98c3213e3fcbb365aaac97cc0802b8802322a4c74ea68acc",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 512,
+					"pixel_count": 262144,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,1.0",
+					"width": 512
+				}
+			}
+		]
+	},
+	"sheet_sidecar": {
+		"final": "6901e47b93478b56f92dd541082252867504ab04be18954cc6fb1fa2555d30b1",
+		"pipeline": "6901e47b93478b56f92dd541082252867504ab04be18954cc6fb1fa2555d30b1",
+		"stages": [
+			{
+				"buffers": {
+					"blacked": "0:empty",
+					"coverage": "1048576:4afc87922b6163ab5212d23d1581aa511be6a5b858239a80b30d8ac0ee157d80",
+					"force_opaque": "0:empty",
+					"key_dist": "1048576:c6626c0f9aa6f8a2f428ad1d52d5fde66f4ac11ff68174e4355bdcc7806c0851",
+					"key_is_island": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"key_of": "1048576:5c40174675734759ed90c9255fa7fa84c5990240560616eb8a2b77bf6c76df21",
+					"mask": "262144:0408a12e042314ca56727bc430176919130a1c80f4612629c021c76b0cd1799a",
+					"nearest": "1048576:9c2c03d40fe8239ab1df8a8874a90c33d0d2be3c02834991255816bc426fbe42",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_background",
+				"key_tolerances": "8:d144783f1ff33776a9fe135900a60ac1eec34eddb2204ec58faab157e66df454",
+				"keys": "16:f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 512,
+					"pixel_count": 262144,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 512
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "0:empty",
+					"coverage": "1048576:1443d34d47fdc4ba6f8d5b2d5b7f1851884deb13e36a3b11da9e40f10684e19d",
+					"force_opaque": "0:empty",
+					"key_dist": "1048576:c6626c0f9aa6f8a2f428ad1d52d5fde66f4ac11ff68174e4355bdcc7806c0851",
+					"key_is_island": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"key_of": "1048576:f0e490b0284eb3105a354f56ffedb4b4839128c4e8912754eda8a9dcab8e2328",
+					"mask": "262144:dd6d78f48437a9ceed836ff3863b9800c63c3bef43fdaba3b18892d2febe48aa",
+					"nearest": "1048576:3e570af58aa4aa4a3cd3d3941fe4373cf2fd25c99fbeff86d2e7b0695b56c1b2",
+					"protect": "0:empty",
+					"strayed": "262144:70930f772aeda524231f2992cf3e805157eec41b0c0c9c07df40426e8a176895",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_crevice",
+				"key_tolerances": "8:d144783f1ff33776a9fe135900a60ac1eec34eddb2204ec58faab157e66df454",
+				"keys": "16:f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 512,
+					"pixel_count": 262144,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 512
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "0:empty",
+					"coverage": "1048576:34384be5dde6aa5aa053c773c91b0a6c9ab6656715a8ec428060c93bb13ea42b",
+					"force_opaque": "0:empty",
+					"key_dist": "1048576:c6626c0f9aa6f8a2f428ad1d52d5fde66f4ac11ff68174e4355bdcc7806c0851",
+					"key_is_island": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"key_of": "1048576:f0e490b0284eb3105a354f56ffedb4b4839128c4e8912754eda8a9dcab8e2328",
+					"mask": "262144:dd6d78f48437a9ceed836ff3863b9800c63c3bef43fdaba3b18892d2febe48aa",
+					"nearest": "1048576:3e570af58aa4aa4a3cd3d3941fe4373cf2fd25c99fbeff86d2e7b0695b56c1b2",
+					"protect": "0:empty",
+					"strayed": "262144:70930f772aeda524231f2992cf3e805157eec41b0c0c9c07df40426e8a176895",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "refine_edges",
+				"key_tolerances": "8:d144783f1ff33776a9fe135900a60ac1eec34eddb2204ec58faab157e66df454",
+				"keys": "16:f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 512,
+					"pixel_count": 262144,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 512
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "0:empty",
+					"coverage": "1048576:9f20bf63eb97b56a4f6e9a08c1fff84a8097fc02ae14161e6061bde2ca6b1d9a",
+					"force_opaque": "0:empty",
+					"key_dist": "1048576:c6626c0f9aa6f8a2f428ad1d52d5fde66f4ac11ff68174e4355bdcc7806c0851",
+					"key_is_island": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"key_of": "1048576:f0e490b0284eb3105a354f56ffedb4b4839128c4e8912754eda8a9dcab8e2328",
+					"mask": "262144:dd6d78f48437a9ceed836ff3863b9800c63c3bef43fdaba3b18892d2febe48aa",
+					"nearest": "1048576:3e570af58aa4aa4a3cd3d3941fe4373cf2fd25c99fbeff86d2e7b0695b56c1b2",
+					"protect": "0:empty",
+					"strayed": "262144:70930f772aeda524231f2992cf3e805157eec41b0c0c9c07df40426e8a176895",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "1048576:483b2103d472b419a71111e91a667a05b7afa800d27cbefc74732ce8ee8307f1",
+					"stroke_outer": "1048576:d22bd2e0386895c6fe453e674edb175602a49365305a3a2b8af375c8215c436e"
+				},
+				"id": "edge_cleanup",
+				"key_tolerances": "8:d144783f1ff33776a9fe135900a60ac1eec34eddb2204ec58faab157e66df454",
+				"keys": "16:f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 512,
+					"pixel_count": 262144,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,1.0",
+					"width": 512
+				}
+			}
+		]
+	},
+	"single_minimal": {
+		"final": "6fc6f4524161c3ae0d316812d7088e3fcd372023edaea2d7821093be40ae1060",
+		"pipeline": "6fc6f4524161c3ae0d316812d7088e3fcd372023edaea2d7821093be40ae1060",
+		"stages": [
+			{
+				"buffers": {
+					"blacked": "0:empty",
+					"coverage": "4:df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+					"force_opaque": "0:empty",
+					"key_dist": "4:df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+					"key_is_island": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"key_of": "4:df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+					"mask": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"nearest": "4:ad95131bc0b799c0b1af477fb14fcf26a6a9f76079e48bf090acb7e8367bfd0e",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_background",
+				"key_tolerances": "8:7f925b2036e92fe2f1f0697c3aedfff74d719c1ee2cb6b739d7c30484e75972c",
+				"keys": "16:f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 1,
+					"pixel_count": 1,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 1
+				}
+			}
+		]
+	},
+	"speckled_full": {
+		"final": "53b361ac3f38e35cdea24bc5d90c2e9a144f91fe572527118412f01e5d2ecb5f",
+		"pipeline": "53b361ac3f38e35cdea24bc5d90c2e9a144f91fe572527118412f01e5d2ecb5f",
+		"stages": [
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "0:empty",
+					"force_opaque": "0:empty",
+					"key_dist": "0:empty",
+					"key_is_island": "0:empty",
+					"key_of": "0:empty",
+					"mask": "0:empty",
+					"nearest": "0:empty",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "polygon_edit",
+				"key_tolerances": "0:empty",
+				"keys": "0:empty",
+				"scalars": {
+					"bleed_radius": 0,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": false,
+					"edge_width": 0,
+					"has_keying": false,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 2,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:aa9a9a1544b6711112d90c49c1d60ba6aabf815b4978bcefc8f903d74670924d",
+					"force_opaque": "0:empty",
+					"key_dist": "16384:42d689660f8466a6234f96d70ab3f8d4f74ecc20f28e86d21c70e85472fd3fbe",
+					"key_is_island": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"key_of": "16384:b9a0b9ea758f0b6e7a0aae7a58e82c4f827ca3fc95be839f498c9550f0d34fa7",
+					"mask": "4096:05e258c7ba1842fd978dbb51851b779c904e9420df053b2ca29996a8167b763b",
+					"nearest": "16384:1127166beb4fdf536a3e71ae98bf06f31305c6ab5be158af9bbe92c66c9ced8a",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_background",
+				"key_tolerances": "8:7f925b2036e92fe2f1f0697c3aedfff74d719c1ee2cb6b739d7c30484e75972c",
+				"keys": "16:f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:60a22e7c9e59a38bc69d3d260ec312eeb80356abec3c1147c11bea0b3f20e711",
+					"force_opaque": "0:empty",
+					"key_dist": "16384:42d689660f8466a6234f96d70ab3f8d4f74ecc20f28e86d21c70e85472fd3fbe",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "16384:484e6f6b2575d0ec51788a71ccc116b213be28c19ff3a3bf5d738b9f87646eb6",
+					"mask": "4096:01423635b55f316fc0bc39c85ff601cfde9a4cb300f285d70cb3867d789a2f81",
+					"nearest": "16384:db8f0381adefc7e1223d24dc03d166d1b32f04cc4d5342661540ddc78c47161d",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "island_picker",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:7e73f20651e63e0e8ac317c55c2be797dd5d38de8ceefaf3bfa85d26d50f0409",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:5fa1faea056fe523cb9c6909b7ed89548e5acdef3e1b6ffa5fbd5439f36681a2",
+					"force_opaque": "0:empty",
+					"key_dist": "16384:42d689660f8466a6234f96d70ab3f8d4f74ecc20f28e86d21c70e85472fd3fbe",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "16384:b5eddc3dde977c3d1132d4f8e2da2516dc557f20473cbcf5a55f9a7d7da899ef",
+					"mask": "4096:490586c1770007154891f1e5cfaf7098aa169900b1c260eac1a165c87a3a669c",
+					"nearest": "16384:ccaa0fcf3b830b75ce72b594aa1f92debc808d6e9704b7e47353ecbfae04d707",
+					"protect": "0:empty",
+					"strayed": "4096:dcb8afcd0e645f06940c9e01d244cb8145d6d094687c7ec2944a0f4703f6ae1d",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_crevice",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:7e73f20651e63e0e8ac317c55c2be797dd5d38de8ceefaf3bfa85d26d50f0409",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:097bbbd34961a3ef6e0e2e268c0d00efca9a666137b290716dbd8d0aac43099d",
+					"force_opaque": "0:empty",
+					"key_dist": "16384:42d689660f8466a6234f96d70ab3f8d4f74ecc20f28e86d21c70e85472fd3fbe",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "16384:b5eddc3dde977c3d1132d4f8e2da2516dc557f20473cbcf5a55f9a7d7da899ef",
+					"mask": "4096:490586c1770007154891f1e5cfaf7098aa169900b1c260eac1a165c87a3a669c",
+					"nearest": "16384:ccaa0fcf3b830b75ce72b594aa1f92debc808d6e9704b7e47353ecbfae04d707",
+					"protect": "0:empty",
+					"strayed": "4096:dcb8afcd0e645f06940c9e01d244cb8145d6d094687c7ec2944a0f4703f6ae1d",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "refine_edges",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:7e73f20651e63e0e8ac317c55c2be797dd5d38de8ceefaf3bfa85d26d50f0409",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 64
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "4096:5867f441bd0f050219dfe872d88b599d3b1f56fa4b9d742e6354e974952c1da7",
+					"coverage": "16384:73392e47899e5618e7fce65421599eb08186dece53487ec8d74874f7d8b44bde",
+					"force_opaque": "4096:ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7",
+					"key_dist": "16384:42d689660f8466a6234f96d70ab3f8d4f74ecc20f28e86d21c70e85472fd3fbe",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "16384:b5eddc3dde977c3d1132d4f8e2da2516dc557f20473cbcf5a55f9a7d7da899ef",
+					"mask": "4096:490586c1770007154891f1e5cfaf7098aa169900b1c260eac1a165c87a3a669c",
+					"nearest": "16384:ccaa0fcf3b830b75ce72b594aa1f92debc808d6e9704b7e47353ecbfae04d707",
+					"protect": "0:empty",
+					"strayed": "4096:dcb8afcd0e645f06940c9e01d244cb8145d6d094687c7ec2944a0f4703f6ae1d",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "16384:579d25b06ae22ab43b916b0ffe58be70b39ba67f9497bd80ed19308a22afc29e",
+					"stroke_outer": "16384:c0c29ee95b66540da50a1b42b9168ce4239eb5976d31b898030b518fe7f3f241"
+				},
+				"id": "edge_cleanup",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:7e73f20651e63e0e8ac317c55c2be797dd5d38de8ceefaf3bfa85d26d50f0409",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 64,
+					"pixel_count": 4096,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,1.0",
+					"width": 64
+				}
+			}
+		]
+	},
+	"tiny_minimal": {
+		"final": "105fd53362b135bd736078a706be560c387f8549651e9ecda9dca84c6787bb3b",
+		"pipeline": "105fd53362b135bd736078a706be560c387f8549651e9ecda9dca84c6787bb3b",
+		"stages": [
+			{
+				"buffers": {
+					"blacked": "0:empty",
+					"coverage": "16:d25b949c65312b91424a3cabd3065dfe18bc73e7cd8893229e9494cd75c16d92",
+					"force_opaque": "0:empty",
+					"key_dist": "16:d25b949c65312b91424a3cabd3065dfe18bc73e7cd8893229e9494cd75c16d92",
+					"key_is_island": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"key_of": "16:374708fff7719dd5979ec875d56cd2286f6d3cf7ec317a3b25632aab28ec37bb",
+					"mask": "4:4afc7d98518180331a55e2f7b2d03f93c15d1c24afc976cdfb5737e02a190203",
+					"nearest": "16:5ac6a5945f16500911219129984ba8b387a06f24fe383ce4e81a73294065461b",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_background",
+				"key_tolerances": "8:7f925b2036e92fe2f1f0697c3aedfff74d719c1ee2cb6b739d7c30484e75972c",
+				"keys": "16:f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 2,
+					"pixel_count": 4,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 2
+				}
+			}
+		]
+	},
+	"translucent_full": {
+		"final": "efc9d5c095189e4aec8474ba1c53cd29776c647913975e672e705645d2926984",
+		"pipeline": "efc9d5c095189e4aec8474ba1c53cd29776c647913975e672e705645d2926984",
+		"stages": [
+			{
+				"buffers": {
+					"blacked": "2304:c49ac17a4cc858c830313d9df2dccf5452cf103832c67d2b6a3dfa07a9156d97",
+					"coverage": "0:empty",
+					"force_opaque": "0:empty",
+					"key_dist": "0:empty",
+					"key_is_island": "0:empty",
+					"key_of": "0:empty",
+					"mask": "0:empty",
+					"nearest": "0:empty",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "polygon_edit",
+				"key_tolerances": "0:empty",
+				"keys": "0:empty",
+				"scalars": {
+					"bleed_radius": 0,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": false,
+					"edge_width": 0,
+					"has_keying": false,
+					"height": 48,
+					"pixel_count": 2304,
+					"search_radius": 2,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 48
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "2304:c49ac17a4cc858c830313d9df2dccf5452cf103832c67d2b6a3dfa07a9156d97",
+					"coverage": "9216:bd9c14011a0c5b4a31fa0c787b91c0be4590472a7b266592e084b927b76eae10",
+					"force_opaque": "0:empty",
+					"key_dist": "9216:5658e98f6a08b1f82588925ef6da0d8b7fad0d8858b24bd37c71f3951bdbee91",
+					"key_is_island": "1:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+					"key_of": "9216:c1bc2ef29fb15655ae7ecb9671483b3e8000c2ea54e08656ad1b89a845435390",
+					"mask": "2304:39da38723c324964e7cfaaf725443f8d85dbe07cb43a9e67837e192d82ee255e",
+					"nearest": "9216:b1d5133cef57c05e32d36c31aeda8bd1f4bd1c8a4fe66dff711f136534f99282",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_background",
+				"key_tolerances": "8:7f925b2036e92fe2f1f0697c3aedfff74d719c1ee2cb6b739d7c30484e75972c",
+				"keys": "16:f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 48,
+					"pixel_count": 2304,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 48
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "2304:c49ac17a4cc858c830313d9df2dccf5452cf103832c67d2b6a3dfa07a9156d97",
+					"coverage": "9216:2d07a41ae992770085117e9815300bfd0730745883e60b24aaad5e69dfc087ae",
+					"force_opaque": "0:empty",
+					"key_dist": "9216:5658e98f6a08b1f82588925ef6da0d8b7fad0d8858b24bd37c71f3951bdbee91",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "9216:b70b24c10316e9499985bfb5a90fb16eb91d6d1077a6581f20ad11204912d48d",
+					"mask": "2304:cfc335996cfae29fdf14fd2db7ea853366d350a5d387aa3c322616e81dacd56b",
+					"nearest": "9216:a27a50c72e45c4f5a44249d2913d9c56b43815d800757303c49dd643c5f40818",
+					"protect": "0:empty",
+					"strayed": "0:empty",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "island_picker",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:9b5d86a6abdbdd4f142283a255c398d0c6ea3e88b9975d6f51b2534fe242e9b2",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 0,
+					"crevice_tolerance": 0.0,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 48,
+					"pixel_count": 2304,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 48
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "2304:c49ac17a4cc858c830313d9df2dccf5452cf103832c67d2b6a3dfa07a9156d97",
+					"coverage": "9216:2d07a41ae992770085117e9815300bfd0730745883e60b24aaad5e69dfc087ae",
+					"force_opaque": "0:empty",
+					"key_dist": "9216:5658e98f6a08b1f82588925ef6da0d8b7fad0d8858b24bd37c71f3951bdbee91",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "9216:b70b24c10316e9499985bfb5a90fb16eb91d6d1077a6581f20ad11204912d48d",
+					"mask": "2304:cfc335996cfae29fdf14fd2db7ea853366d350a5d387aa3c322616e81dacd56b",
+					"nearest": "9216:a27a50c72e45c4f5a44249d2913d9c56b43815d800757303c49dd643c5f40818",
+					"protect": "0:empty",
+					"strayed": "2304:cfc335996cfae29fdf14fd2db7ea853366d350a5d387aa3c322616e81dacd56b",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "remove_crevice",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:9b5d86a6abdbdd4f142283a255c398d0c6ea3e88b9975d6f51b2534fe242e9b2",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 48,
+					"pixel_count": 2304,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 48
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "2304:c49ac17a4cc858c830313d9df2dccf5452cf103832c67d2b6a3dfa07a9156d97",
+					"coverage": "9216:2d07a41ae992770085117e9815300bfd0730745883e60b24aaad5e69dfc087ae",
+					"force_opaque": "0:empty",
+					"key_dist": "9216:5658e98f6a08b1f82588925ef6da0d8b7fad0d8858b24bd37c71f3951bdbee91",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "9216:b70b24c10316e9499985bfb5a90fb16eb91d6d1077a6581f20ad11204912d48d",
+					"mask": "2304:cfc335996cfae29fdf14fd2db7ea853366d350a5d387aa3c322616e81dacd56b",
+					"nearest": "9216:a27a50c72e45c4f5a44249d2913d9c56b43815d800757303c49dd643c5f40818",
+					"protect": "0:empty",
+					"strayed": "2304:cfc335996cfae29fdf14fd2db7ea853366d350a5d387aa3c322616e81dacd56b",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "refine_edges",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:9b5d86a6abdbdd4f142283a255c398d0c6ea3e88b9975d6f51b2534fe242e9b2",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 48,
+					"pixel_count": 2304,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,0.0",
+					"width": 48
+				}
+			},
+			{
+				"buffers": {
+					"blacked": "2304:c49ac17a4cc858c830313d9df2dccf5452cf103832c67d2b6a3dfa07a9156d97",
+					"coverage": "9216:2d07a41ae992770085117e9815300bfd0730745883e60b24aaad5e69dfc087ae",
+					"force_opaque": "2304:cfc335996cfae29fdf14fd2db7ea853366d350a5d387aa3c322616e81dacd56b",
+					"key_dist": "9216:5658e98f6a08b1f82588925ef6da0d8b7fad0d8858b24bd37c71f3951bdbee91",
+					"key_is_island": "2:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+					"key_of": "9216:b70b24c10316e9499985bfb5a90fb16eb91d6d1077a6581f20ad11204912d48d",
+					"mask": "2304:cfc335996cfae29fdf14fd2db7ea853366d350a5d387aa3c322616e81dacd56b",
+					"nearest": "9216:a27a50c72e45c4f5a44249d2913d9c56b43815d800757303c49dd643c5f40818",
+					"protect": "0:empty",
+					"strayed": "2304:cfc335996cfae29fdf14fd2db7ea853366d350a5d387aa3c322616e81dacd56b",
+					"stroke_colors": "0:empty",
+					"stroke_inner": "0:empty",
+					"stroke_outer": "0:empty"
+				},
+				"id": "edge_cleanup",
+				"key_tolerances": "16:c142d894f5af9fb603aa0bfdf8fd9c91b77241a06ca03f4a41b4b6cfc07087da",
+				"keys": "32:9b5d86a6abdbdd4f142283a255c398d0c6ea3e88b9975d6f51b2534fe242e9b2",
+				"scalars": {
+					"bleed_radius": 16,
+					"crevice_reach": 1,
+					"crevice_tolerance": 0.17,
+					"decontaminate": true,
+					"edge_width": 2,
+					"has_keying": true,
+					"height": 48,
+					"pixel_count": 2304,
+					"search_radius": 16,
+					"stroke_color": "0.0,0.0,0.0,1.0",
+					"width": 48
+				}
+			}
+		]
+	}
+}

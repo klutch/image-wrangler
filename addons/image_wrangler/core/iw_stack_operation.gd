@@ -22,6 +22,18 @@ extends IWOperation
 ## without any order being an error.
 
 
+## Guards divisions where the denominator can legitimately collapse to zero.
+##
+## Lives here rather than on [IWPipelineContext], which is where it belongs and where it
+## used to be, because that class is native now and [ClassDB] carries integer constants
+## only — there is no way for a GDExtension to hand GDScript a float constant. The
+## native side keeps its own [code]EPSILON[/code] with the same value, and the two are
+## held in step by the parity harness rather than by the compiler.
+##
+## Every stage that reads this is one whose loops move to C++ in turn, at which point
+## both copies collapse back into the one on the context.
+const EPSILON := 0.0001
+
 ## Whether this stage runs at all.
 ##
 ## Held here rather than as a setting, because it is a fact about the stack rather
