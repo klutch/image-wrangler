@@ -44,6 +44,10 @@ signal entries_rebuilt
 signal copy_requested
 signal paste_requested
 
+## Emitted when Reset is pressed. Asks rather than does: the confirmation and what
+## "default" means both belong to the dock.
+signal reset_requested
+
 ## Scripts the dropdown offers, in the order it offers them.
 var operation_scripts: Array = []
 
@@ -103,6 +107,15 @@ func _build() -> void:
 	paste.tooltip_text = "Add every operation on the clipboard to the bottom of this\nimage's stack.\n\nAdds rather than replaces, so pasting onto a stack that already\nhas something in it keeps both. Remove the rows you don't want."
 	paste.pressed.connect(func() -> void: paste_requested.emit())
 	clipboard_row.add_child(paste)
+
+	# On the same row as the two that replace a stack wholesale, because that is what it
+	# is — the third way of getting one, and the only one that throws something away.
+	var reset := Button.new()
+	reset.text = "Reset"
+	reset.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	reset.tooltip_text = "Throw this image's stack away and start again from the default.\n\nAsks first, and takes the image's edit history with it — a reset\nis not something History can rewind past."
+	reset.pressed.connect(func() -> void: reset_requested.emit())
+	clipboard_row.add_child(reset)
 
 	# The entries are cards standing off the panel, so they need room above and below
 	# to read as separate things rather than as one block with lines in it.

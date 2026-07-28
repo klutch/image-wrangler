@@ -27,21 +27,19 @@ const OPERATION_SCRIPTS := [
 
 ## What a fresh image's stack starts as.
 ##
-## The order that reproduces what the single fused operation used to do, and a
-## sensible default rather than a rule: a cut has to be declared before the keying so
-## it can steer where the colour bleed takes its replacements from, the alpha stages
-## want a classification to exist, and the stroke has to come last because it follows
-## whatever silhouette everything else settled on.
+## [b]The one operation that is always the answer.[/b] Every other stage is a response to
+## something a particular image did — a nook the flood could not get into, an island the
+## border could not reach, an edge that came back harder than it went in — and an image
+## that did none of those things does not want the stage that fixes it. A default stack
+## that guessed at all of them started every image carrying work nobody had asked for,
+## and made the form a list of things to switch off rather than a list of things to
+## reach for.
 ##
-## [Denoise] is deliberately absent. It costs seconds per image, it changes what every
-## tolerance below it means, and it is wrong for the clean vector-exported source that
-## most of this is pointed at. It is a stage you go and add.
+## It also makes the default honest about the one thing this addon does. Add what the
+## image turns out to need; the Create dropdown is right there, and the order the rest
+## want to go in is on their own entries.
 const DEFAULT_STACK := [
-	"res://addons/image_wrangler/core/polygon_edit_op.gd",
 	"res://addons/image_wrangler/core/remove_background.gd",
-	"res://addons/image_wrangler/core/island_picker_op.gd",
-	"res://addons/image_wrangler/core/refine_edges.gd",
-	"res://addons/image_wrangler/core/edge_cleanup.gd",
 ]
 
 ## The file operation, which is not a stack operation and never will be: it does not
@@ -329,6 +327,7 @@ var _save_dialog: FileDialog
 var _save_source := ""
 var _overwrite_dialog: ConfirmationDialog
 var _removal_dialog: ConfirmationDialog
+var _reset_dialog: ConfirmationDialog
 
 ## Sources whose originals may be deleted, mapped to the copy that replaced them.
 ## Filled during a run and acted on only after the user confirms and every copy
@@ -877,6 +876,7 @@ func _build_operation_column() -> Control:
 	_stack_view.entries_rebuilt.connect(_on_entries_rebuilt)
 	_stack_view.copy_requested.connect(_on_copy_stack)
 	_stack_view.paste_requested.connect(_on_paste_stack)
+	_stack_view.reset_requested.connect(_on_reset_stack)
 	stack_page.add_child(_stack_view)
 
 	# No scroll of its own: the list inside it scrolls, and nesting the two would give
@@ -1031,6 +1031,16 @@ func _build_dialogs() -> void:
 	_removal_dialog.confirmed.connect(_verify_then_remove_sources)
 	_removal_dialog.canceled.connect(func() -> void: _pending_removals.clear())
 	add_child(_removal_dialog)
+
+	# The text is fixed, unlike the two above, which name the files they are about. There
+	# is only one thing this can do and only one image it can do it to.
+	_reset_dialog = ConfirmationDialog.new()
+	_reset_dialog.title = "Reset Operations?"
+	_reset_dialog.ok_button_text = "Reset"
+	_reset_dialog.dialog_text = ("Are you sure you want to reset to the default operation "
+			+ "stack? History will be lost.")
+	_reset_dialog.confirmed.connect(_reset_stack)
+	add_child(_reset_dialog)
 
 
 # --- Sources ------------------------------------------------------------
@@ -1625,6 +1635,54 @@ func _on_paste_stack() -> void:
 
 func _operation_count(count: int) -> String:
 	return "1 operation" if count == 1 else "%d operations" % count
+
+
+## Reset was pressed. Always asks, even from an untouched stack.
+##
+## No "nothing to reset" shortcut, because there is nearly always something: the sidecar
+## this would discard, or the history behind it. Working out whether this particular press
+## happened to be a no-op would be a rule the user has to learn in order to trust the
+## button, and the dialog costs a keystroke.
+func _on_reset_stack() -> void:
+	if _current_path().is_empty():
+		_set_status("Select an image before resetting its operations.")
+		return
+	_reset_dialog.popup_centered()
+
+
+## Puts the stack back to the default and throws this image's history away.
+##
+## [b]The history goes rather than gaining a row.[/b] Recording the reset as an edit would
+## make it undoable, which sounds kinder and is the wrong promise: the point of the
+## confirmation is that this is the way out of a stack that has gone wrong, and a way out
+## that leaves the wreckage one click behind it is not one. The dialog says so before
+## anything happens.
+##
+## The sidecar is rewritten on the usual timer rather than deleted. What is on disk should
+## agree with what is on screen, and what is on screen is now the default.
+func _reset_stack() -> void:
+	var path := _current_path()
+	if path.is_empty():
+		return
+
+	_refreshing = true
+	_stack_view.set_stages(_default_stages())
+	_refreshing = false
+
+	_store_stack(path)
+	# Rebuilt rather than cleared, so the first row is the default this just arrived at
+	# instead of a state nothing can reach any more.
+	_history_by_path.erase(path)
+	_shadow_text = JSON.stringify(SettingsIO.encode_stack(_stack_records()))
+	_history_for(path)
+	_refresh_history_view()
+
+	_refresh_notes()
+	_refresh_suffix()
+	_schedule_autosave()
+	_set_status("Operations reset to the default.")
+	if _auto_preview_allowed():
+		_schedule_preview()
 
 
 ## Refreshes every entry's "waiting for" line against what the stack now looks like.
