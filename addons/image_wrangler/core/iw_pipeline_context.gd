@@ -125,9 +125,9 @@ var decontaminate := false
 var search_radius := MIN_SEARCH_RADIUS
 var stroke_color := Color(0, 0, 0, 0)
 
-## How far a flood may stray from its key to squeeze through a gap, and how many
-## such pixels it may cross in a row. Set by the keying stage; see
-## [method flood_key_for].
+## How much further than its key's own tolerance a flood may stray to squeeze through
+## a gap, and how many such pixels one path may cross in total. Set by the keying
+## stage; see [method flood_key_for].
 ##
 ## On the context rather than read from one operation's settings, because every flood
 ## in a run has to obey the same rule — an island squeezing into a gap on different
@@ -135,8 +135,12 @@ var stroke_color := Color(0, 0, 0, 0)
 var crevice_reach := 0
 var crevice_tolerance := 0.0
 
-## Weak-step count [method flood_key_for] wants recorded for the pixel it just
-## accepted. An out-parameter; see that method.
+## How much of the crevice budget the path to the pixel [method flood_key_for] just
+## accepted has spent. An out-parameter; see that method.
+##
+## A running total down the path rather than a count of the last few steps, so above
+## zero means "reached by straying" for every pixel beyond a crevice and not only for
+## the crossing itself. Both floods classify on exactly that.
 var flood_weak := 0
 
 ## Whether any stage has established keys to measure against. Stages that can only
@@ -247,19 +251,29 @@ func claiming_key(index: int) -> int:
 ## which is the normal shape of an image this pipeline has already run over once.
 ##
 ## [b]The crevice rule is Canny's double threshold applied to region growing[/b]
-## rather than to edge linking. A pixel within its key's own tolerance is solid
-## background and resets the count; one merely within [member crevice_tolerance] may
-## still be crossed, but only [member crevice_reach] of them in a row before solid
-## background is needed again. That is what gets into a nook whose neck is nothing but
-## the antialiasing of the two walls meeting, while stopping the flood wandering off
-## across a pale subject, which an unbounded weak threshold would do.
+## rather than to edge linking. A pixel within its key's own tolerance is crossed
+## freely; one merely within [member crevice_tolerance] of that is still crossable,
+## but [member crevice_reach] of them is all any one path gets. That is what gets into
+## a nook whose neck is nothing but the antialiasing of the two walls meeting, while
+## stopping the flood wandering off across a pale subject, which an unbounded weak
+## threshold would do.
+##
+## [b]The budget is spent, not lent.[/b] It is carried down the path in
+## [member flood_weak] and never handed back, so a flood cannot alternate between
+## straying and landing on something a key claims outright and travel that way for as
+## far as it likes. Recharging it on any such pixel was what let a white key at a
+## tolerance of nothing cross a coloured boundary and eat a subject from the inside:
+## one highlight the far side of an edge bought the next crossing, and that one the
+## one after it.
 ##
 ## It comes last, after the whole list has been asked, so a pixel another entry claims
 ## outright is never taken by the weaker rule instead. Straying is for getting through
-## a gap, not for choosing a key. And it is measured against the [i]arriving[/i] key's
-## own tolerance, which is why it has to live in the flood: every entry keeps its own
-## idea of how far background reaches, and a gap off a tightly toleranced colour must
-## not open up on a loosely toleranced one's terms.
+## a gap, not for choosing a key. And it is measured from where the arriving key
+## already reaches rather than in place of it, so a tightly toleranced colour strays
+## as far past its own edge as a loose one does past its own — the rule is about the
+## geometry being squeezed through, and the key still says where background is. That
+## is why it has to live in the flood: every entry keeps its own idea of how far
+## background reaches.
 ##
 ## The weak-step count to record is left in [member flood_weak], as an out-parameter,
 ## because returning it alongside the key would mean allocating an Array four times
@@ -268,7 +282,9 @@ func claiming_key(index: int) -> int:
 ## Shared by every flood here, so an island reaches as far through mixed background
 ## as the border flood does, and squeezes through the same gaps.
 func flood_key_for(to: int, from_key: int, from_weak: int = 0) -> int:
-	flood_weak = 0
+	# Carried rather than cleared: what a path has spent it has spent, and what it
+	# reaches afterwards it reaches only because of it. See above.
+	flood_weak = from_weak
 	if is_clear(to):
 		return KEY_CLEAR
 	if from_key == KEY_CLEAR:
@@ -289,7 +305,7 @@ func flood_key_for(to: int, from_key: int, from_weak: int = 0) -> int:
 		return claimed
 
 	if crevice_reach > 0 and from_weak < crevice_reach \
-			and distance <= maxf(crevice_tolerance, tolerance):
+			and distance <= tolerance + crevice_tolerance:
 		flood_weak = from_weak + 1
 		return from_key
 	return KEY_NONE

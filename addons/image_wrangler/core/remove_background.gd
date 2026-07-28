@@ -395,9 +395,20 @@ func _classify(ctx: IWPipelineContext, first_key: int) -> void:
 	# it to the band gives it partial alpha from the usual coverage maths, where
 	# calling it background would cut a hard notch out of the crevice mouth. It stays
 	# in the queue, so the band still grows from it.
+	#
+	# Everything the path reached [i]after[/i] that crossing goes with it, which is
+	# what makes straying as cheap as the setting claims: the coverage maths decides
+	# those pixels by colour rather than the flood deciding them by arrival, so
+	# background beyond a crevice still measures as fully background and comes out,
+	# and subject the flood should never have got to measures as covered and keeps
+	# its alpha instead of being cut. Marking only the crossing itself left every
+	# pixel past it hard background, which is exactly where the damage was.
+	#
+	# Never a pixel that arrived transparent, though: it has no key to be matted
+	# against, and the band pass leaves it alone for the same reason.
 	if settings.crevice_reach > 0:
 		for i in pixel_count:
-			if mask[i] == background and weak_steps[i] > 0:
+			if mask[i] == background and weak_steps[i] > 0 and key_of[i] >= 0:
 				mask[i] = IWPipelineContext.MASK_EDGE
 
 	ctx.mask = mask
@@ -461,7 +472,7 @@ listed color is removed wherever it appears — enclosed regions included.",
 			"min": 0,
 			"max": 32,
 			"step": 1,
-			"tooltip": "Lets the flood squeeze into nooks whose opening is nothing but the\nantialiasing of the two walls meeting, which it would otherwise stop at.\nThis is how many such pixels it may cross in a row, so it needs to be at\nleast as long as the constriction it has to get through. 0 switches it off.\n\nPart of the flood, so it runs for every color in the list above, each\nagainst its own tolerance.",
+			"tooltip": "Lets the flood squeeze into nooks whose opening is nothing but the\nantialiasing of the two walls meeting, which it would otherwise stop at.\nThis is how many such pixels one path may cross in total, so it needs to be\nat least as long as the constriction it has to get through. 0 switches it off.\n\nA total rather than a count that solid background resets, so the flood\ncannot stray, land on a stray highlight, and use that to buy its way\nfurther in. Everything past a squeeze is matted rather than cut out, so\nsubject it should not have reached keeps its alpha.\n\nPart of the flood, so it runs for every color in the list above, each\nagainst its own tolerance.",
 		},
 		{
 			"property": &"crevice_tolerance",
@@ -470,7 +481,7 @@ listed color is removed wherever it appears — enclosed regions included.",
 			"min": 0.0,
 			"max": 1.0,
 			"step": 0.01,
-			"tooltip": "How far from the background color those squeezed-through pixels may be.\nOnly applies while Crevice Reach is above zero.",
+			"tooltip": "How much further than its own tolerance a color may stray to get through\na squeeze. Added to that tolerance rather than replacing it, so a color\nkeyed tightly stays keyed tightly.\n\nOnly applies while Crevice Reach is above zero.",
 		},
 		{
 			"property": &"decontaminate",

@@ -176,7 +176,11 @@ func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 		var key := ctx.add_key(ctx.color_at(seed), entry.color_tolerance, true)
 		var head := 0
 		var tail := 0
-		weak_steps.fill(0)
+		# Not cleared between islands, though each still starts on a full budget: a
+		# pixel one island claimed is never offered to the next, so no island can read
+		# another's count, and what it records is read once at the end for every island
+		# at once. Clearing it here left all but the last island's squeezed-through
+		# pixels classed as hard background.
 		mask[seed] = IWPipelineContext.MASK_BACKGROUND
 		key_of[seed] = key
 		touched.append(seed)
@@ -243,11 +247,13 @@ func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 	ctx.key_of = key_of
 	if touched.is_empty():
 		return touched
-	# What the flood only squeezed through is edge, not background, exactly as in the
-	# border flood.
+	# What the flood only squeezed through is edge, not background, along with
+	# everything it reached afterwards — exactly as in the border flood, and for the
+	# reason given there.
 	if ctx.crevice_reach > 0:
 		for i in touched:
-			if mask[i] == IWPipelineContext.MASK_BACKGROUND and weak_steps[i] > 0:
+			if mask[i] == IWPipelineContext.MASK_BACKGROUND and weak_steps[i] > 0 \
+					and key_of[i] >= 0:
 				mask[i] = IWPipelineContext.MASK_EDGE
 		ctx.mask = mask
 	# The band has to grow from what this opened, or an island region would have a
