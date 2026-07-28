@@ -73,6 +73,18 @@ const BUSY_SCRIM_ALPHA := 0.3
 const BUSY_BAR_WIDTH := 220.0
 const BUSY_BAR_HEIGHT := 6.0
 
+## Seconds the overlay takes to come up, and to go away again.
+##
+## Most runs are short, and an overlay that snapped on and off for every one of them
+## turned the preview into a flicker — the eye is caught by the change rather than by
+## the result, which is the opposite of what the thing is for. Fading means a run that
+## finishes inside this never reaches full strength: it shows as a swell rather than a
+## flash, and the shorter it is the less there is to see.
+##
+## Long enough to read as a fade rather than a fast cut, short enough that a run which
+## really is slow has its bar up almost at once.
+const BUSY_FADE_TIME := 0.5
+
 ## The second bar, under the first: how far through the stage that is running, where
 ## the one above is how far through the whole stack.
 ##
@@ -220,6 +232,17 @@ var _progress := 0.0
 var _stage_progress := 0.0
 var _stage_label := ""
 
+## How far the overlay has faded up, 0 to 1, ramped over [constant BUSY_FADE_TIME]
+## towards whatever [member _busy] currently is.
+##
+## Separate from [member _busy] because the two are no longer the same thing: a run
+## can be over while its overlay is still on screen on its way out, and the next run
+## can start again from wherever that had got to rather than from nothing.
+##
+## Linear here and eased where it is drawn, so what accumulates is a plain fraction of
+## the fade time and the curve stays a decision the drawing makes.
+var _busy_fade := 0.0
+
 ## Seconds the current run has been on screen, which is all the spinner needs to
 ## know. Reset per run so every one starts from the same place.
 var _spin_time := 0.0
@@ -327,8 +350,25 @@ func _ready() -> void:
 	_relayout()
 
 
+## Runs while the overlay is on screen at all, which outlasts the run itself by the
+## length of the fade.
 func _process(delta: float) -> void:
+	# Kept turning on the way out. A spinner that stops dead and then fades is two
+	# endings for one event, and the first of them says the wrong thing — that the
+	# work has stalled rather than finished.
 	_spin_time += delta
+
+	var target := 1.0 if _busy else 0.0
+	if not is_equal_approx(_busy_fade, target):
+		var step := delta / BUSY_FADE_TIME
+		_busy_fade = minf(_busy_fade + step, target) if target > _busy_fade \
+				else maxf(_busy_fade - step, target)
+	elif not _busy:
+		# Faded out and nothing running: the last frame of the fade has been drawn, so
+		# there is nothing left to animate until the next run.
+		_busy_fade = 0.0
+		set_process(false)
+
 	_canvas.queue_redraw()
 
 
@@ -408,7 +448,9 @@ func set_polygons(polygons: Array, colors: PackedColorArray, selected: int, draf
 ## Puts the view into or out of its working state.
 ##
 ## Starting a run resets the bar, so a second run cannot appear to begin wherever
-## the first one left off.
+## the first one left off. Neither end is immediate: both are a target for the fade in
+## [method _process] to travel towards, so a run that begins during the last one's exit
+## turns it round from wherever it had reached rather than snapping back to full.
 func set_busy(active: bool) -> void:
 	if active:
 		# The bar resets even when a run was already going, since a replacement run
@@ -421,10 +463,13 @@ func set_busy(active: bool) -> void:
 			# The spinner does not, though. It is saying work is happening, and one
 			# run giving way to another has not stopped it happening — restarting it
 			# would put a stutter in the one thing on screen that must look continuous.
-			_spin_time = 0.0
+			# The same holds while the previous run's overlay is still fading: it is
+			# still on screen, so it is still one the eye can follow.
+			if _busy_fade <= 0.0:
+				_spin_time = 0.0
 			_busy = true
-			# The spinner is the only thing here that animates, so the frame loop only
-			# runs while there is something to turn.
+			# Nothing here animates between runs, so the frame loop only runs while
+			# there is something to turn or to fade.
 			set_process(true)
 		_canvas.queue_redraw()
 		return
@@ -432,7 +477,10 @@ func set_busy(active: bool) -> void:
 	if not _busy:
 		return
 	_busy = false
-	set_process(false)
+	# Deliberately still processing: the overlay has to be carried out rather than
+	# taken away, and [member _progress] is left where the run left it so the bar
+	# fades from what it reached instead of emptying first.
+	set_process(true)
 	_canvas.queue_redraw()
 
 
@@ -1174,14 +1222,22 @@ func _draw_handle(center: Vector2, color: Color, emphasised := false) -> void:
 ## the passes are not equally expensive and the reports say so rather than
 ## pretending otherwise.
 func _draw_busy() -> void:
-	if not _busy:
+	# Not [member _busy]: a finished run is still on screen for the length of its fade,
+	# and this is the only thing that says whether there is anything left to draw.
+	var fade := _busy_alpha()
+	if fade <= 0.0:
 		return
 
-	_canvas.draw_rect(Rect2(Vector2.ZERO, _viewport), Color(0, 0, 0, BUSY_SCRIM_ALPHA), true)
+	_canvas.draw_rect(
+		Rect2(Vector2.ZERO, _viewport), Color(0, 0, 0, BUSY_SCRIM_ALPHA * fade), true)
 
 	var accent := Color(0.4, 0.6, 1.0)
 	if has_theme_color(&"accent_color", &"Editor"):
 		accent = get_theme_color(&"accent_color", &"Editor")
+	# Carries the fade into both bars and the spinner arc, which are the only things
+	# drawn in it. [method Color.darkened] leaves alpha alone, so the stage bar's
+	# dimmer shade inherits this too.
+	accent.a *= fade
 
 	var font := get_theme_default_font()
 	var font_size := get_theme_default_font_size()
@@ -1239,7 +1295,7 @@ func _draw_busy() -> void:
 			HORIZONTAL_ALIGNMENT_LEFT,
 			-1.0,
 			font_size,
-			Color(1, 1, 1, 0.85),
+			Color(1, 1, 1, 0.85 * fade),
 		)
 		top += caption.y
 
@@ -1265,11 +1321,15 @@ func _draw_busy() -> void:
 ## [param outlined] is for the upper bar only: an outline around the thin one would be
 ## most of its height.
 func _draw_bar(origin: Vector2, width: float, height: float, fraction: float, fill: Color, outlined: bool) -> void:
-	_canvas.draw_rect(Rect2(origin, Vector2(width, height)), Color(0, 0, 0, 0.55), true)
+	# The fill arrives already faded, since its colour is the caller's; the track and
+	# the outline are this function's own and have to be faded here.
+	var fade := _busy_alpha()
+	_canvas.draw_rect(Rect2(origin, Vector2(width, height)), Color(0, 0, 0, 0.55 * fade), true)
 	if fraction > 0.0:
 		_canvas.draw_rect(Rect2(origin, Vector2(floorf(width * fraction), height)), fill, true)
 	if outlined:
-		_canvas.draw_rect(Rect2(origin, Vector2(width, height)), Color(1, 1, 1, 0.25), false, 1.0)
+		_canvas.draw_rect(
+			Rect2(origin, Vector2(width, height)), Color(1, 1, 1, 0.25 * fade), false, 1.0)
 
 
 ## The spinner at [param center], turned to wherever the run has got to in time.
@@ -1295,7 +1355,16 @@ func _draw_spinner(center: Vector2, size: Vector2, accent: Color) -> void:
 	# what keeps the arc from reading as a stray mark at the moments the wobble has
 	# it nearly stopped.
 	_canvas.draw_arc(
-		center, radius, 0.0, TAU, BUSY_RING_SEGMENTS, Color(1, 1, 1, 0.18), thickness, true)
+		center,
+		radius,
+		0.0,
+		TAU,
+		BUSY_RING_SEGMENTS,
+		# The arc over it arrives faded with the accent; this one is the spinner's own.
+		Color(1, 1, 1, 0.18 * _busy_alpha()),
+		thickness,
+		true,
+	)
 	_canvas.draw_arc(
 		center,
 		radius,
@@ -1325,12 +1394,25 @@ func _spinner_size(room: Vector2, caption_height: float) -> Vector2:
 
 
 ## The rounded black panel behind the overlay, built on first use.
+##
+## Its colour is set on every call rather than only on the first, since it is the one
+## part of the overlay whose fade cannot be applied at the draw — a StyleBox carries
+## its own.
 func _panel_style() -> StyleBoxFlat:
 	if _busy_panel == null:
 		_busy_panel = StyleBoxFlat.new()
-		_busy_panel.bg_color = Color(0, 0, 0, BUSY_PANEL_ALPHA)
 		_busy_panel.set_corner_radius_all(BUSY_PANEL_RADIUS)
+	_busy_panel.bg_color = Color(0, 0, 0, BUSY_PANEL_ALPHA * _busy_alpha())
 	return _busy_panel
+
+
+## The opacity the overlay is drawn at: [member _busy_fade], eased.
+##
+## Eased rather than taken straight, because a linear fade is not seen as an even one
+## — it appears to arrive suddenly and then crawl. Smoothing both ends is most of what
+## makes this read as the overlay arriving rather than as it being switched on.
+func _busy_alpha() -> float:
+	return smoothstep(0.0, 1.0, _busy_fade)
 
 
 static func _build_checker() -> Texture2D:
