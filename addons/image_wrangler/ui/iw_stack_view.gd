@@ -44,6 +44,11 @@ signal entries_rebuilt
 signal copy_requested
 signal paste_requested
 
+## Emitted when Save or Load is pressed. The dock owns the file dialogs, as it does for
+## every other file this addon touches.
+signal save_requested
+signal load_requested
+
 ## Emitted when Reset is pressed. Asks rather than does: the confirmation and what
 ## "default" means both belong to the dock.
 signal reset_requested
@@ -60,16 +65,61 @@ var form_builder := Callable()
 ## rebuild.
 var fold_state: Dictionary = {}
 
+## Where a tool button keeps the icon it wants and the word to fall back on.
+const META_ICON := &"iw_icon"
+const META_LABEL := &"iw_label"
+
 ## The live stack, in order.
 var _entries: Array = []
 var _selector: OptionButton
 var _list: VBoxContainer
+var _tools: HBoxContainer
 var _next_uid := 1
 
 
 func _ready() -> void:
 	if _list == null:
 		_build()
+
+
+## The editor's icons are not there until this is in a tree, and they change with the
+## theme, so the row is dressed again whenever that happens rather than only once.
+func _notification(what: int) -> void:
+	if what != NOTIFICATION_THEME_CHANGED or _tools == null:
+		return
+	for child in _tools.get_children():
+		if child is Button:
+			_dress(child)
+
+
+## One button on the tool row.
+func _add_tool(icon: StringName, label: String, hint: String, on_press: Callable) -> void:
+	var button := Button.new()
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.tooltip_text = hint
+	# Never focused: these sit between the dropdown and the entries, and tabbing through
+	# the form should not stop at five of them on the way.
+	button.focus_mode = Control.FOCUS_NONE
+	button.set_meta(META_ICON, icon)
+	button.set_meta(META_LABEL, label)
+	button.pressed.connect(on_press)
+	_tools.add_child(button)
+	_dress(button)
+
+
+## Puts the icon on a tool button, or its word if there is no icon to be had.
+##
+## Asked for rather than assumed, the same way the fold arrow is: outside the editor
+## there is no [code]EditorIcons[/code] theme at all, and a row of buttons wearing their
+## own names is better than a row of errors.
+func _dress(button: Button) -> void:
+	var icon: StringName = button.get_meta(META_ICON, &"")
+	if not icon.is_empty() and has_theme_icon(icon, &"EditorIcons"):
+		button.icon = get_theme_icon(icon, &"EditorIcons")
+		button.text = ""
+		return
+	button.icon = null
+	button.text = String(button.get_meta(META_LABEL, ""))
 
 
 func _build() -> void:
@@ -84,34 +134,27 @@ func _build() -> void:
 	_selector.get_popup().index_pressed.connect(_on_pick)
 	add_child(_selector)
 
-	# Its own row under the one that builds a stack by hand, because it is the other way
-	# of getting one: the two buttons share the width evenly rather than sitting beside
-	# the dropdown, where they would read as things you do to the operation it names.
-	var clipboard_row := HBoxContainer.new()
-	add_child(clipboard_row)
+	# Its own row under the one that builds a stack by hand, because these are the other
+	# ways of getting one. Icons rather than names: five of these across a dock this
+	# narrow leaves no room for words, and what each one does is the sort of thing an
+	# icon says faster than a label anyway. The tooltips carry the detail.
+	#
+	# In the order they are reached for — the two that go through a file, the two that go
+	# through the clipboard, and then the one that throws everything away, which is last
+	# because it is the only one that costs something.
+	_tools = HBoxContainer.new()
+	add_child(_tools)
 
-	var copy := Button.new()
-	copy.text = "Copy Stack"
-	copy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	copy.tooltip_text = "Copy every operation in this image's stack to the clipboard,\nsettings and all.\n\nThe clipboard gets the same JSON a sidecar holds, so a copied\nstack can be pasted into a text file and kept."
-	copy.pressed.connect(func() -> void: copy_requested.emit())
-	clipboard_row.add_child(copy)
-
-	var paste := Button.new()
-	paste.text = "Paste Stack"
-	paste.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	paste.tooltip_text = "Add every operation on the clipboard to the bottom of this\nimage's stack.\n\nAdds rather than replaces, so pasting onto a stack that already\nhas something in it keeps both. Remove the rows you don't want."
-	paste.pressed.connect(func() -> void: paste_requested.emit())
-	clipboard_row.add_child(paste)
-
-	# On the same row as the two that replace a stack wholesale, because that is what it
-	# is — the third way of getting one, and the only one that throws something away.
-	var reset := Button.new()
-	reset.text = "Reset"
-	reset.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	reset.tooltip_text = "Throw this image's stack away and start again from the default.\n\nAsks first, and takes the image's edit history with it — a reset\nis not something History can rewind past."
-	reset.pressed.connect(func() -> void: reset_requested.emit())
-	clipboard_row.add_child(reset)
+	_add_tool(&"Save", "Save", "Save this image's stack to a file.\n\nWrites the same JSON a sidecar holds, so a saved stack can be\nkept as a preset, edited by hand, or sent to somebody.",
+			func() -> void: save_requested.emit())
+	_add_tool(&"Load", "Load", "Add every operation in a saved stack file to the bottom of\nthis image's stack.\n\nAdds rather than replaces, so loading onto a stack that already\nhas something in it keeps both. Reset first to start clean.",
+			func() -> void: load_requested.emit())
+	_add_tool(&"ActionCopy", "Copy", "Copy every operation in this image's stack to the clipboard,\nsettings and all.\n\nThe clipboard gets the same JSON a sidecar holds, so a copied\nstack can be pasted into a text file and kept.",
+			func() -> void: copy_requested.emit())
+	_add_tool(&"ActionPaste", "Paste", "Add every operation on the clipboard to the bottom of this\nimage's stack.\n\nAdds rather than replaces, so pasting onto a stack that already\nhas something in it keeps both. Remove the rows you don't want.",
+			func() -> void: paste_requested.emit())
+	_add_tool(&"Reload", "Reset", "Throw this image's stack away and start again from the default.\n\nAsks first, and takes the image's edit history with it — a reset\nis not something History can rewind past.",
+			func() -> void: reset_requested.emit())
 
 	# The entries are cards standing off the panel, so they need room above and below
 	# to read as separate things rather than as one block with lines in it.

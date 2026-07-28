@@ -330,6 +330,8 @@ var _save_source := ""
 var _overwrite_dialog: ConfirmationDialog
 var _removal_dialog: ConfirmationDialog
 var _reset_dialog: ConfirmationDialog
+var _stack_save_dialog: FileDialog
+var _stack_load_dialog: FileDialog
 
 ## Sources whose originals may be deleted, mapped to the copy that replaced them.
 ## Filled during a run and acted on only after the user confirms and every copy
@@ -878,6 +880,8 @@ func _build_operation_column() -> Control:
 	_stack_view.entries_rebuilt.connect(_on_entries_rebuilt)
 	_stack_view.copy_requested.connect(_on_copy_stack)
 	_stack_view.paste_requested.connect(_on_paste_stack)
+	_stack_view.save_requested.connect(_on_save_stack)
+	_stack_view.load_requested.connect(_on_load_stack)
 	_stack_view.reset_requested.connect(_on_reset_stack)
 	stack_page.add_child(_stack_view)
 
@@ -1033,6 +1037,25 @@ func _build_dialogs() -> void:
 	_removal_dialog.confirmed.connect(_verify_then_remove_sources)
 	_removal_dialog.canceled.connect(func() -> void: _pending_removals.clear())
 	add_child(_removal_dialog)
+
+	# A stack file is not an image and does not belong in the Images list, so these two
+	# are their own dialogs rather than a mode of the ones above.
+	_stack_save_dialog = FileDialog.new()
+	_stack_save_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	_stack_save_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_stack_save_dialog.title = "Save Operation Stack"
+	_stack_save_dialog.add_filter("*.json", "Operation Stack")
+	_stack_save_dialog.current_file = "operations.json"
+	_stack_save_dialog.file_selected.connect(_on_stack_save_chosen)
+	add_child(_stack_save_dialog)
+
+	_stack_load_dialog = FileDialog.new()
+	_stack_load_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	_stack_load_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_stack_load_dialog.title = "Load Operation Stack"
+	_stack_load_dialog.add_filter("*.json", "Operation Stack")
+	_stack_load_dialog.file_selected.connect(_on_stack_load_chosen)
+	add_child(_stack_load_dialog)
 
 	# The text is fixed, unlike the two above, which name the files they are about. There
 	# is only one thing this can do and only one image it can do it to.
@@ -1606,16 +1629,61 @@ func _on_copy_stack() -> void:
 	_set_status("Copied %s to the clipboard." % _operation_count(records.size()))
 
 
-## Adds whatever stack is on the clipboard to the bottom of this one.
-##
-## Adds rather than replaces, which is the whole point of it being a paste — the stack
-## it lands on is usually one the user has already started, and replacing would throw
-## that away with no way back. Every settings object is built fresh by the codec, so a
-## stack pasted onto two images gives each its own, and editing one does not move the
-## other.
 func _on_paste_stack() -> void:
+	_add_stack_from_text(DisplayServer.clipboard_get(), "the clipboard")
+
+
+## Writes the whole stack out as a file that can be loaded back.
+func _on_save_stack() -> void:
+	if _stack_view.is_empty():
+		_set_status("There is nothing in the stack to save.")
+		return
+	_stack_save_dialog.popup_centered_ratio(0.6)
+
+
+func _on_stack_save_chosen(path: String) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		_set_status("Could not write %s." % path.get_file())
+		return
+	# Indented, unlike the clipboard's copy: this one lands somewhere a person may open
+	# it and read it.
+	file.store_string(SettingsIO.stack_to_text(_stack_records(), "\t"))
+	file.close()
+	_set_status("Saved %s to %s." % [
+		_operation_count(_stack_view.stages().size()), path.get_file(),
+	])
+
+
+func _on_load_stack() -> void:
+	_stack_load_dialog.popup_centered_ratio(0.6)
+
+
+func _on_stack_load_chosen(path: String) -> void:
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		_set_status("Could not read %s." % path.get_file())
+		return
+	var text := file.get_as_text()
+	file.close()
+	_add_stack_from_text(text, path.get_file())
+
+
+## Adds whatever stack [param text] describes to the bottom of this one.
+##
+## [b]Adds rather than replaces, and that is as true of Load as it is of Paste.[/b] The
+## stack it lands on is usually one the user has already started, and replacing would
+## throw that away with nothing to bring it back — Reset is the way to start clean, and
+## it asks first for exactly that reason. Loading onto an empty stack makes the two the
+## same thing anyway.
+##
+## Every settings object is built fresh by the codec, so a stack loaded onto two images
+## gives each its own and editing one does not move the other.
+##
+## [param source] is what to call where the text came from, for the status line alone.
+func _add_stack_from_text(text: String, source: String) -> void:
 	var registry := _operation_registry()
-	var records := SettingsIO.stack_from_text(DisplayServer.clipboard_get(), registry)
+	var records := SettingsIO.stack_from_text(text, registry)
 	var stages: Array[IWStackOperation] = []
 	for record: Dictionary in records:
 		var script: Variant = registry.get(record["id"])
@@ -1627,12 +1695,14 @@ func _on_paste_stack() -> void:
 		stages.append(stage)
 
 	if stages.is_empty():
-		_set_status("Nothing on the clipboard reads as an operation stack.")
+		# Phrased so the source can be dropped in either way round without a capital
+		# landing in the middle of it or a filename being title-cased.
+		_set_status("Found no operation stack in %s." % source)
 		return
 	# Emits stack_changed, which stores, re-notes and reruns. The status is set after,
 	# because what just happened is more use than being told the stack changed.
 	_stack_view.add_stages(stages)
-	_set_status("Pasted %s onto the end of the stack." % _operation_count(stages.size()))
+	_set_status("Added %s from %s." % [_operation_count(stages.size()), source])
 
 
 func _operation_count(count: int) -> String:

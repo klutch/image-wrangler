@@ -17,6 +17,7 @@ extends SceneTree
 
 const StackViewScript := preload("res://addons/image_wrangler/ui/iw_stack_view.gd")
 const PanelScript := preload("res://addons/image_wrangler/ui/iw_panel.gd")
+const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
 
 var _failures := 0
 var _view: VBoxContainer
@@ -34,7 +35,9 @@ func _initialize() -> void:
     _check_no_button()
     _check_pick_adds()
     _check_same_pick_adds_again()
-    _check_clipboard_row()
+    _check_tool_row()
+    _check_tools_only_ask()
+    _check_save_load_round_trip()
 
     _view.queue_free()
     if _failures == 0:
@@ -97,23 +100,108 @@ func _check_same_pick_adds_again() -> void:
             "duplicate operations share one settings object")
 
 
-## The row that replaces a stack wholesale, which sits under the dropdown.
-func _check_clipboard_row() -> void:
-    var row := []
-    for child in _view.get_children():
-        if not (child is HBoxContainer):
-            continue
-        var labels := []
-        for button in (child as HBoxContainer).get_children():
-            if button is Button:
-                labels.append((button as Button).text)
-        if labels.has("Reset"):
-            row = labels
-    _expect(row == ["Copy Stack", "Paste Stack", "Reset"],
-            "the clipboard row reads %s" % str(row))
+## The five ways of getting a whole stack at once, in the order they are reached for.
+##
+## Checked by the word each button falls back on rather than by its icon: headless there
+## is no editor theme, so every one of them is wearing its name here. In the editor they
+## are wearing icons instead, and the same list decides which.
+func _check_tool_row() -> void:
+    var row := _tool_row()
+    var labels := []
+    for button in row:
+        labels.append(button.text)
+    _expect(labels == ["Save", "Load", "Copy", "Paste", "Reset"],
+            "the tool row reads %s" % str(labels))
+
+    # Each one has to have asked for an icon, or in the editor it would be the only bare
+    # word in a row of pictures.
+    for button in row:
+        var icon: StringName = button.get_meta(StackViewScript.META_ICON, &"")
+        _expect(not icon.is_empty(), "the %s button asked for no icon" % button.text)
+
+    # And every one has to say what it does, since a picture on its own does not.
+    for button in row:
+        _expect(button.tooltip_text.length() > 20,
+                "the %s button has nothing useful to say on hover" % button.text)
+
+
+## Every button on the row asks the dock rather than acting, so pressing one has to
+## announce and change nothing by itself.
+func _check_tools_only_ask() -> void:
+    var before: int = _view.stages().size()
+    var heard := {}
+    for name: String in ["save", "load", "copy", "paste", "reset"]:
+        _view.connect("%s_requested" % name,
+                func() -> void: heard[name] = int(heard.get(name, 0)) + 1)
+
+    for button in _tool_row():
+        button.pressed.emit()
+
+    _expect(heard.size() == 5, "only %d of the five buttons asked for anything" % heard.size())
+    for name: String in heard:
+        _expect(heard[name] == 1, "%s asked %d times" % [name, heard[name]])
+    _expect(_view.stages().size() == before,
+            "a tool button changed the stack on its own")
+
+
+## A saved file has to come back as the stack that went into it.
+##
+## Through the real codec and a real file, because the point of Save is that what lands
+## on disk can be read again — by this, or by a person, or by a sidecar.
+func _check_save_load_round_trip() -> void:
+    var registry := {}
+    for path: String in PanelScript.OPERATION_SCRIPTS:
+        var probe: IWOperation = load(path).new()
+        registry[probe.get_operation_id()] = load(path)
+
+    var records := []
+    for stage: IWStackOperation in _view.stages():
+        records.append({
+            "id": stage.get_operation_id(),
+            "enabled": stage.enabled,
+            "settings": stage.get_settings(),
+        })
+    if not _expect(not records.is_empty(), "nothing in the stack to round trip"):
+        return
+
+    var where := "user://stack_round_trip.json"
+    var file := FileAccess.open(where, FileAccess.WRITE)
+    if not _expect(file != null, "could not write the test file"):
+        return
+    file.store_string(SettingsIO.stack_to_text(records, "\t"))
+    file.close()
+
+    var read := FileAccess.open(where, FileAccess.READ)
+    var text := read.get_as_text()
+    read.close()
+    DirAccess.remove_absolute(ProjectSettings.globalize_path(where))
+
+    # Indented, because a saved stack is a thing somebody may open.
+    _expect(text.contains("\n\t"), "the saved file is not laid out to be read")
+
+    var back := SettingsIO.stack_from_text(text, registry)
+    if not _expect(back.size() == records.size(),
+            "a saved stack of %d came back as %d" % [records.size(), back.size()]):
+        return
+    for i in back.size():
+        _expect(back[i]["id"] == records[i]["id"], "the order changed at %d" % i)
 
 
 # --- Helpers ------------------------------------------------------------
+
+## The tool row's buttons, in the order they sit in.
+func _tool_row() -> Array:
+    for child in _view.get_children():
+        if not (child is HBoxContainer):
+            continue
+        var buttons := []
+        for button in (child as HBoxContainer).get_children():
+            if button is Button:
+                buttons.append(button)
+        if not buttons.is_empty():
+            return buttons
+    return []
+
 
 func _selector() -> OptionButton:
     for child in _view.get_children():

@@ -343,7 +343,7 @@ static func encode_stack(stack: Array) -> Array:
 
 # --- The clipboard ------------------------------------------------------
 
-## [param stack] as the text Copy Stack puts on the clipboard.
+## [param stack] as the text Copy Stack and Save Stack write out.
 ##
 ## Deliberately the sidecar's own envelope rather than a format of its own. It costs
 ## nothing — the encoder was already there — and it means a copied stack is a saved
@@ -351,14 +351,14 @@ static func encode_stack(stack: Array) -> Array:
 ## or kept in a note, or sent to somebody. A second format would have been a second
 ## thing to keep in step with every operation added.
 ##
-## Not indented, unlike the sidecar. This one is going through a clipboard rather than
-## into a file somebody may open, and the tabs would only be there to be scrolled past.
-static func stack_to_text(stack: Array) -> String:
+## [param indent] is empty for the clipboard, where the tabs would only be there to be
+## scrolled past, and a tab for a file somebody may open and edit.
+static func stack_to_text(stack: Array, indent := "") -> String:
 	return JSON.stringify({
 		"format": FORMAT,
 		"version": VERSION,
 		"stack": encode_stack(stack),
-	})
+	}, indent)
 
 
 ## The stack a bare list of encoded records describes.
