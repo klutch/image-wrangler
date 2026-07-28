@@ -35,6 +35,10 @@ const INDENT := 8
 ## Thickness of the line drawn where a dragged entry would land.
 const DROP_LINE := 2.0
 
+## Width of the grab handle. Wide enough to be aimed at without crowding the title,
+## which is the only other thing competing for the left of the header.
+const HANDLE_WIDTH := 22
+
 ## How much lighter than the panel behind it an entry sits, and how round its
 ## corners are.
 ##
@@ -65,6 +69,10 @@ var _settings_box: VBoxContainer
 
 ## Where a drop would land, while one is hovering: 1 above, -1 below, 0 not hovering.
 var _drop_side := 0
+
+## Set while the card's own colour is being assigned, so the theme change that
+## assignment raises does not come straight back in.
+var _styling := false
 
 
 func setup(operation: IWStackOperation, entry_uid: int, folded: bool) -> void:
@@ -114,7 +122,16 @@ func _collect(node: Node, into: Array[Control]) -> void:
 ##
 ## Asked for rather than assumed: reading a theme colour that is not there logs an
 ## error, and outside the editor there is no Editor theme type at all.
+##
+## Guarded against itself. Assigning the override is a theme change, and this is what
+## answers a theme change — so without the flag it calls itself until the stack runs
+## out. The editor happens to survive it; anything building an entry outside one does
+## not.
 func _apply_panel_style() -> void:
+	if _styling:
+		return
+	_styling = true
+
 	var base := Color(0.19, 0.20, 0.23)
 	if has_theme_color(&"base_color", &"Editor"):
 		base = get_theme_color(&"base_color", &"Editor")
@@ -124,6 +141,8 @@ func _apply_panel_style() -> void:
 	box.set_corner_radius_all(PANEL_RADIUS)
 	box.set_content_margin_all(PANEL_PADDING)
 	add_theme_stylebox_override(&"panel", box)
+
+	_styling = false
 
 
 func _build() -> void:
@@ -142,7 +161,7 @@ func _build() -> void:
 	_handle.text = "≡"
 	_handle.mouse_filter = Control.MOUSE_FILTER_PASS
 	_handle.mouse_default_cursor_shape = Control.CURSOR_MOVE
-	_handle.custom_minimum_size = Vector2(16, 0)
+	_handle.custom_minimum_size = Vector2(HANDLE_WIDTH, 0)
 	_handle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_handle.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_handle.modulate = Color(1, 1, 1, 0.55)
@@ -272,10 +291,18 @@ func _apply_fold_arrow() -> void:
 
 # --- Reordering ---------------------------------------------------------
 
-func _get_drag_data(_at_position: Vector2) -> Variant:
+func _get_drag_data(at_position: Vector2) -> Variant:
 	# Only from the handle. Without this, dragging any spin slider or list row inside
 	# the entry would start a reorder instead of doing what it looks like it does.
-	if _handle == null or not _handle.get_global_rect().has_point(get_global_mouse_position()):
+	#
+	# Measured against where the press began, which is what at_position is — not where
+	# the pointer has since got to. A drag is not offered until the pointer has moved
+	# about ten pixels, and ten pixels from the middle of a handle this wide is outside
+	# it, so asking the live position turned most real drags down and the handle felt
+	# like it had to be grabbed several times.
+	if _handle == null:
+		return null
+	if not _handle.get_global_rect().has_point(get_global_transform() * at_position):
 		return null
 
 	var preview := Label.new()
