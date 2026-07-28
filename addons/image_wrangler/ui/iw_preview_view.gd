@@ -50,6 +50,17 @@ const MARKER_SELECTED_COLOR := Color(1.0, 0.85, 0.2)
 ## judge, so it has to be readable without being what you look at.
 const MARKER_WIDTH := 1.5
 
+## How solid a flooded island's outline is drawn.
+##
+## Softer than the markers around it on purpose: this one is a report rather than
+## something the user placed, it can be large, and there may be several at once. At full
+## strength a box round every island competes with the edges they are drawn over, which
+## are the thing actually being looked at.
+##
+## Applied as a scale on whatever alpha the marker already carries, so a switched-off
+## island stays the fainter of the two.
+const MARKER_DASH_ALPHA := 0.6
+
 ## Dash length on a flooded island's outline, in screen pixels.
 ##
 ## Held in screen pixels rather than image ones so the dashes stay the same size at
@@ -1084,7 +1095,7 @@ func _draw_markers() -> void:
 		if not on:
 			color = Color(color, 0.45)
 		if i < _marker_flooded.size() and _marker_flooded[i] != 0:
-			_draw_flood_marker(region, color, selected, on)
+			_draw_flood_marker(region, color, selected)
 		elif region.size == Vector2i.ONE:
 			_draw_point_marker(region.position, color, selected, on)
 		else:
@@ -1131,20 +1142,26 @@ func _draw_region_marker(region: Rect2i, color: Color, selected: bool, on: bool)
 ## nothing about how much keying it took out. Dashes also survive lying on top of the
 ## edge they are describing, where a solid line of the same weight reads as part of it.
 ##
-## Faintly shaded when it is the highlighted row, exactly as a picked region is, since
-## the question there — which of these is the one I have selected — is the same.
-func _draw_flood_marker(region: Rect2i, color: Color, selected: bool, on: bool) -> void:
+## Never shaded inside, unlike a picked region: this box is drawn around whatever the
+## flood took, which is exactly the thing being judged, and a wash over it would tint
+## the pixels the user is trying to read. The outline alone says where it reached.
+##
+## Selection is carried by weight and colour rather than by a fill, for the same reason.
+func _draw_flood_marker(region: Rect2i, color: Color, selected: bool) -> void:
 	var scale := _scale()
 	var box := Rect2(
 		_content_origin + Vector2(region.position) * scale,
 		Vector2(region.size) * scale,
 	)
-	if selected and on:
-		_canvas.draw_rect(box, Color(color, MARKER_FILL_ALPHA), true)
-	# The same dark backing every other marker carries, dashed in step with the line
-	# over it so it reads as a shadow rather than as a second dashed box.
-	_draw_dashed_rect(box, Color(0, 0, 0, 0.75), MARKER_WIDTH + 2.0)
-	_draw_dashed_rect(box, color, MARKER_WIDTH + (1.0 if selected else 0.0))
+	# Scaled rather than set, so a switched-off island stays fainter than a live one:
+	# the alpha it arrives with is the only thing left saying which is which now that
+	# there is no fill to go hollow.
+	var line := Color(color, color.a * MARKER_DASH_ALPHA)
+	# The dark backing every other marker carries, dashed in step with the line over it
+	# so it reads as a shadow rather than as a second dashed box — and let down by the
+	# same amount, since a full-strength shadow under a softened line is just a dark box.
+	_draw_dashed_rect(box, Color(0, 0, 0, 0.75 * MARKER_DASH_ALPHA), MARKER_WIDTH + 2.0)
+	_draw_dashed_rect(box, line, MARKER_WIDTH + (1.0 if selected else 0.0))
 
 
 ## A dashed rectangle, drawn as its four sides.
