@@ -379,6 +379,9 @@ func _ready() -> void:
 ## they do nothing at all the rest of the time — Backspace especially, which has
 ## an obvious meaning elsewhere and must not be swallowed here.
 ##
+## Ctrl+Z and Ctrl+Shift+Z walk this image's history, one step up or down the list the
+## History tab shows.
+##
 ## Ctrl+Shift+R rebuilds the interface, which is a development affordance rather than
 ## a feature: see [method _rebuild_ui]. It takes a modifier so it cannot be hit by
 ## accident, and being scoped to the dock like the rest, it leaves the combination free
@@ -387,9 +390,24 @@ func _unhandled_key_input(event: InputEvent) -> void:
     if _preview == null or not is_visible_in_tree():
         return
     var key := event as InputEventKey
-    if key == null or not key.pressed or key.echo:
+    if key == null or not key.pressed:
         return
     if not get_global_rect().has_point(get_global_mouse_position()):
+        return
+
+    # Ahead of the repeat guard below, because holding these two is how anyone walks back
+    # more than a step or two and refusing to repeat would make that twenty presses.
+    if key.keycode == KEY_Z and key.ctrl_pressed and not key.alt_pressed \
+            and not key.meta_pressed:
+        # A rename scheme has no history, so the keystroke is left for whoever wants it
+        # rather than swallowed to do nothing.
+        if _mode == Mode.RENAME:
+            return
+        accept_event()
+        _step_history(1 if key.shift_pressed else -1)
+        return
+
+    if key.echo:
         return
 
     if key.keycode == KEY_R and key.ctrl_pressed and key.shift_pressed \
@@ -1443,6 +1461,33 @@ func _on_history_revert(index: int) -> void:
         _schedule_preview()
     else:
         _set_status("Rewound. Press Refresh to update the preview.")
+
+
+## Moves one step through this image's history. [param direction] is -1 to undo and 1 to
+## redo, which is up and down the list the History tab shows.
+##
+## The status line names where it landed, because the keyboard gives no other sign of it:
+## the History tab moves its selection, and that is behind a tab the user is very likely
+## not looking at while pressing this.
+func _step_history(direction: int) -> void:
+    var path := _current_path()
+    if path.is_empty() or not _history_by_path.has(path):
+        _set_status("Select an image to undo anything.")
+        return
+
+    var history: IWHistory = _history_by_path[path]
+    var target := history.current_index() + direction
+    if target < IWHistory.BASE_INDEX or target >= history.size():
+        _set_status("Nothing left to undo." if direction < 0 else "Nothing left to redo.")
+        return
+
+    _on_history_revert(target)
+
+    # Row zero is the state the image opened in, so a command's own row is one further
+    # along than its index.
+    var rows := history.rows()
+    var landed: String = rows[target + 1]["label"]
+    _set_status("%s: %s" % ["Undo" if direction < 0 else "Redo", landed])
 
 
 func _refresh_history_view() -> void:

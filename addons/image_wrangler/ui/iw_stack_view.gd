@@ -165,21 +165,10 @@ func _dress(button: Button) -> void:
 
 
 func _build() -> void:
-    # Picking from the list is the whole gesture — there is no button beside it to press
-    # afterwards, so the popup's own index_pressed is what this listens to rather than
-    # item_selected. item_selected does not fire when the item picked is the one already
-    # showing, and adding a second Polygon Edit is an ordinary thing to want.
-    _selector = OptionButton.new()
-    _selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _selector.tooltip_text = "Add an operation to the bottom of the stack.\nDrag its handle afterwards to move it.\n\nPicking the one already showing adds another of it, which is what duplicates are for."
-    _selector.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-    _selector.get_popup().index_pressed.connect(_on_pick)
-    add_child(_selector)
-
-    # Its own row under the one that builds a stack by hand, because these are the other
-    # ways of getting one. Icons rather than names: five of these across a dock this
-    # narrow leaves no room for words, and what each one does is the sort of thing an
-    # icon says faster than a label anyway.
+    # First, because these are the ways a whole stack arrives at once, and the dropdown
+    # under them is for adding to whatever they left. Icons rather than names: five of
+    # these across a dock this narrow leaves no room for words, and what each one does is
+    # the sort of thing an icon says faster than a label anyway.
     #
     # In the order they are reached for — the two that go through a file, the two that go
     # through the clipboard, and then the one that throws everything away, which is last
@@ -193,6 +182,17 @@ func _build() -> void:
     _add_tool(&"ActionCopy", "Copy", func() -> void: copy_requested.emit())
     _add_tool(&"ActionPaste", "Paste", func() -> void: paste_requested.emit())
     _add_tool(&"Reload", "Reset", func() -> void: reset_requested.emit())
+
+    # Picking from the list is the whole gesture — there is no button beside it to press
+    # afterwards, so the popup's own index_pressed is what this listens to rather than
+    # item_selected. item_selected does not fire when the item picked is the one already
+    # showing, and adding a second Polygon Edit is an ordinary thing to want.
+    _selector = OptionButton.new()
+    _selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _selector.tooltip_text = "Add an operation to the bottom of the stack.\nDrag its handle afterwards to move it.\n\nPicking the one already showing adds another of it, which is what duplicates are for."
+    _selector.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+    _selector.get_popup().index_pressed.connect(_on_pick)
+    add_child(_selector)
 
     # The entries are cards standing off the panel, so they need room above and below
     # to read as separate things rather than as one block with lines in it.
