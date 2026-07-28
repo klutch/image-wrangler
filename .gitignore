@@ -7,8 +7,7 @@ build/
 .vscode/
 *.depren
 flower_sheets/
-*.dll
-*.obj
+addons/image_wrangler/~*.dll
 
 # GDExtension build output. The addon's own bin/ is deliberately NOT ignored — the
 # built library is committed so the addon works from a checkout — but the .dll is the
@@ -20,6 +19,21 @@ src/*.obj
 addons/image_wrangler/bin/*.exp
 addons/image_wrangler/bin/*.lib
 addons/image_wrangler/bin/*.pdb
+
+# The vendored Open Image Denoise runtime, committed on purpose — see
+# thirdparty/oidn/README-vendored.md. It has to sit beside the extension, because that is
+# the only place both Godot's loader and OIDN's own module lookup will find it, which
+# puts it squarely under the blanket *.dll above.
+#
+# Named one file at a time rather than globbed: a re-vendor that drags the CUDA or HIP
+# device module back in should be a visible decision, not a silent twenty megabytes.
+!addons/image_wrangler/bin/OpenImageDenoise.dll
+!addons/image_wrangler/bin/OpenImageDenoise_core.dll
+!addons/image_wrangler/bin/OpenImageDenoise_device_cpu.dll
+!addons/image_wrangler/bin/tbb12.dll
+!addons/image_wrangler/bin/tbbbind.dll
+!addons/image_wrangler/bin/tbbbind_2_0.dll
+!addons/image_wrangler/bin/tbbbind_2_5.dll
 
 # Raw buffer dumps from the parity harness. Regenerable, and large enough that a
 # baseline run of every case would dwarf the repo.
