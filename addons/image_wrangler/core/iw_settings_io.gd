@@ -563,6 +563,13 @@ static func apply_dict(resource: Resource, data: Dictionary) -> void:
 			resource.set(name, decoded)
 
 
+## [b]Every type a setting may hold has to be named in all three of [method _encode],
+## [method _decode] and [method _blank_element].[/b] A type missing from the first two
+## falls through to being returned as-is, which for a struct means Godot's own
+## [code]to_string[/code] — so it saves as something like
+## [code]"[P: (20, 30), S: (40, 50)]"[/code] and decodes back to the blank, silently. The
+## setting is then not merely unsaved: it is unsaved and reads as its default, which looks
+## like the operation doing nothing rather than like a codec that dropped it.
 static func _encode(value: Variant) -> Variant:
 	match typeof(value):
 		TYPE_COLOR:
@@ -571,6 +578,12 @@ static func _encode(value: Variant) -> Variant:
 		TYPE_VECTOR2I:
 			var point: Vector2i = value
 			return [point.x, point.y]
+		TYPE_VECTOR2:
+			var spot: Vector2 = value
+			return [spot.x, spot.y]
+		TYPE_RECT2I:
+			var box: Rect2i = value
+			return [box.position.x, box.position.y, box.size.x, box.size.y]
 		TYPE_ARRAY:
 			var encoded := []
 			for item in (value as Array):
@@ -598,6 +611,16 @@ static func _decode(target: Variant, encoded: Variant) -> Variant:
 				return target
 			var pair: Array = encoded
 			return Vector2i(int(pair[0]), int(pair[1]))
+		TYPE_VECTOR2:
+			if not (encoded is Array) or (encoded as Array).size() < 2:
+				return target
+			var spot: Array = encoded
+			return Vector2(float(spot[0]), float(spot[1]))
+		TYPE_RECT2I:
+			if not (encoded is Array) or (encoded as Array).size() < 4:
+				return target
+			var box: Array = encoded
+			return Rect2i(int(box[0]), int(box[1]), int(box[2]), int(box[3]))
 		TYPE_COLOR:
 			if not (encoded is Array) or (encoded as Array).size() < 4:
 				return target
@@ -641,6 +664,7 @@ static func _blank_element(array: Array) -> Variant:
 		TYPE_STRING: return ""
 		TYPE_VECTOR2I: return Vector2i.ZERO
 		TYPE_VECTOR2: return Vector2.ZERO
+		TYPE_RECT2I: return Rect2i()
 		TYPE_COLOR: return Color.WHITE
 		TYPE_OBJECT:
 			var element_script: Variant = array.get_typed_script()
