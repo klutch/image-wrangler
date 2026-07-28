@@ -54,9 +54,20 @@ func process_context(_ctx: IWPipelineContext) -> void:
 ## Whether this stage needs a background to have been keyed out above it.
 ##
 ## [code]true[/code] for anything measuring against a key — which is most of them,
-## since the coverage maths is a ratio of distances from the background.
+## since the coverage maths is a ratio of distances from the background. May be
+## answered from the settings rather than from the class: a stage whose need
+## depends on what has been dialled into it says so per instance.
 func needs_keying() -> bool:
 	return true
+
+
+## Whether this stage is one that establishes the keys and the classification.
+##
+## Asked separately from [method needs_keying] rather than read as its opposite,
+## because most stages do neither: geometry and the stroke work on their own
+## without leaving a background behind for anything below to measure against.
+func establishes_keying() -> bool:
+	return false
 
 
 ## One line saying what this stage is waiting for, or empty when it is ready.

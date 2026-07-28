@@ -123,6 +123,11 @@ func needs_keying() -> bool:
 	return false
 
 
+## And the only one that does: the mask everything else builds on is made here.
+func establishes_keying() -> bool:
+	return true
+
+
 ## Most of a run by a distance: the flood and the nearest-subject map between them
 ## are the bulk of the work whatever else is in the stack.
 func stage_weight() -> float:

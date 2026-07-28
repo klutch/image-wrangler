@@ -79,7 +79,7 @@ func clamp_settings_to_schema(_settings: Resource = null) -> void:
 ## Used by the dock to decide what to tell the user about a stack that cannot key.
 func has_keying_stage() -> bool:
 	for stage in stages:
-		if stage.enabled and not stage.needs_keying():
+		if stage.enabled and stage.establishes_keying():
 			return true
 	return false
 

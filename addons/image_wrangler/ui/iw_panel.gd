@@ -904,7 +904,10 @@ func _on_entries_rebuilt() -> void:
 		for control: Control in entry.pick_controls():
 			_pick_controls.append(control)
 			_bind_pick_control(control)
-		entry.set_note(entry.stage.prerequisite_note(null))
+	# Through the same pass the rest of the stack goes through, because a note is
+	# about what is above an entry rather than about the entry, and asking each one
+	# on its own gets that wrong in exactly the cases the note exists for.
+	_refresh_notes()
 	# A fresh set of forms never inherits a crosshair from the set before it.
 	_release_pick()
 	_update_overlays()
@@ -975,7 +978,7 @@ func _refresh_notes() -> void:
 	for entry: Control in _stack_view.entries():
 		var stage: IWStackOperation = entry.stage
 		entry.set_note("" if keying or not stage.needs_keying() else stage.prerequisite_note(null))
-		if stage.enabled and not stage.needs_keying():
+		if stage.enabled and stage.establishes_keying():
 			keying = true
 
 
@@ -1364,6 +1367,9 @@ func _on_setting_changed() -> void:
 	else:
 		for entry: Control in _stack_view.entries():
 			SettingsBuilder.refresh_visibility(entry.stage, entry.settings_box())
+		# And a setting can be what makes a stage need something above it — the first
+		# Subtract island picked is the case — so the notes are asked again too.
+		_refresh_notes()
 	_schedule_autosave()
 	if _mode == Mode.RENAME:
 		_update_detail_label()

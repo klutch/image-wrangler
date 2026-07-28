@@ -92,9 +92,10 @@ func stage_weight() -> float:
 
 
 ## An Add island needs nothing above it — it is its own flood and forces alpha
-## directly. A Subtract one needs a classification to add background to.
+## directly. A Subtract one needs a classification to add background to, so the
+## answer is about the islands picked rather than about the operation.
 func needs_keying() -> bool:
-	return false
+	return settings.islands != null and _has(IWAlphaMode.Mode.SUBTRACT)
 
 
 func prerequisite_note(ctx: IWPipelineContext) -> String:

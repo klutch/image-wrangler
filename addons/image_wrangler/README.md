@@ -814,7 +814,12 @@ and the pixels are written out once at the end by `IWCompose` — so an operatio
 never sees a half-finished image, only the original colours plus what has been
 decided about them. Anything measuring against a background should return `true`
 from `needs_keying()` and a line from `prerequisite_note()`, so an entry with
-nothing above it says so instead of failing.
+nothing above it says so instead of failing — and anything that leaves a
+classification behind for those to measure against should return `true` from
+`establishes_keying()`, which is what silences their notes. The two are asked
+separately because most operations answer `false` to both. `needs_keying()` may
+also be answered from the settings, as Island Picker does: only a Subtract island
+needs anything above it.
 
 Three things worth knowing about the context:
 
