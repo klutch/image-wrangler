@@ -73,6 +73,9 @@ void IWStageKernels::_bind_methods() {
 	ClassDB::bind_static_method("IWStageKernels",
 			D_METHOD("smooth_halos", "ctx", "threshold", "radius", "strength"),
 			&IWStageKernels::smooth_halos);
+	// Defined in iw_hsv_kernels.cpp; bound here so every entry point is in one list.
+	ClassDB::bind_static_method("IWStageKernels",
+			D_METHOD("adjust_hsv", "ctx", "rects", "shifts"), &IWStageKernels::adjust_hsv);
 }
 
 // Rasterises this stage's shapes and folds them into whatever is already declared.

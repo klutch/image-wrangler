@@ -33,6 +33,9 @@ enum SettingType {
 	## A list of polygons the user draws over the preview, each standing for a
 	## region to act on. The property must hold a [PolygonRegionList].
 	POLYGON_LIST,
+	## A list of rectangles the user picks off the preview, each carrying its own
+	## hue, saturation and value. The property must hold an [HSVRegionList].
+	HSV_LIST,
 }
 
 

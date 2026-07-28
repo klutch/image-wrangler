@@ -10,6 +10,7 @@ extends RefCounted
 const IslandPicker := preload("res://addons/image_wrangler/ui/iw_island_picker.gd")
 const ColorList := preload("res://addons/image_wrangler/ui/iw_color_list.gd")
 const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd")
+const HSVList := preload("res://addons/image_wrangler/ui/iw_hsv_list.gd")
 
 ## Left indent applied to the contents of a named group.
 const GROUP_INDENT := 8
@@ -88,6 +89,8 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 				control = _build_color_list(operation, property)
 			IWOperation.SettingType.POLYGON_LIST:
 				control = _build_polygon_list(operation, property)
+			IWOperation.SettingType.HSV_LIST:
+				control = _build_hsv_list(operation, property)
 			_:
 				control = _build_number(operation, property, label, setting, false, on_changed)
 
@@ -202,6 +205,15 @@ static func _build_color_list(operation: IWOperation, property: StringName) -> C
 ## drawing needs the preview, and only the dock can reach it.
 static func _build_polygon_list(operation: IWOperation, property: StringName) -> Control:
 	var list := PolygonList.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.setup(operation, property)
+	return list
+
+
+## Left unwired here for the same reason the other three are: picking needs the
+## preview, and only the dock can reach it.
+static func _build_hsv_list(operation: IWOperation, property: StringName) -> Control:
+	var list := HSVList.new()
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	list.setup(operation, property)
 	return list

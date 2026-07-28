@@ -8,6 +8,7 @@ const PreviewView := preload("res://addons/image_wrangler/ui/iw_preview_view.gd"
 const IslandPicker := preload("res://addons/image_wrangler/ui/iw_island_picker.gd")
 const ColorList := preload("res://addons/image_wrangler/ui/iw_color_list.gd")
 const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd")
+const HSVList := preload("res://addons/image_wrangler/ui/iw_hsv_list.gd")
 const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
 const StackView := preload("res://addons/image_wrangler/ui/iw_stack_view.gd")
 const HistoryView := preload("res://addons/image_wrangler/ui/iw_history_view.gd")
@@ -19,6 +20,7 @@ const OPERATION_SCRIPTS := [
     "res://addons/image_wrangler/core/smooth_blocks.gd",
     "res://addons/image_wrangler/core/smooth_halos.gd",
     "res://addons/image_wrangler/core/smooth_color.gd",
+    "res://addons/image_wrangler/core/hsv_adjust.gd",
     "res://addons/image_wrangler/core/remove_background.gd",
     "res://addons/image_wrangler/core/remove_crevice.gd",
     "res://addons/image_wrangler/core/refine_edges.gd",
@@ -71,17 +73,15 @@ At 0 you see the result, at 100 the untouched source, and in between both
 at once — which is how you judge whether an edge was eaten or a fringe
 left behind, since the two are then in the same place at the same time."""
 
-const THREADING_TOOLTIP := """Runs the preview on a worker thread instead of on the main one.
+const INDICATOR_TOOLTIP := """Draws the outlines that say what has been picked or drawn.
 
-With it on, the editor stays responsive while an image is being worked
-and a run already in flight can be abandoned the moment a setting
-changes. With it off, every run blocks the editor until it finishes —
-slower to work with, but there is one thread touching the image, which
-is what you want while judging whether a result is the operation's
-doing or the threading's.
+Islands get a dashed box round the pixels they reached; drawn regions
+get their shape dashed in the same way. Both sit right on top of the
+edges you are trying to judge, so turning them off is how you see the
+result on its own.
 
-Off for now. Processing files is unaffected either way; only the
-preview is threaded."""
+It changes nothing about what is processed — only what is drawn over
+the preview."""
 
 ## Whether saving one of this addon's own scripts rebuilds the interface by itself.
 ##
@@ -159,27 +159,11 @@ var _sources: PackedStringArray = PackedStringArray()
 var _source_image: Image
 var _result_image: Image
 
-## The worker running a preview, or null when nothing is in flight.
+## Whether a run is in flight.
 ##
-## One at a time. [Thread] has to be joined before it can be replaced and joining
-## blocks, so a second one would reintroduce exactly the stall the thread exists
-## to remove — [member _preview_pending] queues the next run instead.
-var _preview_thread: Thread
-
-## Whether a run is in flight, in either mode.
-##
-## [member _preview_thread] used to answer this on its own. With threading off there is
-## no thread to point at but there is still a run in progress — it is sitting between
-## two stages, and the editor is live enough in that gap for the debounce to fire and
-## ask for another.
+## A run sits between two stages while the editor goes on painting, and the editor is
+## live enough in that gap for the debounce to fire and ask for another.
 var _preview_running := false
-
-## Whether a preview is allowed to leave the main thread.
-##
-## Read once per run, when the run starts, so flipping it never has to reach into a
-## worker that is already going — that one finishes the way it began and the next
-## one picks up the new answer.
-var _threading_enabled := false
 
 ## Whether something asked for a preview while one was already running, which also
 ## means whatever comes back from that run is out of date.
@@ -188,14 +172,12 @@ var _preview_pending := false
 ## Set while the dock is leaving the tree, and checked by everything a run reports
 ## back through.
 ##
-## A worker reports by deferral, so its calls can still be sitting in the message queue
-## when the dock is pulled out from under them. The queue drops a call whose object has
-## been freed, but between leaving the tree and being freed the dock is still a valid
-## object holding controls that are on their way out — and that is the window these
-## guards close.
+## A run yields between stages, so the dock can be pulled out from under one that is
+## halfway along. These guards are what stop the rest of it writing into controls that
+## are on their way out.
 var _shutting_down := false
 
-## The operation the worker is running, kept so it can be told to stop.
+## The operation the current run is working through, kept so it can be told to stop.
 ##
 ## A run that has been superseded is producing an answer nobody will look at, so
 ## there is no reason to let it finish — cancelling it frees the core and gets the
@@ -315,7 +297,7 @@ var _rename_box: VBoxContainer
 var _original_fade: HSlider
 var _zoom_select: OptionButton
 var _zoom_entry: LineEdit
-var _thread_toggle: CheckBox
+var _indicator_toggle: CheckBox
 var _refresh_button: Button
 var _remove_button: Button
 var _clear_button: Button
@@ -445,13 +427,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 ## editor shutdown. It deliberately touches only the settings store and the
 ## codec, nothing that needs the panel to still be in the tree.
 ##
-## A running worker has to be joined here as well. It holds nothing of the dock's
-## but its own copy of the settings, so waiting is safe — and not waiting means
-## letting the editor tear down a node a live thread is about to call back into.
-## The wait is bounded by whatever one image takes.
+## A run in flight is told to stop here as well. It cannot be waited on — it is parked on
+## a frame that has not come yet — so cancelling is what ends it: it resumes, finds the
+## flag at its next checkpoint and drops out without reporting.
 func _exit_tree() -> void:
-    # Before anything else: the join below pumps no messages, but a worker that
-    # finishes during it will have queued its report by the time this returns.
     _shutting_down = true
 
     var filesystem := EditorInterface.get_resource_filesystem()
@@ -460,18 +439,10 @@ func _exit_tree() -> void:
 
     _flush_autosave()
     _preview_pending = false
-    # Asked to stop before being waited on, so the wait is however long the current
-    # pass has left rather than however long the whole image takes.
     if _preview_worker_op != null:
         _preview_worker_op.cancelled = true
-    if _preview_thread != null:
-        _preview_thread.wait_to_finish()
-        _preview_thread = null
     _preview_worker_op = null
-    # An unthreaded run cannot be waited on the way a thread can — it is parked on a
-    # frame that has not come yet. Cancelling it above is what stops it: it resumes,
-    # finds the flag at its next checkpoint and drops out without reporting. This
-    # clears the way for the next run should the dock come back.
+    # Cleared so the way is open for the next run should the dock come back.
     _preview_running = false
 
 
@@ -558,17 +529,13 @@ func _rebuild_ui() -> void:
     # resolves it against the current mode, so it goes before any of this.
     _flush_autosave()
 
-    # A run in flight reports into controls that are about to be freed. Cancelled and
-    # joined exactly as [method _exit_tree] does it, and for the same reason — the wait
-    # is however long the current pass has left. An unthreaded run cannot be waited on,
-    # but the cancel reaches it at its next checkpoint and what it reports then lands on
-    # the rebuilt controls harmlessly.
+    # A run in flight reports into controls that are about to be freed. Cancelled exactly
+    # as [method _exit_tree] does it: it cannot be waited on, but the cancel reaches it at
+    # its next checkpoint and what it reports then lands on the rebuilt controls
+    # harmlessly.
     _preview_pending = false
     if _preview_worker_op != null:
         _preview_worker_op.cancelled = true
-    if _preview_thread != null:
-        _preview_thread.wait_to_finish()
-        _preview_thread = null
     _preview_worker_op = null
     _preview_running = false
 
@@ -578,7 +545,7 @@ func _rebuild_ui() -> void:
     var suffix := _suffix_edit.text
     var fade := _original_fade.value
     var zoom := _preview.get_zoom()
-    var threading := _threading_enabled
+    var indicators := _preview.markers_visible
     # Back into the store the rebuild reads it out of, so the new form comes up pointed
     # at the same operation instances rather than at fresh ones carrying defaults.
     _store_stack(path)
@@ -593,8 +560,8 @@ func _rebuild_ui() -> void:
     _build_ui()
     _build_rename()
 
-    _threading_enabled = threading
-    _thread_toggle.set_pressed_no_signal(threading)
+    _preview.markers_visible = indicators
+    _indicator_toggle.set_pressed_no_signal(indicators)
     _apply_stack_for(path)
     _refresh_file_list()
     if selected >= 0 and selected < _file_list.item_count:
@@ -639,7 +606,7 @@ func _forget_controls() -> void:
     _original_fade = null
     _zoom_select = null
     _zoom_entry = null
-    _thread_toggle = null
+    _indicator_toggle = null
     _refresh_button = null
     _remove_button = null
     _clear_button = null
@@ -687,10 +654,11 @@ func _build_ui() -> void:
     add_child(_autosave)
 
 
-## Takes effect at the next run. A worker already going is left alone — see
-## [member _threading_enabled].
-func _on_threading_toggled(pressed: bool) -> void:
-    _threading_enabled = pressed
+## Nothing is reprocessed: the overlays are drawn over the result rather than into it,
+## so this is a repaint and not a rerun.
+func _on_indicators_toggled(pressed: bool) -> void:
+    if _preview != null:
+        _preview.markers_visible = pressed
 
 
 func _build_source_column() -> Control:
@@ -773,15 +741,15 @@ func _build_preview_column() -> Control:
     toolbar.add_child(_original_fade)
 
     # The one long label on this toolbar, and it does widen the column's minimum —
-    # but this is a switch you want in sight while judging a result, not one to go
-    # hunting for, and it is spelled out rather than abbreviated because what it
-    # changes is not something to have to guess at.
-    _thread_toggle = CheckBox.new()
-    _thread_toggle.text = "Enable Threading"
-    _thread_toggle.tooltip_text = THREADING_TOOLTIP
-    _thread_toggle.button_pressed = _threading_enabled
-    _thread_toggle.toggled.connect(_on_threading_toggled)
-    toolbar.add_child(_thread_toggle)
+    # but this is a switch you want in sight while judging an edge, not one to go
+    # hunting for. The overlays sit right on top of what they describe, so getting
+    # them out of the way has to be quick.
+    _indicator_toggle = CheckBox.new()
+    _indicator_toggle.text = "Show Indicators"
+    _indicator_toggle.tooltip_text = INDICATOR_TOOLTIP
+    _indicator_toggle.button_pressed = true
+    _indicator_toggle.toggled.connect(_on_indicators_toggled)
+    toolbar.add_child(_indicator_toggle)
 
     var spacer := Control.new()
     spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1336,6 +1304,11 @@ func _bind_pick_control(control: Control) -> void:
         polygons.draw_toggled.connect(_on_pick_toggled.bind(polygons))
         polygons.polygons_changed.connect(_on_setting_changed)
         polygons.selection_changed.connect(_on_selection_changed.bind(polygons))
+    elif control is HSVList:
+        var hsv := control as HSVList
+        hsv.pick_toggled.connect(_on_pick_toggled.bind(hsv))
+        hsv.regions_changed.connect(_on_setting_changed)
+        hsv.selection_changed.connect(_on_selection_changed.bind(hsv))
 
 
 ## The stack gained, lost or reordered an entry.
@@ -2158,13 +2131,15 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
     _pick_target = source
     _overlay_owner = source
     _preview.pick_mode = true
-    # Both lists want a rectangle — one takes the pixels inside it, the other the
-    # colours. A polygon is built corner by corner and wants neither.
-    _preview.region_pick = source is IslandPicker or source is ColorList
+    # Three of them want a rectangle — one takes the pixels inside it, one the colours,
+    # one the area to recolour. A polygon is built corner by corner and wants neither.
+    _preview.region_pick = source is IslandPicker or source is ColorList or source is HSVList
     if source is ColorList:
         _set_status("Drag a region in the preview to take every color in it, or click one pixel.")
     elif source is PolygonList:
         _set_status("Click to place corners. Right-click or Escape closes the region.")
+    elif source is HSVList:
+        _set_status("Drag a rectangle in the preview to add it to the list.")
     else:
         _set_status("Drag a region in the preview to add it to the list, or click one pixel.")
     _update_overlays()
@@ -2198,6 +2173,20 @@ func _on_region_picked(region: Rect2i) -> void:
         _pick_island_region(region)
     elif _pick_target is ColorList:
         _pick_color_region(region)
+    elif _pick_target is HSVList:
+        _pick_hsv_region(region)
+
+
+func _pick_hsv_region(region: Rect2i) -> void:
+    var picked := (_pick_target as HSVList).add_region(region)
+    if picked <= 0:
+        return
+    _set_status("Picked (%d, %d)–(%d, %d). Use the sliders to adjust it." % [
+        region.position.x,
+        region.position.y,
+        region.end.x - 1,
+        region.end.y - 1,
+    ])
 
 
 func _pick_island_region(region: Rect2i) -> void:
@@ -2332,7 +2321,6 @@ func _update_overlays() -> void:
     var selected_island := -1
 
     var regions := []
-    var region_colors := PackedColorArray()
     var region_flags := PackedByteArray()
     var selected_region := -1
     var draft_region := -1
@@ -2347,6 +2335,19 @@ func _update_overlays() -> void:
                 islands.append_array(own)
                 island_flags.append_array(picker.get_enabled_flags())
                 island_flooded.append_array(picker.get_flooded_flags())
+            elif control is HSVList:
+                # Drawn with the islands rather than beside them: both are rectangles
+                # naming an area, and the boxes already say what one of those looks like.
+                # Flagged as flooded so they come out dashed, since a picked rectangle is
+                # exactly what it acts on rather than a guess at it.
+                var hsv := control as HSVList
+                var own_rects := hsv.get_regions()
+                if hsv == _overlay_owner and hsv.selected_index() >= 0:
+                    selected_island = islands.size() + hsv.selected_index()
+                islands.append_array(own_rects)
+                island_flags.append_array(hsv.get_enabled_flags())
+                for _i in own_rects.size():
+                    island_flooded.append(1)
             elif control is PolygonList:
                 var list := control as PolygonList
                 var own_regions := list.get_polygons()
@@ -2357,11 +2358,10 @@ func _update_overlays() -> void:
                 if list.draft_index() >= 0:
                     draft_region = offset + list.draft_index()
                 regions.append_array(own_regions)
-                region_colors.append_array(list.get_colors())
                 region_flags.append_array(list.get_enabled_flags())
 
     _preview.set_markers(islands, selected_island, island_flags, island_flooded)
-    _preview.set_polygons(regions, region_colors, selected_region, draft_region, region_flags)
+    _preview.set_polygons(regions, selected_region, draft_region, region_flags)
 
 
 func _on_setting_changed() -> void:
@@ -2413,11 +2413,9 @@ func _on_original_fade_changed(value: float) -> void:
 
 ## Asks for a preview, starting one now or replacing the run in flight.
 ##
-## Only ever one worker at a time. A second [Thread] would have to be joined before
-## it could be replaced, and joining blocks — which is the whole thing this is here
-## to avoid. So a request arriving mid-run tells that run to stop and leaves a note
-## to start again; the run bails at its next checkpoint, and the handler that
-## collects it starts the replacement.
+## Only ever one run at a time. A request arriving mid-run tells that run to stop and
+## leaves a note to start again; the run gives up at its next checkpoint, and the handler
+## that collects it starts the replacement.
 func _run_preview() -> void:
     _debounce.stop()
     if _shutting_down or _source_image == null or _mode == Mode.RENAME:
@@ -2430,8 +2428,7 @@ func _run_preview() -> void:
     _start_preview()
 
 
-## Hands the operation to a worker thread — or, with threading off, runs it right
-## here — and puts the preview into its working state.
+## Starts a run and puts the preview into its working state.
 func _start_preview() -> void:
     _preview_pending = false
     if _shutting_down:
@@ -2445,51 +2442,28 @@ func _start_preview() -> void:
     # file replaces the object, and nothing else does.
     var source := _source_image
 
-    # Captured rather than read again when a report arrives: the switch can be flipped
-    # mid-run, and a run must report the way it was started or half its numbers would
-    # take the other route.
-    var threaded := _threading_enabled
-    worker.progress_reporter = func(fraction: float) -> void:
-        # Deferred when it comes from the worker, since nothing on that side of it may
-        # touch a control. Called straight through when the run is on the main thread
-        # already — deferring there would land the number after the frame it belongs to.
-        if threaded:
-            _on_preview_progress.call_deferred(fraction)
-        else:
-            _on_preview_progress(fraction)
+    worker.progress_reporter = _on_preview_progress
     if worker is IWPipeline:
-        (worker as IWPipeline).stage_progress_reporter = func(index: int, count: int, fraction: float, stage_name: String) -> void:
-            if threaded:
-                _on_preview_stage_progress.call_deferred(index, count, fraction, stage_name)
-            else:
-                _on_preview_stage_progress(index, count, fraction, stage_name)
+        (worker as IWPipeline).stage_progress_reporter = _on_preview_stage_progress
 
     # set_busy resets the bar even when it is already up, so a restart begins from
     # nothing rather than from wherever the abandoned run had got to.
     _preview.set_busy(true)
     _preview_worker_op = worker
     _preview_running = true
-
-    if not threaded:
-        _run_preview_here(worker, source)
-        return
-
-    _preview_thread = Thread.new()
-    _preview_thread.start(_preview_worker.bind(worker, source))
+    _run_preview_here(worker, source)
 
 
-## The run with threading off: on the main thread, a stage at a time.
+## The run itself: on the main thread, a stage at a time.
 ##
-## Stepped rather than run straight through, because a bar nobody can see is not a
-## bar. The main thread does the painting, so while it is inside a stack of stages
-## nothing on screen changes — set_busy and every report in between would land as one
-## repaint at the end, on their way out. Yielding between stages gets each of them
-## drawn.
+## Stepped rather than run straight through, because a bar nobody can see is not a bar.
+## The main thread does the painting, so while it is inside a stack of stages nothing on
+## screen changes — set_busy and every report in between would land as one repaint at the
+## end, on their way out. Yielding between stages gets each of them drawn.
 ##
-## The editor is live during those yields, which the straight-through version never
-## was, so everything that guards a threaded run has to hold here too: the request
-## arriving mid-run is caught by [member _preview_running] and cancels this one, and
-## the answer is dropped if the dock left the tree while a stage was running.
+## The editor is live during those yields, so a request arriving mid-run is caught by
+## [member _preview_running] and cancels this one, and the answer is dropped if the dock
+## left the tree while a stage was running.
 func _run_preview_here(worker: IWOperation, source: Image) -> void:
     var started := Time.get_ticks_msec()
     var result: Image
@@ -2501,17 +2475,6 @@ func _run_preview_here(worker: IWOperation, source: Image) -> void:
     if _shutting_down:
         return
     _on_preview_done(source, result, Time.get_ticks_msec() - started)
-
-
-## The whole of what runs off the main thread.
-##
-## Touches only the throwaway operation it was handed and the source image, and
-## reports back by deferral. Anything else here would be reaching into state the
-## editor is free to be changing at the same moment.
-func _preview_worker(worker: IWOperation, source: Image) -> void:
-    var started := Time.get_ticks_msec()
-    var result := worker.process_image(source)
-    _on_preview_done.call_deferred(source, result, Time.get_ticks_msec() - started)
 
 
 func _on_preview_progress(fraction: float) -> void:
@@ -2530,18 +2493,11 @@ func _on_preview_stage_progress(index: int, count: int, fraction: float, stage_n
     _preview.set_stage_progress(fraction, "%s  (%d/%d)" % [stage_name, index + 1, count])
 
 
-## Takes delivery of a finished run, back on the main thread.
+## Takes delivery of a finished run.
 func _on_preview_done(source: Image, result: Image, elapsed: int) -> void:
-    # The dock is on its way out and [method _exit_tree] has already joined the thread
-    # and let go of it. Nothing below has anywhere to put an answer.
+    # The dock is on its way out. Nothing below has anywhere to put an answer.
     if _shutting_down:
         return
-    if _preview_thread != null:
-        # Returns at once — the worker is already done, this is the bookkeeping
-        # Thread insists on before it can be let go. Null when the run was unthreaded,
-        # which is the whole of the difference by the time an answer gets here.
-        _preview_thread.wait_to_finish()
-        _preview_thread = null
     # Held on to for the report below: it is the only handle on the stack that actually
     # ran, and everything it observed is recorded on that copy rather than on the live one.
     var worker := _preview_worker_op

@@ -176,6 +176,16 @@ public:
 	// for the reason given on denoise above.
 	static void smooth_halos(const Ref<IWPipelineContext> &ctx, double threshold,
 			int64_t radius, double strength);
+
+	// HSVAdjust.process_context: turns the hue and scales the saturation and value of the
+	// pixels inside each rectangle.
+	//
+	// `rects` is x,y,w,h per region and `shifts` is turn,saturation,value per region,
+	// flattened for the usual reason — an Array of Resources read once per pixel would
+	// cost more than the adjustment. Rewrites the source pixels, so it belongs above
+	// everything that keys.
+	static void adjust_hsv(const Ref<IWPipelineContext> &ctx, const PackedInt32Array &rects,
+			const PackedFloat64Array &shifts);
 };
 
 } // namespace godot
