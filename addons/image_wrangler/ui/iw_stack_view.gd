@@ -35,6 +35,15 @@ signal setting_changed
 ## their controls.
 signal entries_rebuilt
 
+## Emitted when Copy Stack or Paste Stack is pressed.
+##
+## The dock does the work rather than this. The clipboard carries the sidecar's own
+## format, and both the codec and the registry saying which ids name operations belong
+## to the dock — the same reason the settings form is built through
+## [member form_builder] instead of here.
+signal copy_requested
+signal paste_requested
+
 ## Scripts the dropdown offers, in the order it offers them.
 var operation_scripts: Array = []
 
@@ -74,6 +83,26 @@ func _build() -> void:
 	create.tooltip_text = "Add the chosen operation to the stack.\nDrag its handle afterwards to move it."
 	create.pressed.connect(_on_create)
 	add_row.add_child(create)
+
+	# Its own row under the one that builds a stack by hand, because it is the other way
+	# of getting one: the two buttons share the width evenly rather than sitting beside
+	# the dropdown, where they would read as things you do to the operation it names.
+	var clipboard_row := HBoxContainer.new()
+	add_child(clipboard_row)
+
+	var copy := Button.new()
+	copy.text = "Copy Stack"
+	copy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	copy.tooltip_text = "Copy every operation in this image's stack to the clipboard,\nsettings and all.\n\nThe clipboard gets the same JSON a sidecar holds, so a copied\nstack can be pasted into a text file and kept."
+	copy.pressed.connect(func() -> void: copy_requested.emit())
+	clipboard_row.add_child(copy)
+
+	var paste := Button.new()
+	paste.text = "Paste Stack"
+	paste.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	paste.tooltip_text = "Add every operation on the clipboard to the bottom of this\nimage's stack.\n\nAdds rather than replaces, so pasting onto a stack that already\nhas something in it keeps both. Remove the rows you don't want."
+	paste.pressed.connect(func() -> void: paste_requested.emit())
+	clipboard_row.add_child(paste)
 
 	# The entries are cards standing off the panel, so they need room above and below
 	# to read as separate things rather than as one block with lines in it.
@@ -127,6 +156,24 @@ func _on_create() -> void:
 func add_stage(stage: IWStackOperation) -> void:
 	_entries.append({"uid": _take_uid(), "stage": stage, "entry": null})
 	rebuild()
+
+
+## Appends [param stages] to the stack in order, rebuilds once, and announces it.
+##
+## It announces and [method add_stage] does not, which looks inconsistent and is not:
+## Create appends and then emits from its own handler, so the append there is half an
+## action. A paste is the whole of one, and there is no second half to do the telling.
+##
+## One rebuild for the lot rather than one apiece — every entry's form is thrown away
+## and rebuilt each time, and pasting a six-stage stack would otherwise do that six
+## times to arrive at the same place.
+func add_stages(stages: Array) -> void:
+	if stages.is_empty():
+		return
+	for stage: IWStackOperation in stages:
+		_entries.append({"uid": _take_uid(), "stage": stage, "entry": null})
+	rebuild()
+	stack_changed.emit()
 
 
 ## Replaces the whole stack with [param stages], in order.

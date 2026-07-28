@@ -168,13 +168,24 @@ static func load_stack(source_path: String, registry: Dictionary) -> Array:
 	var path := sidecar_path(source_path)
 	if not FileAccess.file_exists(path):
 		return []
+	return decode_stack(_read_envelope(path), registry, path.get_file())
 
-	var envelope := _read_envelope(path)
+
+## The stack an envelope describes, whatever it arrived in.
+##
+## Split out from [method load_stack] because the sidecar is no longer the only thing
+## carrying a stack: Copy Stack puts this same envelope on the clipboard, and a stack
+## pasted from there has to be read on exactly the terms one loaded from a file is —
+## same version handling, same retired ids, same skipping of an operation this build
+## does not have. Two decoders would only ever disagree.
+##
+## [param source] names where the envelope came from, for the warnings alone.
+static func decode_stack(envelope: Dictionary, registry: Dictionary, source: String) -> Array:
 	if envelope.is_empty():
 		return []
 	var version := int(envelope.get("version", 0))
 	if version > VERSION:
-		push_warning("Image Wrangler: %s was written by a newer version; ignoring it." % path.get_file())
+		push_warning("Image Wrangler: %s was written by a newer version; ignoring it." % source)
 		return []
 	if version < 2:
 		return _stack_from_v1(envelope, registry)
@@ -193,7 +204,7 @@ static func load_stack(source_path: String, registry: Dictionary) -> Array:
 			continue
 		if not registry.has(id):
 			push_warning("Image Wrangler: %s names an unknown operation \"%s\"; skipping it."
-					% [path.get_file(), id])
+					% [source, id])
 			continue
 		var settings := _settings_for_id(id, registry)
 		if settings == null:
@@ -284,18 +295,9 @@ static func save_stack(source_path: String, stack: Array) -> Error:
 			# else's file and overwriting it would destroy their data.
 			return ERR_FILE_CORRUPT
 
-	var encoded := []
-	for entry: Dictionary in stack:
-		var settings: Resource = entry.get("settings")
-		encoded.append({
-			"id": String(entry.get("id", &"")),
-			"enabled": bool(entry.get("enabled", true)),
-			"settings": to_dict(settings),
-		})
-
 	envelope["format"] = FORMAT
 	envelope["version"] = VERSION
-	envelope["stack"] = encoded
+	envelope["stack"] = encode_stack(stack)
 	# The version 1 blocks are dropped rather than kept in step. Two records of the
 	# same settings would only ever disagree, and the file has already been read.
 	envelope.erase("operations")
@@ -306,6 +308,53 @@ static func save_stack(source_path: String, stack: Array) -> Error:
 	file.store_string(JSON.stringify(envelope, "\t"))
 	file.close()
 	return OK
+
+
+## One JSON block per stage, in order, for the [code]"stack"[/code] field.
+##
+## [param stack] is the dock's own record shape — [code]{"id", "enabled",
+## "settings"}[/code] — and any other key on a record, such as the live operation the
+## dock hangs off it, is ignored rather than encoded.
+static func encode_stack(stack: Array) -> Array:
+	var encoded := []
+	for entry: Dictionary in stack:
+		var settings: Resource = entry.get("settings")
+		encoded.append({
+			"id": String(entry.get("id", &"")),
+			"enabled": bool(entry.get("enabled", true)),
+			"settings": to_dict(settings),
+		})
+	return encoded
+
+
+# --- The clipboard ------------------------------------------------------
+
+## [param stack] as the text Copy Stack puts on the clipboard.
+##
+## Deliberately the sidecar's own envelope rather than a format of its own. It costs
+## nothing — the encoder was already there — and it means a copied stack is a saved
+## stack: it can be pasted into a [code].json[/code] beside an image and be read back,
+## or kept in a note, or sent to somebody. A second format would have been a second
+## thing to keep in step with every operation added.
+##
+## Not indented, unlike the sidecar. This one is going through a clipboard rather than
+## into a file somebody may open, and the tabs would only be there to be scrolled past.
+static func stack_to_text(stack: Array) -> String:
+	return JSON.stringify({
+		"format": FORMAT,
+		"version": VERSION,
+		"stack": encode_stack(stack),
+	})
+
+
+## The stack [param text] describes, or an empty Array when it is not one of ours.
+##
+## Quiet about text that is simply not a stack — the clipboard holds whatever the user
+## last copied anywhere, and most of the time that is not this. An envelope that *is*
+## ours but names an operation this build does not have still warns, because that one is
+## a real mismatch worth knowing about.
+static func stack_from_text(text: String, registry: Dictionary) -> Array:
+	return decode_stack(_parse_envelope(text), registry, "the clipboard")
 
 
 ## Builds the equivalent stack from a version 1 envelope.
@@ -409,8 +458,26 @@ static func _read_envelope(path: String) -> Dictionary:
 		return {}
 	var text := file.get_as_text()
 	file.close()
+	return _parse_envelope(text)
 
-	var parsed: Variant = JSON.parse_string(text)
+
+## Parsed envelope, or an empty Dictionary when the text is not JSON or not one of ours.
+##
+## The format check is what keeps this off somebody else's file — [code]sprite.json[/code]
+## beside [code]sprite.png[/code] is what Aseprite names its atlas descriptor — and, now
+## that a stack can arrive on the clipboard, off whatever else the user last copied.
+##
+## Parsed through a [JSON] instance rather than [method JSON.parse_string], which prints
+## an engine error on anything that is not JSON. That was invisible while the only input
+## was a file this addon wrote, and is not now: the clipboard holds whatever was last
+## copied anywhere, so a user pressing Paste Stack with a URL on it would get a red line
+## in the console for doing something perfectly ordinary. Not being one of ours is an
+## answer here, not a fault.
+static func _parse_envelope(text: String) -> Dictionary:
+	var json := JSON.new()
+	if json.parse(text) != OK:
+		return {}
+	var parsed: Variant = json.data
 	if not (parsed is Dictionary):
 		return {}
 	var envelope: Dictionary = parsed

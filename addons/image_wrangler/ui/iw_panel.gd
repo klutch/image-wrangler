@@ -841,6 +841,8 @@ func _build_operation_column() -> Control:
 	_stack_view.stack_changed.connect(_on_stack_changed)
 	_stack_view.setting_changed.connect(_on_setting_changed)
 	_stack_view.entries_rebuilt.connect(_on_entries_rebuilt)
+	_stack_view.copy_requested.connect(_on_copy_stack)
+	_stack_view.paste_requested.connect(_on_paste_stack)
 	stack_page.add_child(_stack_view)
 
 	var rename_page := ScrollContainer.new()
@@ -1228,6 +1230,15 @@ func _on_stack_changed() -> void:
 func _store_stack(path: String) -> void:
 	if path.is_empty():
 		return
+	_stacks_by_path[path] = _stack_records()
+
+
+## The live stack in the codec's record shape, which is what both the sidecar and the
+## clipboard take.
+##
+## The live operation rides along under [code]"operation"[/code] for [method
+## _apply_stack_for] to point the forms back at. Neither encoder looks at it.
+func _stack_records() -> Array:
 	var records := []
 	for stage: IWStackOperation in _stack_view.stages():
 		records.append({
@@ -1236,7 +1247,54 @@ func _store_stack(path: String) -> void:
 			"settings": stage.get_settings(),
 			"operation": stage,
 		})
-	_stacks_by_path[path] = records
+	return records
+
+
+## Puts the whole stack on the clipboard, settings and all.
+##
+## A snapshot rather than a reference: [method IWSettingsIO.to_dict] reads the values
+## out on the way past, so editing a slider afterwards does not reach back into what was
+## copied.
+func _on_copy_stack() -> void:
+	var records := _stack_records()
+	if records.is_empty():
+		_set_status("There is nothing in the stack to copy.")
+		return
+	DisplayServer.clipboard_set(SettingsIO.stack_to_text(records))
+	_set_status("Copied %s to the clipboard." % _operation_count(records.size()))
+
+
+## Adds whatever stack is on the clipboard to the bottom of this one.
+##
+## Adds rather than replaces, which is the whole point of it being a paste — the stack
+## it lands on is usually one the user has already started, and replacing would throw
+## that away with no way back. Every settings object is built fresh by the codec, so a
+## stack pasted onto two images gives each its own, and editing one does not move the
+## other.
+func _on_paste_stack() -> void:
+	var registry := _operation_registry()
+	var records := SettingsIO.stack_from_text(DisplayServer.clipboard_get(), registry)
+	var stages: Array[IWStackOperation] = []
+	for record: Dictionary in records:
+		var script: Variant = registry.get(record["id"])
+		if not (script is Script):
+			continue
+		var stage: IWStackOperation = (script as Script).new()
+		stage.set_settings(record["settings"])
+		stage.enabled = bool(record["enabled"])
+		stages.append(stage)
+
+	if stages.is_empty():
+		_set_status("Nothing on the clipboard reads as an operation stack.")
+		return
+	# Emits stack_changed, which stores, re-notes and reruns. The status is set after,
+	# because what just happened is more use than being told the stack changed.
+	_stack_view.add_stages(stages)
+	_set_status("Pasted %s onto the end of the stack." % _operation_count(stages.size()))
+
+
+func _operation_count(count: int) -> String:
+	return "1 operation" if count == 1 else "%d operations" % count
 
 
 ## Refreshes every entry's "waiting for" line against what the stack now looks like.

@@ -54,6 +54,31 @@ do its job from what it has been handed — there is no coverage to refine until
 something has keyed — its entry says so on its own face rather than failing, so a
 half-built stack is a normal state to be in.
 
+### Copy Stack and Paste Stack
+
+The row under **Create** moves a whole stack between images. **Copy Stack** puts
+every operation in the current image's stack on the clipboard, settings and all;
+**Paste Stack** adds everything on the clipboard to the bottom of whichever image
+is selected now.
+
+**It adds rather than replaces**, which is the point of it being a paste. The stack
+you land on is usually one you have already started, and replacing it would throw
+that away with nothing to undo it. Paste onto an empty stack and adding and
+replacing are the same thing; paste onto a full one and you get both, in order,
+with the rows you don't want a **✕** away.
+
+Every pasted operation gets its own settings, built fresh out of the clipboard
+text — so the same stack pasted onto ten images gives each of them a copy, and
+tuning one afterwards leaves the other nine alone. Copying is a snapshot too:
+dragging a slider after a copy does not reach back into what is on the clipboard.
+
+**The clipboard gets the sidecar's own format**, which is just JSON. That is worth
+knowing because it means a copied stack is a saved stack — paste it into a text
+file and keep it as a preset, mail it to someone, or drop it in beside an image as
+that image's `.json`. Pasting anything that is *not* one of these is a no-op with a
+line in the status bar, and an operation named in the text that this build does not
+have is skipped while the rest comes through.
+
 Rename is deliberately **not** in the stack. It does not touch pixels, and its
 settings describe the whole batch rather than any one image, so it has a
 **Rename** tab of its own beside **Operations** instead.
