@@ -61,6 +61,10 @@ void IWStageKernels::_bind_methods() {
 	ClassDB::bind_static_method("IWStageKernels",
 			D_METHOD("remove_lines", "ctx", "thickness", "detached_only"),
 			&IWStageKernels::remove_lines);
+	// Defined in iw_color_kernels.cpp; bound here so every entry point is in one list.
+	ClassDB::bind_static_method("IWStageKernels",
+			D_METHOD("smooth_color", "ctx", "radius", "strength", "amount"),
+			&IWStageKernels::smooth_color);
 }
 
 // Rasterises this stage's shapes and folds them into whatever is already declared.

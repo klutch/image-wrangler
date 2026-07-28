@@ -147,6 +147,16 @@ public:
 	// RemoveLines.process_context for why that second one would undo the stages above it.
 	static PackedInt32Array remove_lines(
 			const Ref<IWPipelineContext> &ctx, int64_t thickness, bool detached_only);
+
+	// SmoothColor.process_context: flattens the colour of ctx->data while leaving its
+	// brightness and its alpha alone.
+	//
+	// Both colour parts are smoothed with the brightness as their guide, so they follow
+	// the edges the brightness has rather than the blurred ones a JPEG gave them. The
+	// second kernel that rewrites the source pixels, and it stands down unless it is
+	// running above everything that keys, for the reason given on denoise above.
+	static void smooth_color(const Ref<IWPipelineContext> &ctx, int64_t radius,
+			double strength, double amount);
 };
 
 } // namespace godot
