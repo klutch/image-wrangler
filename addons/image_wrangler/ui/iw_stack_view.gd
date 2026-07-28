@@ -54,6 +54,13 @@ signal load_requested
 ## "default" means both belong to the dock.
 signal reset_requested
 
+## Emitted on a right-click over the stack. [param index] is the entry under the pointer,
+## or -1 for the empty space below them; [param at] is where a paste would land.
+##
+## The dock builds the menu, because what it can offer depends on what is on the
+## clipboard and only the dock can read that.
+signal menu_requested(index: int, at: int)
+
 ## Scripts the dropdown offers, in the order it offers them.
 var operation_scripts: Array = []
 
@@ -196,14 +203,20 @@ func _build() -> void:
 
     # The entries are cards standing off the panel, so they need room above and below
     # to read as separate things rather than as one block with lines in it.
+    #
+    # Both containers are see-through to the mouse. Neither has anything to do with a
+    # click, and leaving them solid would swallow every right-click that missed an entry
+    # — which is exactly the one that means "paste at the end".
     var inset := MarginContainer.new()
     inset.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    inset.mouse_filter = Control.MOUSE_FILTER_IGNORE
     for side in ["margin_top", "margin_bottom"]:
         inset.add_theme_constant_override(side, ENTRY_MARGIN)
     add_child(inset)
 
     _list = VBoxContainer.new()
     _list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _list.mouse_filter = Control.MOUSE_FILTER_IGNORE
     _list.add_theme_constant_override("separation", ENTRY_GAP)
     inset.add_child(_list)
 
@@ -248,6 +261,33 @@ func _on_pick(index: int) -> void:
 func add_stage(stage: IWStackOperation) -> void:
     _entries.append({"uid": _take_uid(), "stage": stage, "entry": null})
     rebuild()
+
+
+## Puts [param stage] into the stack at [param at], pushing whatever was there down.
+func insert_stage(stage: IWStackOperation, at: int) -> void:
+    _entries.insert(clampi(at, 0, _entries.size()),
+            {"uid": _take_uid(), "stage": stage, "entry": null})
+    rebuild()
+    stack_changed.emit()
+
+
+## Right-clicks that reached the empty space under the entries, which mean the end of the
+## stack. The tools and the dropdown take their own clicks, so this only ever hears the
+## column itself.
+func _gui_input(event: InputEvent) -> void:
+    var button := event as InputEventMouseButton
+    if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_RIGHT:
+        return
+    accept_event()
+    menu_requested.emit(-1, _entries.size())
+
+
+## A right-click on one entry, turned into where a paste would land.
+func _on_entry_menu(entry: Control, above: bool) -> void:
+    for i in _entries.size():
+        if _entries[i]["entry"] == entry:
+            menu_requested.emit(i, i if above else i + 1)
+            return
 
 
 ## Replaces the whole stack with [param stages], in order.
@@ -299,6 +339,7 @@ func rebuild() -> void:
         entry.reorder_requested.connect(_on_reorder)
         entry.enabled_toggled.connect(func(_e: Control, _on: bool) -> void: stack_changed.emit())
         entry.setting_changed.connect(func(_e: Control) -> void: setting_changed.emit())
+        entry.menu_requested.connect(_on_entry_menu)
         record["entry"] = entry
         if form_builder.is_valid():
             form_builder.call(record["stage"], entry.settings_box(), entry, record["uid"])

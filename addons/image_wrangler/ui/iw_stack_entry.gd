@@ -29,6 +29,10 @@ signal reorder_requested(from_uid: int, to_uid: int, above: bool)
 ## Emitted when anything in the settings form changes.
 signal setting_changed(entry: Control)
 
+## Emitted on a right-click over this entry. [param above] is which half was clicked, the
+## same rule a drop uses, so a paste lands where the pointer said rather than at the end.
+signal menu_requested(entry: Control, above: bool)
+
 ## Indent of the settings form under its header, matching what a folded group used.
 const INDENT := 8
 
@@ -76,28 +80,28 @@ var _styling := false
 
 
 func setup(operation: IWStackOperation, entry_uid: int, folded: bool) -> void:
-	stage = operation
-	uid = entry_uid
-	_build()
-	_title.button_pressed = not folded
-	_body.visible = not folded
-	_tick.button_pressed = operation.enabled
-	_apply_fold_arrow()
+    stage = operation
+    uid = entry_uid
+    _build()
+    _title.button_pressed = not folded
+    _body.visible = not folded
+    _tick.button_pressed = operation.enabled
+    _apply_fold_arrow()
 
 
 ## The form's container, for the settings builder to fill.
 func settings_box() -> VBoxContainer:
-	return _settings_box
+    return _settings_box
 
 
 ## Shows or clears the line about what this stage is waiting for.
 func set_note(text: String) -> void:
-	_note.text = text
-	_note.visible = not text.is_empty()
+    _note.text = text
+    _note.visible = not text.is_empty()
 
 
 func is_folded() -> bool:
-	return not _title.button_pressed
+    return not _title.button_pressed
 
 
 ## Every picker or drawing control this entry's form built, at any depth.
@@ -106,16 +110,16 @@ func is_folded() -> bool:
 ## the form, so scanning only the form's own children would find nothing and every
 ## picker feature would go quietly dead.
 func pick_controls() -> Array[Control]:
-	var found: Array[Control] = []
-	_collect(_settings_box, found)
-	return found
+    var found: Array[Control] = []
+    _collect(_settings_box, found)
+    return found
 
 
 func _collect(node: Node, into: Array[Control]) -> void:
-	for child in node.get_children():
-		if child.has_method("set_pick_active"):
-			into.append(child)
-		_collect(child, into)
+    for child in node.get_children():
+        if child.has_method("set_pick_active"):
+            into.append(child)
+        _collect(child, into)
 
 
 ## Paints the entry as a card standing slightly off the panel behind it.
@@ -128,105 +132,106 @@ func _collect(node: Node, into: Array[Control]) -> void:
 ## out. The editor happens to survive it; anything building an entry outside one does
 ## not.
 func _apply_panel_style() -> void:
-	if _styling:
-		return
-	_styling = true
+    if _styling:
+        return
+    _styling = true
 
-	var base := Color(0.19, 0.20, 0.23)
-	if has_theme_color(&"base_color", &"Editor"):
-		base = get_theme_color(&"base_color", &"Editor")
+    var base := Color(0.19, 0.20, 0.23)
+    if has_theme_color(&"base_color", &"Editor"):
+        base = get_theme_color(&"base_color", &"Editor")
 
-	var box := StyleBoxFlat.new()
-	box.bg_color = base.lightened(PANEL_LIGHTEN)
-	box.set_corner_radius_all(PANEL_RADIUS)
-	box.set_content_margin_all(PANEL_PADDING)
-	add_theme_stylebox_override(&"panel", box)
+    var box := StyleBoxFlat.new()
+    box.bg_color = base.lightened(PANEL_LIGHTEN)
+    box.set_corner_radius_all(PANEL_RADIUS)
+    box.set_content_margin_all(PANEL_PADDING)
+    add_theme_stylebox_override(&"panel", box)
 
-	_styling = false
+    _styling = false
 
 
 func _build() -> void:
-	_apply_panel_style()
+    _apply_panel_style()
 
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 0)
-	add_child(column)
+    var column := VBoxContainer.new()
+    column.add_theme_constant_override("separation", 0)
+    add_child(column)
 
-	var header := HBoxContainer.new()
-	column.add_child(header)
+    var header := HBoxContainer.new()
+    column.add_child(header)
 
-	# Passes the mouse through rather than taking it, so the press reaches the entry
-	# and _get_drag_data can see where it started.
-	_handle = Label.new()
-	_handle.text = "≡"
-	_handle.mouse_filter = Control.MOUSE_FILTER_PASS
-	_handle.mouse_default_cursor_shape = Control.CURSOR_MOVE
-	_handle.custom_minimum_size = Vector2(HANDLE_WIDTH, 0)
-	_handle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_handle.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_handle.modulate = Color(1, 1, 1, 0.55)
-	_handle.tooltip_text = "Drag to reorder. Order matters: each operation works on what the ones above it left."
-	header.add_child(_handle)
+    # Passes the mouse through rather than taking it, so the press reaches the entry
+    # and _get_drag_data can see where it started.
+    _handle = Label.new()
+    _handle.text = "≡"
+    _handle.mouse_filter = Control.MOUSE_FILTER_PASS
+    _handle.mouse_default_cursor_shape = Control.CURSOR_MOVE
+    _handle.custom_minimum_size = Vector2(HANDLE_WIDTH, 0)
+    _handle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    _handle.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+    _handle.modulate = Color(1, 1, 1, 0.55)
+    _handle.tooltip_text = "Drag to reorder. Order matters: each operation works on what the ones above it left."
+    header.add_child(_handle)
 
-	_tick = CheckBox.new()
-	_tick.focus_mode = Control.FOCUS_NONE
-	_tick.tooltip_text = "Run this operation.\nUnticking it keeps everything dialled into it, which removing the entry would not."
-	_tick.toggled.connect(func(pressed: bool) -> void:
-		stage.enabled = pressed
-		refresh_enabled_state()
-		enabled_toggled.emit(self, pressed))
-	header.add_child(_tick)
+    _tick = CheckBox.new()
+    _tick.focus_mode = Control.FOCUS_NONE
+    _tick.tooltip_text = "Run this operation.\nUnticking it keeps everything dialled into it, which removing the entry would not."
+    _tick.toggled.connect(func(pressed: bool) -> void:
+        stage.enabled = pressed
+        refresh_enabled_state()
+        enabled_toggled.emit(self, pressed))
+    header.add_child(_tick)
 
-	# A flat toggle rather than a Label: it reads as a heading, but the whole width of
-	# it is the hit target, which a disclosure arrow on its own is not.
-	_title = Button.new()
-	_title.text = stage.get_operation_name()
-	_title.toggle_mode = true
-	_title.flat = true
-	_title.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# Never focused: the form is tabbed through to reach the controls, and a heading
-	# in that path is a stop nobody wants.
-	_title.focus_mode = Control.FOCUS_NONE
-	_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_title.tooltip_text = "Show or hide these settings."
-	_title.toggled.connect(func(pressed: bool) -> void:
-		_body.visible = pressed
-		_apply_fold_arrow())
-	_title.theme_changed.connect(_apply_fold_arrow)
-	header.add_child(_title)
+    # A flat toggle rather than a Label: it reads as a heading, but the whole width of
+    # it is the hit target, which a disclosure arrow on its own is not.
+    _title = Button.new()
+    _title.text = stage.get_operation_name()
+    _title.toggle_mode = true
+    _title.flat = true
+    _title.alignment = HORIZONTAL_ALIGNMENT_LEFT
+    _title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    # Never focused: the form is tabbed through to reach the controls, and a heading
+    # in that path is a stop nobody wants.
+    _title.focus_mode = Control.FOCUS_NONE
+    _title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+    _title.tooltip_text = "Show or hide these settings."
+    _title.toggled.connect(func(pressed: bool) -> void:
+        _body.visible = pressed
+        _apply_fold_arrow())
+    _title.theme_changed.connect(_apply_fold_arrow)
+    _title.gui_input.connect(_on_title_input)
+    header.add_child(_title)
 
-	# Text rather than the editor's Remove icon: that one is colour-coded by the theme
-	# and would arrive tinted.
-	#
-	# Grey rather than red, and brighter on hover. Six red crosses down a column read
-	# as six warnings; the button only becomes the loudest thing on the entry at the
-	# moment the pointer is on it, which is the moment it matters.
-	var close := Button.new()
-	close.flat = true
-	close.focus_mode = Control.FOCUS_NONE
-	close.text = "✕"
-	close.add_theme_color_override(&"font_color", Color(0.62, 0.62, 0.62))
-	close.add_theme_color_override(&"font_hover_color", Color(0.92, 0.92, 0.92))
-	close.add_theme_color_override(&"font_pressed_color", Color(1.0, 1.0, 1.0))
-	close.tooltip_text = "Remove this operation from the stack.\nIts settings go with it."
-	close.pressed.connect(func() -> void: remove_requested.emit(self))
-	header.add_child(close)
+    # Text rather than the editor's Remove icon: that one is colour-coded by the theme
+    # and would arrive tinted.
+    #
+    # Grey rather than red, and brighter on hover. Six red crosses down a column read
+    # as six warnings; the button only becomes the loudest thing on the entry at the
+    # moment the pointer is on it, which is the moment it matters.
+    var close := Button.new()
+    close.flat = true
+    close.focus_mode = Control.FOCUS_NONE
+    close.text = "✕"
+    close.add_theme_color_override(&"font_color", Color(0.62, 0.62, 0.62))
+    close.add_theme_color_override(&"font_hover_color", Color(0.92, 0.92, 0.92))
+    close.add_theme_color_override(&"font_pressed_color", Color(1.0, 1.0, 1.0))
+    close.tooltip_text = "Remove this operation from the stack.\nIts settings go with it."
+    close.pressed.connect(func() -> void: remove_requested.emit(self))
+    header.add_child(close)
 
-	_note = Label.new()
-	_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_note.modulate = Color(1.0, 0.85, 0.4)
-	_note.visible = false
-	_note.add_theme_font_size_override("font_size", 10)
-	column.add_child(_note)
+    _note = Label.new()
+    _note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    _note.modulate = Color(1.0, 0.85, 0.4)
+    _note.visible = false
+    _note.add_theme_font_size_override("font_size", 10)
+    column.add_child(_note)
 
-	_body = MarginContainer.new()
-	_body.add_theme_constant_override("margin_left", INDENT)
-	column.add_child(_body)
+    _body = MarginContainer.new()
+    _body.add_theme_constant_override("margin_left", INDENT)
+    column.add_child(_body)
 
-	_settings_box = VBoxContainer.new()
-	_settings_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_body.add_child(_settings_box)
+    _settings_box = VBoxContainer.new()
+    _settings_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _body.add_child(_settings_box)
 
 
 ## Fades a switched-off entry and takes its settings out of use, so the stack reads at
@@ -239,16 +244,16 @@ func _build() -> void:
 ## adding the title to the tree raises [code]theme_changed[/code], and the arrow that
 ## hangs off it comes through here.
 func refresh_enabled_state() -> void:
-	if _title == null or _body == null:
-		return
-	var live := stage.enabled
-	var shade := Color(1, 1, 1, 1.0 if live else 0.5)
-	_title.modulate = shade
-	_body.modulate = shade
+    if _title == null or _body == null:
+        return
+    var live := stage.enabled
+    var shade := Color(1, 1, 1, 1.0 if live else 0.5)
+    _title.modulate = shade
+    _body.modulate = shade
 
-	if _settings_box == null:
-		return
-	_set_form_enabled(_settings_box, live)
+    if _settings_box == null:
+        return
+    _set_form_enabled(_settings_box, live)
 
 
 ## Turns every input in [param node] on or off.
@@ -264,96 +269,123 @@ func refresh_enabled_state() -> void:
 ## here would be overwritten the moment the user touched them — which is exactly how a
 ## disabled entry ended up with a live dropdown and a working Remove.
 static func _set_form_enabled(node: Node, enabled: bool) -> void:
-	for child in node.get_children():
-		if child.has_method("set_controls_enabled"):
-			child.call("set_controls_enabled", enabled)
-			continue
-		if "disabled" in child:
-			child.disabled = not enabled
-		elif "editable" in child:
-			child.editable = enabled
-		elif "read_only" in child:
-			child.read_only = not enabled
-		_set_form_enabled(child, enabled)
+    for child in node.get_children():
+        if child.has_method("set_controls_enabled"):
+            child.call("set_controls_enabled", enabled)
+            continue
+        if "disabled" in child:
+            child.disabled = not enabled
+        elif "editable" in child:
+            child.editable = enabled
+        elif "read_only" in child:
+            child.read_only = not enabled
+        _set_form_enabled(child, enabled)
 
 
 ## Guarded rather than assumed: outside the editor there is no [code]EditorIcons[/code]
 ## theme to take an arrow from, and a heading with no arrow is better than an error.
 func _apply_fold_arrow() -> void:
-	if _title == null:
-		return
-	var open := _title.button_pressed
-	var name := &"GuiTreeArrowDown" if open else &"GuiTreeArrowRight"
-	if has_theme_icon(name, &"EditorIcons"):
-		_title.icon = get_theme_icon(name, &"EditorIcons")
-	refresh_enabled_state()
+    if _title == null:
+        return
+    var open := _title.button_pressed
+    var name := &"GuiTreeArrowDown" if open else &"GuiTreeArrowRight"
+    if has_theme_icon(name, &"EditorIcons"):
+        _title.icon = get_theme_icon(name, &"EditorIcons")
+    refresh_enabled_state()
+
+
+# --- The right-click menu -----------------------------------------------
+
+## Right-clicks anywhere on the card itself: the padding, the gaps, the note.
+func _gui_input(event: InputEvent) -> void:
+    _offer_menu(event, self)
+
+
+## Right-clicks on the title, which is a [Button] and would otherwise swallow them.
+##
+## The header is where anyone would aim, so leaving it out would make the menu feel
+## broken. The form below is deliberately not forwarded — a right-click on a slider
+## belongs to the slider.
+func _on_title_input(event: InputEvent) -> void:
+    _offer_menu(event, _title)
+
+
+func _offer_menu(event: InputEvent, over: Control) -> void:
+    var button := event as InputEventMouseButton
+    if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_RIGHT:
+        return
+    accept_event()
+    # Measured against the whole card rather than whatever was clicked, so the top and
+    # bottom halves mean the same thing wherever the pointer landed.
+    var at := over.global_position.y + button.position.y - global_position.y
+    menu_requested.emit(self, at < size.y * 0.5)
 
 
 # --- Reordering ---------------------------------------------------------
 
 func _get_drag_data(at_position: Vector2) -> Variant:
-	# Only from the handle. Without this, dragging any spin slider or list row inside
-	# the entry would start a reorder instead of doing what it looks like it does.
-	#
-	# Measured against where the press began, which is what at_position is — not where
-	# the pointer has since got to. A drag is not offered until the pointer has moved
-	# about ten pixels, and ten pixels from the middle of a handle this wide is outside
-	# it, so asking the live position turned most real drags down and the handle felt
-	# like it had to be grabbed several times.
-	if _handle == null:
-		return null
-	if not _handle.get_global_rect().has_point(get_global_transform() * at_position):
-		return null
+    # Only from the handle. Without this, dragging any spin slider or list row inside
+    # the entry would start a reorder instead of doing what it looks like it does.
+    #
+    # Measured against where the press began, which is what at_position is — not where
+    # the pointer has since got to. A drag is not offered until the pointer has moved
+    # about ten pixels, and ten pixels from the middle of a handle this wide is outside
+    # it, so asking the live position turned most real drags down and the handle felt
+    # like it had to be grabbed several times.
+    if _handle == null:
+        return null
+    if not _handle.get_global_rect().has_point(get_global_transform() * at_position):
+        return null
 
-	var preview := Label.new()
-	preview.text = stage.get_operation_name()
-	preview.add_theme_constant_override("outline_size", 2)
-	set_drag_preview(preview)
-	return {"type": "iw_stack_entry", "uid": uid}
+    var preview := Label.new()
+    preview.text = stage.get_operation_name()
+    preview.add_theme_constant_override("outline_size", 2)
+    set_drag_preview(preview)
+    return {"type": "iw_stack_entry", "uid": uid}
 
 
 func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
-	if not (data is Dictionary):
-		return false
-	var payload: Dictionary = data
-	if String(payload.get("type", "")) != "iw_stack_entry":
-		return false
-	if int(payload.get("uid", -1)) == uid:
-		return false
-	var side := 1 if at_position.y < size.y * 0.5 else -1
-	if side != _drop_side:
-		_drop_side = side
-		queue_redraw()
-	return true
+    if not (data is Dictionary):
+        return false
+    var payload: Dictionary = data
+    if String(payload.get("type", "")) != "iw_stack_entry":
+        return false
+    if int(payload.get("uid", -1)) == uid:
+        return false
+    var side := 1 if at_position.y < size.y * 0.5 else -1
+    if side != _drop_side:
+        _drop_side = side
+        queue_redraw()
+    return true
 
 
 func _drop_data(at_position: Vector2, data: Variant) -> void:
-	_drop_side = 0
-	queue_redraw()
-	var payload: Dictionary = data
-	reorder_requested.emit(int(payload.get("uid", -1)), uid, at_position.y < size.y * 0.5)
+    _drop_side = 0
+    queue_redraw()
+    var payload: Dictionary = data
+    reorder_requested.emit(int(payload.get("uid", -1)), uid, at_position.y < size.y * 0.5)
 
 
 func _notification(what: int) -> void:
-	# The card is mixed from a theme colour, so it has to be mixed again when the
-	# theme changes or a light editor would keep a dark entry.
-	if what == NOTIFICATION_THEME_CHANGED and _title != null:
-		_apply_panel_style()
-		return
-	# The indicator has to come down when the drag leaves or ends anywhere, not only
-	# when it is dropped here — _can_drop_data stops being called and nothing else
-	# would clear it.
-	if what == NOTIFICATION_DRAG_END or what == NOTIFICATION_MOUSE_EXIT:
-		if _drop_side != 0:
-			_drop_side = 0
-			queue_redraw()
+    # The card is mixed from a theme colour, so it has to be mixed again when the
+    # theme changes or a light editor would keep a dark entry.
+    if what == NOTIFICATION_THEME_CHANGED and _title != null:
+        _apply_panel_style()
+        return
+    # The indicator has to come down when the drag leaves or ends anywhere, not only
+    # when it is dropped here — _can_drop_data stops being called and nothing else
+    # would clear it.
+    if what == NOTIFICATION_DRAG_END or what == NOTIFICATION_MOUSE_EXIT:
+        if _drop_side != 0:
+            _drop_side = 0
+            queue_redraw()
 
 
 func _draw() -> void:
-	if _drop_side == 0:
-		return
-	var accent := Color(0.4, 0.7, 1.0)
-	if has_theme_color(&"accent_color", &"Editor"):
-		accent = get_theme_color(&"accent_color", &"Editor")
-	var y := 0.0 if _drop_side > 0 else size.y - DROP_LINE
-	draw_rect(Rect2(0, y, size.x, DROP_LINE), accent)
+    if _drop_side == 0:
+        return
+    var accent := Color(0.4, 0.7, 1.0)
+    if has_theme_color(&"accent_color", &"Editor"):
+        accent = get_theme_color(&"accent_color", &"Editor")
+    var y := 0.0 if _drop_side > 0 else size.y - DROP_LINE
+    draw_rect(Rect2(0, y, size.x, DROP_LINE), accent)

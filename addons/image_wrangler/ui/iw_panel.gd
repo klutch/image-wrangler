@@ -337,6 +337,14 @@ var _reset_dialog: ConfirmationDialog
 var _stack_save_dialog: FileDialog
 var _stack_load_dialog: FileDialog
 
+## The right-click menu over the stack, and what the choice on it would act on.
+##
+## Rebuilt every time it opens, because what it can offer depends on what is on the
+## clipboard this instant.
+var _stack_menu: PopupMenu
+var _stack_menu_index := -1
+var _stack_menu_at := 0
+
 ## Sources whose originals may be deleted, mapped to the copy that replaced them.
 ## Filled during a run and acted on only after the user confirms and every copy
 ## has been proved identical to its source.
@@ -905,6 +913,7 @@ func _build_operation_column() -> Control:
     _stack_view.save_requested.connect(_on_save_stack)
     _stack_view.load_requested.connect(_on_load_stack)
     _stack_view.reset_requested.connect(_on_reset_stack)
+    _stack_view.menu_requested.connect(_on_stack_menu)
     stack_page.add_child(_stack_view)
 
     # No scroll of its own: the list inside it scrolls, and nesting the two would give
@@ -1078,6 +1087,10 @@ func _build_dialogs() -> void:
     _stack_load_dialog.add_filter("*.json", "Operation Stack")
     _stack_load_dialog.file_selected.connect(_on_stack_load_chosen)
     add_child(_stack_load_dialog)
+
+    _stack_menu = PopupMenu.new()
+    _stack_menu.id_pressed.connect(_on_stack_menu_chosen)
+    add_child(_stack_menu)
 
     # The text is fixed, unlike the two above, which name the files they are about. There
     # is only one thing this can do and only one image it can do it to.
@@ -1691,6 +1704,81 @@ func _on_paste_stack() -> void:
         return
     _replace_stack(stages, "Paste stack")
     _set_status("Pasted %s over the stack." % _operation_count(stages.size()))
+
+
+# --- The right-click menu over the stack --------------------------------
+
+## What the menu's two choices are worth as ids.
+const MENU_COPY := 0
+const MENU_PASTE := 1
+
+
+## Opens the menu over the stack. [param index] is the entry under the pointer, or -1 for
+## the empty space; [param at] is where a paste would land.
+##
+## [b]Paste is only offered for a clipboard holding exactly one operation.[/b] The whole
+## stack tools already handle a whole stack, and a menu that pasted six operations into
+## the middle of a list because the pointer happened to be there would be a surprise
+## rather than a shortcut.
+func _on_stack_menu(index: int, at: int) -> void:
+    _stack_menu_index = index
+    _stack_menu_at = at
+
+    _stack_menu.clear()
+    if index >= 0:
+        _stack_menu.add_item("Copy", MENU_COPY)
+    if _stages_from_text(DisplayServer.clipboard_get()).size() == 1:
+        # Named for where it would land, since by the time the menu is up the pointer has
+        # moved off the spot that decided it.
+        var label := "Paste"
+        if index >= 0:
+            label = "Paste Above" if at == index else "Paste Below"
+        _stack_menu.add_item(label, MENU_PASTE)
+    if _stack_menu.item_count == 0:
+        return
+
+    _stack_menu.reset_size()
+    _stack_menu.position = DisplayServer.mouse_get_position()
+    _stack_menu.popup()
+
+
+func _on_stack_menu_chosen(id: int) -> void:
+    match id:
+        MENU_COPY:
+            _copy_one(_stack_menu_index)
+        MENU_PASTE:
+            _paste_one(_stack_menu_at)
+
+
+## Puts one operation on the clipboard, in the same format the whole-stack Copy uses.
+##
+## A stack of one rather than a shape of its own, so anything that reads a saved stack
+## reads this too — including Paste, which cannot tell where it came from and does not
+## need to.
+func _copy_one(index: int) -> void:
+    var stages: Array = _stack_view.stages()
+    if index < 0 or index >= stages.size():
+        return
+    var stage: IWStackOperation = stages[index]
+    DisplayServer.clipboard_set(SettingsIO.stack_to_text([{
+        "id": stage.get_operation_id(),
+        "enabled": stage.enabled,
+        "settings": stage.get_settings(),
+    }]))
+    _set_status("Copied %s." % stage.get_operation_name())
+
+
+## Puts the clipboard's one operation into the stack at [param at].
+func _paste_one(at: int) -> void:
+    var stages := _stages_from_text(DisplayServer.clipboard_get())
+    if stages.size() != 1:
+        _set_status("The clipboard no longer holds a single operation.")
+        return
+    var stage := stages[0]
+    _pending_label = "Paste %s" % stage.get_operation_name()
+    # Announces, so the store, the history and the rerun all follow from it.
+    _stack_view.insert_stage(stage, at)
+    _set_status("Pasted %s." % stage.get_operation_name())
 
 
 ## Writes the whole stack out as a file that can be loaded back.
