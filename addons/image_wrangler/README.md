@@ -647,10 +647,13 @@ eats part of the subject — and a rectangle that overshoots its region takes th
 colours it overshot onto with it. The preview shows it at once, and removing the row
 undoes it.
 
-Press **H** with the pointer over the dock to hide and show the markers — they
-sit right on top of the edges you are trying to judge. The shortcut is scoped to
-the dock, so H stays free everywhere else in the editor and never steals a
-keystroke from a text field.
+**A pick is marked by what it reached, not by where you clicked.** Once a run has
+finished, each entry gets a dotted rectangle round the bounds of the pixels it
+actually affected — no fill, because what is underneath is the thing being judged.
+Until then a single clicked pixel is not marked at all. That is deliberate: a click
+is one pixel, and one pixel says nothing about how much of the image the pick took
+out, so there is nothing worth drawing yet. A swept rectangle still shows its own
+outline in the meantime, since its extent is something you chose.
 
 **The list belongs to the image**, like every other setting: changing selection
 swaps it to whatever that image has, so you can work through a batch picking each
@@ -703,9 +706,6 @@ still fills the RGB underneath them exactly as it does for keyed-out background.
 
 Polygon Edit works with no **Remove Colors** entries at all. Clear the list and the
 polygons are still cut; nothing else happens.
-
-Press **H** to hide the regions and the island markers together while judging an
-edge.
 
 ### Accuracy
 

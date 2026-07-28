@@ -41,15 +41,14 @@ signal zoom_changed(percent: float)
 const CHECKER_SIZE := 8
 const CHECKER_DARK := Color(0.16, 0.16, 0.18)
 const CHECKER_LIGHT := Color(0.24, 0.24, 0.27)
-const MARKER_RADIUS := 5.0
 
 ## What a marker is drawn in, alpha included.
 ##
 ## The alpha belongs here rather than being mixed in at each draw. There is one answer
 ## to how present a marker should be, and every place that built its own from a bare
-## colour was another place for that answer to drift — the dashes ended up softer than
-## the dot for no reason anyone had decided on. A marker that should read differently is
-## a colour of its own, below, not the same colour re-alphaed on the way past.
+## colour was another place for that answer to drift. A marker that should read
+## differently is a colour of its own, below, not the same colour re-alphaed on the way
+## past.
 ##
 ## Softer than solid on purpose: these sit over the edges the tool exists to judge, and
 ## have to be readable without being what you look at.
@@ -224,17 +223,6 @@ var region_pick := false:
 		# A sweep in flight belongs to the tool that had the crosshair. Letting it
 		# survive the handover would report it to whoever holds it next.
 		_cancel_region()
-
-## Whether the overlays — island markers and drawn regions — are drawn. They
-## sit right on top of the edges being judged, so being able to blink them away
-## matters.
-var markers_visible := true:
-	set(value):
-		if markers_visible == value:
-			return
-		markers_visible = value
-		if _canvas != null:
-			_canvas.queue_redraw()
 
 ## How much of [member _original_texture] is drawn over the result, 0 to 1.
 var original_fade := 0.0:
@@ -562,12 +550,6 @@ func set_stage_progress(fraction: float, label: String) -> void:
 		return
 	_stage_progress = clamped
 	_canvas.queue_redraw()
-
-
-## Flips overlay visibility and reports the new state.
-func toggle_markers() -> bool:
-	markers_visible = not markers_visible
-	return markers_visible
 
 
 func get_zoom() -> float:
@@ -945,7 +927,7 @@ func _handle_vertex_drag(event: InputEvent) -> bool:
 ## Searched back to front so that the corner drawn on top is the one grabbed
 ## where two overlap.
 func _vertex_at(local_position: Vector2, polygon: int) -> int:
-	if not markers_visible or polygon < 0 or polygon >= _polygons.size():
+	if polygon < 0 or polygon >= _polygons.size():
 		return -1
 	var points: PackedVector2Array = _polygons[polygon]
 	var scale := _scale()
@@ -1083,18 +1065,19 @@ func _draw_canvas() -> void:
 		_canvas.draw_texture_rect(_original_texture, frame, false, Color(1, 1, 1, original_fade))
 	_draw_markers()
 	_draw_polygons()
-	# Deliberately outside the markers_visible test the two above obey: H is for
-	# getting the overlays off the edges being judged, and a sweep in progress is not
-	# an overlay but the thing the user is doing this instant.
 	_draw_region_band()
 	# Over everything, including the overlays, since it is about the whole view
 	# rather than about anything drawn on it.
 	_draw_busy()
 
 
+## [b]A single picked pixel draws nothing at all until a run has reported.[/b] It used to
+## get a ringed dot, which was the wrong statement in the only place it appeared: a click
+## is one pixel and one pixel says nothing about how much of the image that pick took out,
+## so the dot marked the question rather than the answer — and it sat over the very pixel
+## being judged while doing it. The dashed box the run comes back with is the whole of what
+## there is to say, and a gap until then is better than a mark that means nothing.
 func _draw_markers() -> void:
-	if not markers_visible:
-		return
 	var frame := Rect2i(Vector2i.ZERO, _image_size)
 	for i in _markers.size():
 		var region := _markers[i]
@@ -1108,23 +1091,10 @@ func _draw_markers() -> void:
 			color = MARKER_DISABLED_SELECTED_COLOR if selected else MARKER_DISABLED_COLOR
 		if i < _marker_flooded.size() and _marker_flooded[i] != 0:
 			_draw_flood_marker(region, color, selected)
-		elif region.size == Vector2i.ONE:
-			_draw_point_marker(region.position, color, selected, on)
-		else:
+		elif region.size != Vector2i.ONE:
+			# A swept rectangle is still worth outlining before a run: the user drew it,
+			# and it is the one pick whose own extent is a thing they chose.
 			_draw_region_marker(region, color, selected, on)
-
-
-## A single picked pixel: the ringed dot the picker has always drawn.
-func _draw_point_marker(point: Vector2i, color: Color, selected: bool, on: bool) -> void:
-	var center := _content_origin + (Vector2(point) + Vector2(0.5, 0.5)) * _scale()
-	var radius := MARKER_RADIUS + (1.0 if selected else 0.0)
-	# Dark ring underneath so the marker reads against light and dark art.
-	_canvas.draw_arc(center, radius + 1.0, 0.0, TAU, 24, MARKER_SHADOW_COLOR, 3.0)
-	_canvas.draw_arc(center, radius, 0.0, TAU, 24, color, 1.5)
-	# Hollow when switched off, so a marker that is only a reminder cannot be
-	# mistaken for one that is doing something.
-	if on:
-		_canvas.draw_circle(center, 1.5, color)
 
 
 ## A picked rectangle: outlined rather than filled, because what is underneath it is
@@ -1203,8 +1173,6 @@ func _draw_region_band() -> void:
 ## Draws every drawn region: finished ones closed and shaded, the one being
 ## drawn as an open path trailing a rubber band to the pointer.
 func _draw_polygons() -> void:
-	if not markers_visible:
-		return
 	for i in _polygons.size():
 		var points: PackedVector2Array = _polygons[i]
 		if points.is_empty():

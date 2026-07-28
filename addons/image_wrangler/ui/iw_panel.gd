@@ -326,9 +326,8 @@ func _ready() -> void:
 	_update_controls()
 
 
-## The dock's keyboard shortcuts: H toggles the overlays, which otherwise sit
-## right on top of the edges you are trying to judge, and Escape and Backspace
-## close and unwind a drawn region in progress.
+## The dock's keyboard shortcuts: Escape and Backspace close and unwind a drawn
+## region in progress.
 ##
 ## Scoped to the dock rather than bound globally: they only fire while the panel
 ## is on screen and the pointer is inside it, so these keys stay free everywhere
@@ -361,12 +360,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 
 	if key.ctrl_pressed or key.alt_pressed or key.shift_pressed or key.meta_pressed:
-		return
-
-	if key.keycode == KEY_H:
-		var shown := _preview.toggle_markers()
-		_set_status("Overlays %s." % ("shown" if shown else "hidden"))
-		accept_event()
 		return
 
 	var drawing := _drawing_list()
@@ -518,7 +511,6 @@ func _rebuild_ui() -> void:
 	var suffix := _suffix_edit.text
 	var fade := _original_fade.value
 	var zoom := _preview.get_zoom()
-	var markers := _preview.markers_visible
 	var threading := _threading_enabled
 	# Back into the store the rebuild reads it out of, so the new form comes up pointed
 	# at the same operation instances rather than at fresh ones carrying defaults.
@@ -543,7 +535,6 @@ func _rebuild_ui() -> void:
 	_suffix_edit.text = suffix
 	_original_fade.set_value_no_signal(fade)
 	_preview.original_fade = fade * 0.01
-	_preview.markers_visible = markers
 
 	# Held across the mode switch, which clears it: the result on screen a moment ago
 	# still describes this image, and dropping it would blank the preview until the
