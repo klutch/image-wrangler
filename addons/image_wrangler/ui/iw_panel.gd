@@ -1000,16 +1000,15 @@ func _build_operation_column() -> Control:
     _modes.tab_changed.connect(_on_tab_changed)
     column.add_child(_modes)
 
-    # Each tab gets its own scroll, so switching does not carry the other one's
-    # scroll position across.
-    var stack_page := ScrollContainer.new()
-    # The tab strip takes its label from the node's name.
-    stack_page.name = "Operations"
-    stack_page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    _modes.add_child(stack_page)
-
+    # Each tab gets its own scroll, so switching does not carry the other one's scroll
+    # position across. Operations keeps its own rather than being handed one here: the
+    # tools and the Add dropdown at the top of it must not scroll away with the stack, so
+    # the scroll starts under them. See iw_stack_view.gd.
     _stack_view = StackView.new()
+    # The tab strip takes its label from the node's name.
+    _stack_view.name = "Operations"
     _stack_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _stack_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
     _stack_view.operation_scripts = OPERATION_SCRIPTS
     _stack_view.fold_state = _fold_state
     _stack_view.form_builder = _build_entry_form
@@ -1022,7 +1021,7 @@ func _build_operation_column() -> Control:
     _stack_view.load_requested.connect(_on_load_stack)
     _stack_view.reset_requested.connect(_on_reset_stack)
     _stack_view.menu_requested.connect(_on_stack_menu)
-    stack_page.add_child(_stack_view)
+    _modes.add_child(_stack_view)
 
     # No scroll of its own: the list inside it scrolls, and nesting the two would give
     # the tab a scrollbar that moved a list with a scrollbar in it.
@@ -3050,13 +3049,16 @@ func _run_repack() -> void:
     var plan: Dictionary = _repack.plan(sizes)
     var positions: Array = plan["positions"]
     var placed: int = plan["placed"]
+    # The size the plan was actually made for, which is not the one in the settings once
+    # Expand to Fit has grown it.
+    var packed_width: int = plan["width"]
+    var packed_height: int = plan["height"]
     if placed < sprites.size():
-        _warn_repack_overflowed(placed, sprites.size())
+        _warn_repack_overflowed(placed, sprites.size(), packed_width, packed_height)
         return
 
-    var settings := _repack.get_settings()
     var sheet := Image.create_empty(
-            settings.output_width, settings.output_height, false, Image.FORMAT_RGBA8)
+            packed_width, packed_height, false, Image.FORMAT_RGBA8)
     sheet.fill(Color(0, 0, 0, 0))
     for i in sprites.size():
         var at: Vector2i = positions[i]
@@ -3067,10 +3069,14 @@ func _run_repack() -> void:
     _repack_image = sheet
     _update_preview_texture()
     _preview.fit_to_view()
-    _set_repack_status("Packed %d sprite%s from %d image%s onto %d x %d."
+    var settings := _repack.get_settings()
+    var grown := ""
+    if packed_width != settings.output_width or packed_height != settings.output_height:
+        grown = "  (expanded from %d x %d)" % [settings.output_width, settings.output_height]
+    _set_repack_status("Packed %d sprite%s from %d image%s onto %d x %d.%s"
             % [sprites.size(), "" if sprites.size() == 1 else "s",
                     read, "" if read == 1 else "s",
-                    settings.output_width, settings.output_height])
+                    packed_width, packed_height, grown])
 
 
 ## Every object in one processed image, each cut out on its own.
@@ -3103,19 +3109,27 @@ func _pipeline_for(path: String) -> IWPipeline:
 ## [b]Nothing is shown for a run that did not finish.[/b] A half-packed sheet is a picture
 ## of an answer that does not exist, and the one thing it would be read as — this is what
 ## you asked for — is the one thing it is not.
-func _warn_repack_overflowed(placed: int, total: int) -> void:
+##
+## [param width] and [param height] are the sheet actually tried, which is the grown one
+## when Expand to Fit has been at it — so the number in the message is the number that was
+## not enough rather than the one still showing in the form.
+func _warn_repack_overflowed(placed: int, total: int, width: int, height: int) -> void:
     var settings := _repack.get_settings()
-    var message := ("Ran out of room on the %d x %d sheet.
+    var expanded: bool = width != settings.output_width or height != settings.output_height
+    var title := ""
+    var message := ""
+    if expanded:
+        title = "Too Big to Pack"
+        message = "Grew the sheet to %d x %d, the largest a texture may be, and %d of %d sprites still did not fit.\n\nPack fewer images at once, or use Tight, which fits the most." % [width, height, placed, total]
+    else:
+        title = "Not Enough Room"
+        message = "Ran out of room on the %d x %d sheet.\n\n%d of %d sprites fitted. Make the sheet larger, or try a different packing mode — Tight fits the most." % [width, height, placed, total]
 
-%d of %d sprites fitted. "
-            % [settings.output_width, settings.output_height, placed, total]
-            + "Make the sheet larger, or try a
-different packing mode — Tight fits the "
-            + "most.")
     _set_repack_status("Ran out of room: %d of %d sprites fitted on %d x %d."
-            % [placed, total, settings.output_width, settings.output_height])
+            % [placed, total, width, height])
     if _repack_dialog == null:
         return
+    _repack_dialog.title = title
     _repack_dialog.dialog_text = message
     _repack_dialog.popup_centered()
 

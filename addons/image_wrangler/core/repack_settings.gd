@@ -18,6 +18,14 @@ extends Resource
 @export var output_width: int = 1024
 @export var output_height: int = 1024
 
+## Whether Grid may double the sheet until its cells fit.
+##
+## Grid alone, because Grid alone runs out for a reason a bigger sheet reliably fixes: its
+## capacity is counted in cells rather than in area, so one sprite larger than the rest
+## costs every other sprite the same room. The other three fail because the sprites genuinely
+## do not fit, and doubling past that is a guess at a size nobody asked for.
+@export var expand_to_fit: bool = false
+
 
 ## A copy that belongs to no image.
 ##

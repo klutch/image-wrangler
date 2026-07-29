@@ -131,6 +131,12 @@ func get_settings_schema() -> Array[Dictionary]:
             "step": 1,
             "tooltip": "How tall the packed sheet is, in pixels.\n\nNothing here grows the sheet to suit what it is given. If the sprites do not\nfit you are told, rather than handed a size you did not ask for.",
         },
+        {
+            "property": &"expand_to_fit",
+            "label": "Expand to Fit",
+            "type": SettingType.BOOL,
+            "tooltip": "Grid only. Doubles the sheet until every cell fits, taking the width first,\nthen the height, then the width again.\n\nGrid runs out of room for a reason a bigger sheet reliably fixes: it counts\ncapacity in cells rather than in area, so one sprite larger than the rest costs\nevery other sprite the same room. The other three modes run out because the\nsprites genuinely do not fit, and doubling past that would be a guess at a size\nnobody asked for.\n\nIt stops at %d, the largest a texture is allowed to be almost anywhere, and\nsays so if it gets there with sprites still to place." % MAX_SIZE,
+        },
     ]
 
 
@@ -145,8 +151,10 @@ static func sanitise_mode(mode: int) -> int:
 ## Where each sprite goes on the sheet, given the size of each.
 ##
 ## [param sizes] is one [Vector2i] per sprite, in the order they were found. Returns
-## [code]{"positions": Array[Vector2i], "placed": int}[/code], where positions runs
-## alongside [param sizes] and holds the top-left corner each sprite was given.
+## [code]{"positions": Array[Vector2i], "placed": int, "width": int, "height": int}[/code],
+## where positions runs alongside [param sizes] and holds the top-left corner each sprite
+## was given, and the two sizes are the sheet it was planned for — which is not the one in
+## the settings once [member RepackSettings.expand_to_fit] has grown it.
 ##
 ## [b]It stops at the first sprite that does not fit rather than skipping it.[/b] A packer
 ## that carried on would produce a sheet missing whichever sprites happened to be awkward,
@@ -154,9 +162,48 @@ static func sanitise_mode(mode: int) -> int:
 ## thing to do about it. [code]placed[/code] is how many went down before that happened, so
 ## a caller can say how far it got.
 func plan(sizes: Array) -> Dictionary:
-    var width: int = maxi(settings.output_width, MIN_SIZE)
-    var height: int = maxi(settings.output_height, MIN_SIZE)
-    match sanitise_mode(settings.mode):
+    var width: int = clampi(settings.output_width, MIN_SIZE, MAX_SIZE)
+    var height: int = clampi(settings.output_height, MIN_SIZE, MAX_SIZE)
+    var mode := sanitise_mode(settings.mode)
+    var wanted := _packable(sizes)
+
+    var attempt := _plan_at(sizes, width, height, mode)
+    if attempt["placed"] >= wanted or not (mode == PackMode.GRID and settings.expand_to_fit):
+        return _at_size(attempt, width, height)
+
+    # [b]Doubling, alternately, rather than working out the size that would fit.[/b] Grid's
+    # capacity is cells, and cells only appear when a whole one fits — so the sheet a
+    # calculation would arrive at is a sheet the packer might still refuse over a rounding.
+    # Doubling and asking is the answer that cannot be wrong, and it is at most a couple of
+    # dozen attempts from any starting size to the ceiling.
+    #
+    # Width first, then height, so a sheet grows wide before it grows tall — which is the
+    # way a sprite sheet is usually looked at, and the way the rows already run.
+    var grow_width := true
+    while width < MAX_SIZE or height < MAX_SIZE:
+        # The axis whose turn it is, unless that one is already at the ceiling and the
+        # other is not — alternating into a wall would stop the search early.
+        if grow_width and width >= MAX_SIZE:
+            grow_width = false
+        elif not grow_width and height >= MAX_SIZE:
+            grow_width = true
+
+        if grow_width:
+            width = mini(width * 2, MAX_SIZE)
+        else:
+            height = mini(height * 2, MAX_SIZE)
+        grow_width = not grow_width
+
+        attempt = _plan_at(sizes, width, height, mode)
+        if attempt["placed"] >= wanted:
+            break
+
+    return _at_size(attempt, width, height)
+
+
+## One attempt, at one size.
+func _plan_at(sizes: Array, width: int, height: int, mode: int) -> Dictionary:
+    match mode:
         PackMode.GRID:
             return _plan_grid(sizes, width, height)
         PackMode.TIGHT:
@@ -165,6 +212,29 @@ func plan(sizes: Array) -> Dictionary:
             return _plan_rows(sizes, width, height, _in_order(sizes))
         _:
             return _plan_rows(sizes, width, height, _by_height(sizes))
+
+
+## How many of [param sizes] are real sprites, which is what "everything fitted" means.
+##
+## A sprite of no area is skipped rather than placed, so counting the list itself would
+## make a plan holding one look like a plan that failed — and, with expansion on, would
+## double the sheet to the ceiling chasing a sprite that was never going down.
+func _packable(sizes: Array) -> int:
+    var count := 0
+    for size: Vector2i in sizes:
+        if size.x > 0 and size.y > 0:
+            count += 1
+    return count
+
+
+## The plan, told what size it was made for.
+##
+## The caller needs the size as well as the positions once expansion is in play, since the
+## sheet it goes on to make is no longer the one in the settings.
+func _at_size(attempt: Dictionary, width: int, height: int) -> Dictionary:
+    attempt["width"] = width
+    attempt["height"] = height
+    return attempt
 
 
 ## Sprite indices tallest first, and widest first among equals.

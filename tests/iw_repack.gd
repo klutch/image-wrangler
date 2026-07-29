@@ -31,6 +31,7 @@ func _initialize() -> void:
     _check_original_keeps_its_order()
     _check_tight_is_at_least_as_dense()
     _check_overflow_is_reported()
+    _check_expand_to_fit()
     _check_degenerate_input()
     _check_find_islands()
     _check_cut_islands()
@@ -209,6 +210,81 @@ func _check_overflow_is_reported() -> void:
         var plan: Dictionary = _packer(mode, 16, 512).plan([Vector2i(40, 4)])
         _expect(plan["placed"] == 0,
                 "%s claimed to place a sprite wider than the sheet" % MODE_NAMES[mode])
+
+
+# --- Growing the sheet -------------------------------------------------
+
+## Grid may double until its cells fit. Width first, then height, then width again — so
+## the sizes it walks through are a fixed sequence and the one it stops on is the first in
+## that sequence with room.
+func _check_expand_to_fit() -> void:
+    var sizes := []
+    for _i in 30:
+        sizes.append(Vector2i(20, 20))
+
+    # 64 x 64 holds nine of them; thirty need a 128 x 128, which is two doublings away —
+    # width to 128, then height to 128.
+    var packer := _packer(1, 64, 64)
+    packer.get_settings().expand_to_fit = true
+    var plan: Dictionary = packer.plan(sizes)
+
+    _expect(plan["placed"] == sizes.size(),
+            "Expand to Fit placed %d of %d sprites" % [plan["placed"], sizes.size()])
+    _expect(plan["width"] == 128 and plan["height"] == 128,
+            "Expand to Fit stopped at %d x %d rather than the 128 x 128 that first fits"
+            % [plan["width"], plan["height"]])
+    _expect_inside(plan["positions"], sizes, plan["width"], plan["height"], "Expand to Fit")
+    _expect_no_overlap(plan["positions"], sizes, "Expand to Fit")
+
+    # Width goes first, so a sheet exactly one doubling short comes back wide rather than
+    # tall. A 20-pixel cell on a 32 x 32 sheet is one column by one row, which holds one
+    # sprite; doubling the width to 64 gives three columns and takes both.
+    var narrow := _packer(1, 32, 32)
+    narrow.get_settings().expand_to_fit = true
+    var wide: Dictionary = narrow.plan([Vector2i(20, 20), Vector2i(20, 20)])
+    _expect(wide["placed"] == 2, "the width doubling did not fit both sprites")
+    _expect(wide["width"] == 64 and wide["height"] == 32,
+            "the first doubling gave %d x %d rather than taking the width"
+            % [wide["width"], wide["height"]])
+
+    # A sheet that already fits is left exactly as it was asked for.
+    var roomy := _packer(1, 256, 256)
+    roomy.get_settings().expand_to_fit = true
+    var kept: Dictionary = roomy.plan(sizes)
+    _expect(kept["width"] == 256 and kept["height"] == 256,
+            "a sheet with room to spare was grown to %d x %d anyway"
+            % [kept["width"], kept["height"]])
+
+    # It stops at the ceiling rather than running forever, and reports what did not fit.
+    var huge := []
+    for _i in 8:
+        huge.append(Vector2i(9000, 9000))
+    var stuck := _packer(1, 1024, 1024)
+    stuck.get_settings().expand_to_fit = true
+    var gave_up: Dictionary = stuck.plan(huge)
+    _expect(gave_up["width"] == 16384 and gave_up["height"] == 16384,
+            "expansion stopped at %d x %d rather than the largest a texture may be"
+            % [gave_up["width"], gave_up["height"]])
+    _expect(gave_up["placed"] < huge.size(),
+            "expansion claimed to fit eight 9000-pixel sprites")
+
+    # Off, it does not grow at all — which is what the other three modes always get.
+    var fixed := _packer(1, 64, 64)
+    fixed.get_settings().expand_to_fit = false
+    var unmoved: Dictionary = fixed.plan(sizes)
+    _expect(unmoved["width"] == 64 and unmoved["height"] == 64,
+            "Expand to Fit grew the sheet while switched off")
+    _expect(unmoved["placed"] < sizes.size(), "the unexpanded sheet somehow fitted them all")
+
+    # And it is Grid's alone. The other three run out because the sprites genuinely do not
+    # fit, and doubling past that would be a size nobody asked for.
+    for mode: int in [0, 2, 3]:
+        var other := _packer(mode, 64, 64)
+        other.get_settings().expand_to_fit = true
+        var untouched: Dictionary = other.plan(sizes)
+        _expect(untouched["width"] == 64 and untouched["height"] == 64,
+                "%s grew its sheet to %d x %d — Expand to Fit is Grid's alone"
+                % [MODE_NAMES[mode], untouched["width"], untouched["height"]])
 
 
 # --- Nothing to do -----------------------------------------------------

@@ -201,6 +201,20 @@ func _build() -> void:
     _selector.get_popup().index_pressed.connect(_on_pick)
     add_child(_selector)
 
+    # [b]The scroll starts here, under the tools and the dropdown rather than above
+    # them.[/b] It used to wrap the whole of this view, which meant a stack long enough to
+    # scroll took its own Add dropdown off the top of the screen — so adding a second
+    # operation meant scrolling back up, picking, and scrolling down again to reach what
+    # you had just added. The two things that are always worth reaching are the two that
+    # now never move.
+    var scroll := ScrollContainer.new()
+    scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    # The dock column is narrow and the forms inside give rather than overflow, so a
+    # sideways bar would only ever be a second thing to nudge past the vertical one.
+    scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    add_child(scroll)
+
     # The entries are cards standing off the panel, so they need room above and below
     # to read as separate things rather than as one block with lines in it.
     #
@@ -212,7 +226,7 @@ func _build() -> void:
     inset.mouse_filter = Control.MOUSE_FILTER_IGNORE
     for side in ["margin_top", "margin_bottom"]:
         inset.add_theme_constant_override(side, ENTRY_MARGIN)
-    add_child(inset)
+    scroll.add_child(inset)
 
     _list = VBoxContainer.new()
     _list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
