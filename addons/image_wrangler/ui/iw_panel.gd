@@ -9,6 +9,7 @@ const IslandPicker := preload("res://addons/image_wrangler/ui/iw_island_picker.g
 const ColorList := preload("res://addons/image_wrangler/ui/iw_color_list.gd")
 const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd")
 const HSVList := preload("res://addons/image_wrangler/ui/iw_hsv_list.gd")
+const BrushList := preload("res://addons/image_wrangler/ui/iw_brush_list.gd")
 const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
 const StackView := preload("res://addons/image_wrangler/ui/iw_stack_view.gd")
 const HistoryView := preload("res://addons/image_wrangler/ui/iw_history_view.gd")
@@ -27,6 +28,7 @@ const OPERATION_SCRIPTS := [
     "res://addons/image_wrangler/core/refine_edges.gd",
     "res://addons/image_wrangler/core/island_picker_op.gd",
     "res://addons/image_wrangler/core/polygon_edit_op.gd",
+    "res://addons/image_wrangler/core/brush_edit_op.gd",
     "res://addons/image_wrangler/core/remove_lines.gd",
     "res://addons/image_wrangler/core/fill_pinholes.gd",
     "res://addons/image_wrangler/core/edge_cleanup.gd",
@@ -425,6 +427,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
     if key.ctrl_pressed or key.alt_pressed or key.shift_pressed or key.meta_pressed:
         return
 
+    # Escape puts the brush away. Unlike the polygon it does not wait for a shape to be
+    # open: a stroke is finished the moment the button comes up, so a brush with no draft
+    # is the ordinary state to be in while still holding the tool.
+    if _painting_list() != null and key.keycode == KEY_ESCAPE:
+        _finish_painting()
+        accept_event()
+        return
+
     var drawing := _drawing_list()
     if drawing == null or drawing.draft_index() < 0:
         return
@@ -802,6 +812,8 @@ func _build_preview_column() -> Control:
     _preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _preview.pixel_picked.connect(_on_pixel_picked)
     _preview.region_picked.connect(_on_region_picked)
+    _preview.stroke_point.connect(_on_stroke_point)
+    _preview.stroke_finished.connect(_on_stroke_finished)
     _preview.pick_cancelled.connect(_on_pick_cancelled)
     _preview.vertex_dragged.connect(_on_vertex_dragged)
     _preview.vertex_drag_ended.connect(_on_vertex_drag_ended)
@@ -1345,6 +1357,11 @@ func _bind_pick_control(control: Control) -> void:
         hsv.pick_toggled.connect(_on_pick_toggled.bind(hsv))
         hsv.regions_changed.connect(_on_setting_changed)
         hsv.selection_changed.connect(_on_selection_changed.bind(hsv))
+    elif control is BrushList:
+        var brush := control as BrushList
+        brush.draw_toggled.connect(_on_pick_toggled.bind(brush))
+        brush.strokes_changed.connect(_on_setting_changed)
+        brush.selection_changed.connect(_on_selection_changed.bind(brush))
 
 
 ## The stack gained, lost or reordered an entry.
@@ -1986,6 +2003,8 @@ func _release_pick() -> void:
             # Committed rather than abandoned: leaving a half-drawn shape open would
             # strand it on the list with no way back into the session that owns it.
             (control as PolygonList).finish_polygon()
+        elif control is BrushList:
+            (control as BrushList).finish_stroke()
         control.set_pick_active(false)
 
 
@@ -2149,8 +2168,12 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
             _pick_target = null
             _preview.pick_mode = false
             _preview.region_pick = false
+            _preview.stroke_pick = false
             if source is PolygonList:
                 (source as PolygonList).finish_polygon()
+                _update_overlays()
+            elif source is BrushList:
+                (source as BrushList).finish_stroke()
                 _update_overlays()
         return
 
@@ -2162,6 +2185,8 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
             continue
         if control is PolygonList:
             (control as PolygonList).finish_polygon()
+        elif control is BrushList:
+            (control as BrushList).finish_stroke()
         control.set_pick_active(false)
 
     _pick_target = source
@@ -2170,7 +2195,11 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
     # Three of them want a rectangle — one takes the pixels inside it, one the colours,
     # one the area to recolour. A polygon is built corner by corner and wants neither.
     _preview.region_pick = source is IslandPicker or source is ColorList or source is HSVList
-    if source is ColorList:
+    # And the brush wants the whole drag rather than either end of it.
+    _preview.stroke_pick = source is BrushList
+    if source is BrushList:
+        _set_status("Drag over the preview to paint a stroke. Escape or right-click stops.")
+    elif source is ColorList:
         _set_status("Drag a region in the preview to take every color in it, or click one pixel.")
     elif source is PolygonList:
         _set_status("Click to place corners. Right-click or Escape closes the region.")
@@ -2265,6 +2294,50 @@ func _pick_color_region(region: Rect2i) -> void:
         _set_status("Picked %d of the %d colors in that region." % [added, colors.size()])
 
 
+## One pixel a stroke drag has reached.
+##
+## The overlay is redrawn and nothing else: a drag reports many times a second, and
+## re-running the stack on every point would be unusable on any real image. The run waits
+## for the button to come up. What the overlay draws in the meantime is the paint going
+## down, which is why it can be seen at all before then.
+func _on_stroke_point(pixel: Vector2i, starting: bool) -> void:
+    var painting := _painting_list()
+    if painting == null:
+        return
+    if starting:
+        painting.begin_stroke(pixel)
+    else:
+        painting.extend_stroke(pixel)
+
+
+## The drag ended. This is the one that re-runs, through the list's own changed signal.
+func _on_stroke_finished() -> void:
+    var painting := _painting_list()
+    if painting == null:
+        return
+    painting.finish_stroke()
+    _update_overlays()
+
+
+## Whichever brush list currently owns the preview, or null.
+func _painting_list() -> BrushList:
+    return _pick_target as BrushList
+
+
+## Ends any stroke in flight and drops out of painting, so the Draw button does not sit
+## armed over a tool that is no longer receiving anything.
+func _finish_painting() -> void:
+    var painting := _painting_list()
+    if painting == null:
+        return
+    painting.finish_stroke()
+    painting.set_pick_active(false)
+    _pick_target = null
+    _preview.pick_mode = false
+    _preview.stroke_pick = false
+    _update_overlays()
+
+
 ## Whichever polygon list currently owns the crosshair, or null.
 ##
 ## Unambiguous in a way "the one polygon list" never was: with several in the stack,
@@ -2286,10 +2359,13 @@ func _finish_polygon() -> void:
     _update_overlays()
 
 
-## Right-click on the preview. Only the polygon tool makes anything of it.
+## Right-click on the preview. The two drawing tools make something of it: for the polygon
+## it closes the shape, for the brush it puts the tool away.
 func _on_pick_cancelled() -> void:
     if _drawing_list() != null:
         _finish_polygon()
+    elif _painting_list() != null:
+        _finish_painting()
 
 
 func _on_vertex_dragged(polygon: int, vertex: int, to: Vector2i) -> void:
@@ -2361,6 +2437,16 @@ func _update_overlays() -> void:
     var selected_region := -1
     var draft_region := -1
 
+    # The brush overlays are not merged the way the others are. A path is drawn at its own
+    # brush width, so a flat list of paths would need a parallel list of widths and modes
+    # to go with it — and only two of them are ever on screen: the one being painted and
+    # the highlighted one. Naming those two directly is the whole of what is needed.
+    var draft_path := []
+    var draft_radius := 1
+    var draft_adding := false
+    var brush_path := []
+    var brush_radius := 1
+
     if _mode != Mode.RENAME:
         for control: Control in _pick_controls:
             if control is IslandPicker:
@@ -2395,9 +2481,29 @@ func _update_overlays() -> void:
                     draft_region = offset + list.draft_index()
                 regions.append_array(own_regions)
                 region_flags.append_array(list.get_enabled_flags())
+            elif control is BrushList:
+                var brush := control as BrushList
+                var paths := brush.get_paths()
+                var radii := brush.get_radii()
+                # At most one list has a stroke in flight, because drawing is arbitrated.
+                var draft := brush.draft_index()
+                if draft >= 0 and draft < paths.size():
+                    draft_path = paths[draft]
+                    draft_radius = radii[draft]
+                    draft_adding = brush.get_adding_flags()[draft] != 0
+                # The highlighted stroke, and only from the list the user is working in —
+                # the same rule the merged selections above follow, and for the same
+                # reason: two lists each highlighting a row would draw two answers to a
+                # question that has one.
+                var chosen := brush.selected_index()
+                if brush == _overlay_owner and chosen >= 0 and chosen < paths.size() \
+                        and chosen != draft:
+                    brush_path = paths[chosen]
+                    brush_radius = radii[chosen]
 
     _preview.set_markers(islands, selected_island, island_flags, island_flooded)
     _preview.set_polygons(regions, selected_region, draft_region, region_flags)
+    _preview.set_brush_overlay(draft_path, draft_radius, draft_adding, brush_path, brush_radius)
 
 
 func _on_setting_changed() -> void:

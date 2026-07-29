@@ -750,6 +750,22 @@ static func self_test(operation: IWOperation) -> bool:
 					quad.color = Color(0.8, 0.2, 0.6, 1.0)
 					quad.enabled = false
 					quad.mode = IWAlphaMode.Mode.ADD
+				elif nested is BrushStrokeList:
+					# The same nesting depth the polygons reach, and checked as well
+					# rather than instead: a stroke carries two tunables of its own
+					# beside the path, so a decoder that rebuilt the list but handed
+					# every stroke the default brush would round-trip the polygons
+					# without complaint and quietly flatten every stroke here.
+					var painted := nested as BrushStrokeList
+					painted.clear()
+					var dab := painted.add(3, 0.25)
+					dab.points = [Vector2i(11, 12)]
+					dab.color = Color(0.2, 0.7, 0.3, 1.0)
+					var sweep := painted.add(17, 0.8)
+					sweep.points = [Vector2i(0, 0), Vector2i(5, 9), Vector2i(40, 41)]
+					sweep.color = Color(0.7, 0.3, 0.9, 1.0)
+					sweep.enabled = false
+					sweep.mode = IWAlphaMode.Mode.ADD
 
 	var round_tripped: Variant = JSON.parse_string(JSON.stringify(to_dict(original)))
 	if not (round_tripped is Dictionary):

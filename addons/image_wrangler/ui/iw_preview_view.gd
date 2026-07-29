@@ -21,6 +21,17 @@ signal pixel_picked(pixel: Vector2i)
 ## a separate gesture.
 signal region_picked(region: Rect2i)
 
+## Emitted for each new pixel a stroke drag reaches, while [member stroke_pick] is on.
+##
+## [param starting] marks the press that opened the drag, so the receiver knows to begin a
+## stroke rather than extend the one before it. One signal rather than a start and an
+## extend: the two carry the same thing and differ by a flag, and a receiver that handled
+## one but not the other would be a stroke that silently went to the wrong entry.
+signal stroke_point(pixel: Vector2i, starting: bool)
+
+## Emitted when the button comes up, or when a drag is abandoned.
+signal stroke_finished
+
 ## Emitted when the user right-clicks while [member pick_mode] is on.
 ##
 ## What that means is the dock's business — for the polygon tool it closes the
@@ -88,6 +99,27 @@ const MARKER_WIDTH := 1.5
 ## that grew with a zoom would turn into a solid line long before the pixels did.
 const MARKER_DASH := 5.0
 const MARKER_FILL_ALPHA := 0.14
+
+## What a stroke being painted is drawn in, by what it is doing.
+##
+## Red for taking away and green for putting back, which is the one place in this view a
+## colour carries meaning rather than identity: while a drag is in flight the result has
+## not caught up, so nothing else on screen says which of the two is happening.
+const BRUSH_SUBTRACT_COLOR := Color(1.0, 0.35, 0.3)
+const BRUSH_ADD_COLOR := Color(0.4, 1.0, 0.45)
+
+## How present the paint going down looks, and how present the highlighted stroke's
+## outline is.
+##
+## The draft is deliberately faint. It stands in for a result that has not been computed
+## yet, and paint drawn at full strength would be a claim about the answer rather than a
+## sketch of where it is going.
+const BRUSH_FILL_ALPHA := 0.45
+const BRUSH_OUTLINE_ALPHA := 0.7
+
+## Segments in the circle drawn for a one-point stroke. Enough that a dab at high zoom
+## reads as round rather than as a polygon.
+const BRUSH_OUTLINE_SEGMENTS := 24
 
 ## Half-width of a polygon's draggable corner handle, in screen pixels, and how
 ## near the pointer has to be to grab one. Generous on purpose: at low zoom a
@@ -232,6 +264,21 @@ var region_pick := false:
         # survive the handover would report it to whoever holds it next.
         _cancel_region()
 
+## While set, a left drag in [member pick_mode] paints: every pixel it crosses is reported
+## through [signal stroke_point], and letting go reports [signal stroke_finished].
+##
+## A third property beside [member region_pick] rather than an enum of pick kinds, because
+## that is the shape the other two already have and an enum would mean rewriting both to
+## add the third. They are mutually exclusive in practice — the dock sets exactly one from
+## whichever control holds the crosshair — and this one is tested first where they meet.
+var stroke_pick := false:
+    set(value):
+        if stroke_pick == value:
+            return
+        stroke_pick = value
+        # A drag in flight belongs to the tool that had the crosshair, the same as a sweep.
+        _cancel_stroke()
+
 ## Whether the overlays — island boxes and drawn regions — are drawn at all.
 ##
 ## They sit right on top of the edges being judged, so getting them out of the way is
@@ -336,6 +383,25 @@ var _selected_marker := -1
 ## An anchor of (-1, -1) means there is no sweep.
 var _region_anchor := Vector2i(-1, -1)
 var _region_cursor := Vector2i(-1, -1)
+
+## Whether a stroke drag is in flight, and the last pixel reported for it.
+##
+## The last pixel is kept so that motion inside one pixel — which is most motion events at
+## any zoom above 100% — is dropped here rather than sent on to be dropped there.
+var _painting := false
+var _paint_last := Vector2i(-1, -1)
+
+## The stroke being painted right now, in image coordinates, and the brush it is being
+## painted with. Drawn as it is made, because a run only lands once the drag is over and a
+## brush that showed nothing until then would be a brush you cannot aim.
+var _brush_draft := PackedVector2Array()
+var _brush_draft_radius := 1
+var _brush_draft_adding := false
+
+## The highlighted stroke's path and brush, drawn as a thin outline so a row in the list
+## can be found on the image. Empty when nothing is selected.
+var _brush_path := PackedVector2Array()
+var _brush_path_radius := 1
 
 ## Drawn regions, as an Array of PackedVector2Array in image coordinates.
 var _polygons: Array = []
@@ -517,6 +583,41 @@ func set_polygons(polygons: Array, selected: int, draft: int, enabled := PackedB
     if draft < 0:
         _hover_pixel = Vector2i(-1, -1)
     _canvas.queue_redraw()
+
+
+## Shows the two brush overlays: the stroke being painted right now, and the highlighted
+## one.
+##
+## [param draft] is drawn at its full width and filled, because it is the paint going down
+## and the run that renders it has not happened yet — without it a drag would leave the
+## preview unchanged until the button came up. [param selected] is drawn as a thin outline
+## instead: that stroke is already in the result, and filling over it would hide the very
+## thing the user is looking at.
+##
+## Pass empty arrays for either to clear it.
+func set_brush_overlay(
+        draft: Array,
+        draft_radius: int,
+        draft_adding: bool,
+        selected: Array,
+        selected_radius: int) -> void:
+    # Converted to float points once here rather than per redraw, and copied for the same
+    # reason the polygons are: the caller's arrays belong to the operation and can change
+    # underneath us without a redraw being asked for.
+    _brush_draft = _to_points(draft)
+    _brush_draft_radius = maxi(draft_radius, 1)
+    _brush_draft_adding = draft_adding
+    _brush_path = _to_points(selected)
+    _brush_path_radius = maxi(selected_radius, 1)
+    if _canvas != null:
+        _canvas.queue_redraw()
+
+
+static func _to_points(from: Array) -> PackedVector2Array:
+    var out := PackedVector2Array()
+    for point: Vector2i in from:
+        out.append(Vector2(point))
+    return out
 
 
 ## Puts the view into or out of its working state.
@@ -800,8 +901,11 @@ func _on_canvas_gui_input(event: InputEvent) -> void:
     # Panning claims Ctrl+left before picking can see it, so the two never fight.
     if _handle_pan(event):
         return
-    # After panning for that reason, and before everything below because a sweep owns
-    # the left button outright for as long as it is held.
+    # After panning for that reason, and before everything below because a drag owns the
+    # left button outright for as long as it is held. Before the sweep because the two
+    # claim the same gesture and the dock never arms both at once.
+    if _handle_stroke_pick(event):
+        return
     if _handle_region_pick(event):
         return
 
@@ -880,6 +984,70 @@ func _handle_region_pick(event: InputEvent) -> bool:
         _canvas.queue_redraw()
     _canvas.accept_event()
     return true
+
+
+## Paints with the left button while [member stroke_pick] is set. Returns whether the
+## event was consumed.
+##
+## The gesture is one thing from press to release, so a click is not a case of its own: a
+## press and release without motion reports one pixel, which is one dab of the brush.
+func _handle_stroke_pick(event: InputEvent) -> bool:
+    if not pick_mode or not stroke_pick:
+        return false
+
+    var button := event as InputEventMouseButton
+    if button != null and button.button_index == MOUSE_BUTTON_LEFT:
+        if button.pressed:
+            # Starting off the image is a miss rather than a stroke of nothing, the same
+            # answer a click there has always given.
+            var pixel := _pixel_at(button.position)
+            if pixel.x < 0:
+                return false
+            _painting = true
+            _paint_last = pixel
+            stroke_point.emit(pixel, true)
+            _canvas.accept_event()
+            return true
+        if not _painting:
+            return false
+        _painting = false
+        _paint_last = Vector2i(-1, -1)
+        stroke_finished.emit()
+        _canvas.accept_event()
+        return true
+
+    if not _painting or not (event is InputEventMouseMotion):
+        return false
+
+    # A release swallowed elsewhere — an alt-tab mid-drag — would otherwise leave the
+    # brush stuck to the cursor. The stroke is reported rather than dropped: it happened,
+    # and only its ending went missing.
+    if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+        _painting = false
+        _paint_last = Vector2i(-1, -1)
+        stroke_finished.emit()
+        return false
+
+    # Clamped rather than dropped, so a stroke dragged off the edge of the image keeps
+    # painting along it instead of stopping where the pointer last was inside. Reported
+    # only when it has actually left the pixel it was on: at any zoom above 100% most
+    # motion events land on the pixel already reported.
+    var moved := _pixel_at_clamped(event.position)
+    if moved != _paint_last:
+        _paint_last = moved
+        stroke_point.emit(moved, false)
+    _canvas.accept_event()
+    return true
+
+
+## Drops the drag without reporting an ending, for the cases where the tool it belonged to
+## has gone away underneath it.
+func _cancel_stroke() -> void:
+    if not _painting:
+        return
+    _painting = false
+    _paint_last = Vector2i(-1, -1)
+    stroke_finished.emit()
 
 
 ## Ends the sweep and reports it.
@@ -1110,6 +1278,7 @@ func _draw_canvas() -> void:
         _canvas.draw_texture_rect(_original_texture, frame, false, Color(1, 1, 1, original_fade))
     _draw_markers()
     _draw_polygons()
+    _draw_brush()
     _draw_region_band()
     # Over everything, including the overlays, since it is about the whole view
     # rather than about anything drawn on it.
@@ -1200,6 +1369,59 @@ func _draw_dashed_rect(box: Rect2, color: Color, width: float) -> void:
     _canvas.draw_dashed_line(top_right, bottom_right, color, width, MARKER_DASH)
     _canvas.draw_dashed_line(bottom_right, bottom_left, color, width, MARKER_DASH)
     _canvas.draw_dashed_line(bottom_left, top_left, color, width, MARKER_DASH)
+
+
+## The two brush overlays: the stroke going down now, and the highlighted one.
+##
+## The draft is drawn whether or not the overlays are showing, for the reason the polygon
+## draft is: a stroke being painted this instant is not an overlay on the result, it is the
+## thing being done. The highlighted path is an overlay and obeys the switch.
+##
+## Both are drawn as a polyline at the brush's own width, which is a round-capped, round-
+## jointed line — the same shape a run of overlapping round dabs makes, so what is on
+## screen during the drag is the shape that lands when it ends.
+func _draw_brush() -> void:
+    if markers_visible and _brush_path.size() > 0:
+        _draw_brush_path(_brush_path, _brush_path_radius, MARKER_SELECTED_COLOR, false)
+    if _brush_draft.size() > 0:
+        # Add and Subtract are told apart by colour, because which one is going down is
+        # the thing you most need to know while it is going down — and on a preview where
+        # the result has not caught up yet there is nothing else saying so.
+        var color := BRUSH_ADD_COLOR if _brush_draft_adding else BRUSH_SUBTRACT_COLOR
+        _draw_brush_path(_brush_draft, _brush_draft_radius, color, true)
+
+
+## One path at the brush's width: filled while it is being painted, outlined when it is
+## the highlighted row.
+##
+## A single point is a dab rather than a line, and draw_polyline draws nothing at all for
+## one point, so that case is a circle of its own.
+func _draw_brush_path(path: PackedVector2Array, radius: int, color: Color, filled: bool) -> void:
+    var scale := _scale()
+    # The brush reaches half a pixel short of its radius, matching the kernel, so a radius
+    # of 1 is one pixel across rather than three.
+    var width := maxf((radius * 2.0 - 1.0) * scale, 1.0)
+    var screen := _to_screen(path)
+
+    if filled:
+        if screen.size() == 1:
+            _canvas.draw_circle(screen[0], width * 0.5, Color(color, BRUSH_FILL_ALPHA))
+        else:
+            _canvas.draw_polyline(screen, Color(color, BRUSH_FILL_ALPHA), width, true)
+        return
+
+    # Outlined: two circles or two polylines, the outer one dark, so the shape reads
+    # against light and dark art alike the way every other marker here does.
+    if screen.size() == 1:
+        _canvas.draw_arc(screen[0], width * 0.5, 0.0, TAU, BRUSH_OUTLINE_SEGMENTS,
+                MARKER_SHADOW_COLOR, MARKER_WIDTH + 2.0)
+        _canvas.draw_arc(screen[0], width * 0.5, 0.0, TAU, BRUSH_OUTLINE_SEGMENTS,
+                color, MARKER_WIDTH)
+        return
+    _canvas.draw_polyline(screen, Color(MARKER_SHADOW_COLOR, BRUSH_OUTLINE_ALPHA),
+            width, true)
+    _canvas.draw_polyline(screen, Color(color, BRUSH_OUTLINE_ALPHA),
+            maxf(width - MARKER_WIDTH * 2.0, 1.0), true)
 
 
 ## The rectangle being swept, drawn as it is dragged.

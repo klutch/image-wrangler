@@ -11,6 +11,7 @@ const IslandPicker := preload("res://addons/image_wrangler/ui/iw_island_picker.g
 const ColorList := preload("res://addons/image_wrangler/ui/iw_color_list.gd")
 const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd")
 const HSVList := preload("res://addons/image_wrangler/ui/iw_hsv_list.gd")
+const BrushList := preload("res://addons/image_wrangler/ui/iw_brush_list.gd")
 
 ## Left indent applied to the contents of a named group.
 const GROUP_INDENT := 8
@@ -91,6 +92,8 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 				control = _build_polygon_list(operation, property)
 			IWOperation.SettingType.HSV_LIST:
 				control = _build_hsv_list(operation, property)
+			IWOperation.SettingType.BRUSH_LIST:
+				control = _build_brush_list(operation, property)
 			_:
 				control = _build_number(operation, property, label, setting, false, on_changed)
 
@@ -214,6 +217,15 @@ static func _build_polygon_list(operation: IWOperation, property: StringName) ->
 ## preview, and only the dock can reach it.
 static func _build_hsv_list(operation: IWOperation, property: StringName) -> Control:
 	var list := HSVList.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.setup(operation, property)
+	return list
+
+
+## Left unwired here for the same reason the other four are: painting needs the
+## preview, and only the dock can reach it.
+static func _build_brush_list(operation: IWOperation, property: StringName) -> Control:
+	var list := BrushList.new()
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	list.setup(operation, property)
 	return list
@@ -398,4 +410,6 @@ static func _refresh_into(settings: Resource, node: Node) -> void:
 				(child as ColorList).refresh()
 			elif child is PolygonList:
 				(child as PolygonList).refresh()
+			elif child is BrushList:
+				(child as BrushList).refresh()
 		_refresh_into(settings, child)

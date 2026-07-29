@@ -83,6 +83,11 @@ void IWStageKernels::_bind_methods() {
     // Defined in iw_hole_kernels.cpp; bound here so every entry point is in one list.
     ClassDB::bind_static_method("IWStageKernels",
             D_METHOD("fill_pinholes", "ctx", "max_area"), &IWStageKernels::fill_pinholes);
+    // Defined in iw_brush_kernels.cpp; bound here so every entry point is in one list.
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("paint_strokes", "ctx", "points", "starts", "counts", "radii", "adding",
+                    "sharpness"),
+            &IWStageKernels::paint_strokes);
 }
 
 // Rasterises this stage's shapes and folds them into whatever is already declared.

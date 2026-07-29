@@ -219,6 +219,29 @@ public:
     // the source pixels, the coverage and the mask — so the caller owes the run a rebuild
     // of the distance map and of the nearest-subject map afterwards.
     static PackedInt32Array fill_pinholes(const Ref<IWPipelineContext> &ctx, int64_t max_area);
+
+    // BrushEdit.process_context: lays down every stroke, in the order they were drawn.
+    //
+    // The strokes arrive flattened for the usual reason — `points` is x,y interleaved,
+    // `starts` and `counts` bound each stroke's samples, and `radii`, `adding` and
+    // `sharpness` carry one value per stroke.
+    //
+    // The samples are the path the pointer took, not the pixels it covered: the gap
+    // between two of them is walked a pixel at a time here, so a stroke is continuous
+    // however fast it was drawn. Within a stroke the stamps take the strongest, between
+    // strokes each is applied to what the ones above it left.
+    //
+    // Returns every index it touched. Writes the coverage, the source alpha and the mask,
+    // and never the colour — so the caller owes a rebuild_nearest and no distance-map
+    // rebuild, the keys being measured against RGB.
+    static PackedInt32Array paint_strokes(
+            const Ref<IWPipelineContext> &ctx,
+            const PackedInt32Array &points,
+            const PackedInt32Array &starts,
+            const PackedInt32Array &counts,
+            const PackedInt32Array &radii,
+            const PackedByteArray &adding,
+            const PackedFloat64Array &sharpness);
 };
 
 } // namespace godot

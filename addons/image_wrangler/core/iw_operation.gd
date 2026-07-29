@@ -36,6 +36,9 @@ enum SettingType {
 	## A list of rectangles the user picks off the preview, each carrying its own
 	## hue, saturation and value. The property must hold an [HSVRegionList].
 	HSV_LIST,
+	## A list of strokes the user drags over the preview, each carrying its own
+	## brush and mode. The property must hold a [BrushStrokeList].
+	BRUSH_LIST,
 }
 
 
