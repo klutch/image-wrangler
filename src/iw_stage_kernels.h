@@ -242,6 +242,32 @@ public:
             const PackedInt32Array &radii,
             const PackedByteArray &adding,
             const PackedFloat64Array &sharpness);
+
+    // The dock's live brush: adds one segment to a stroke in flight and returns the patch
+    // of the composed preview it leaves, so the paint can be seen going down between two
+    // mouse events.
+    //
+    // Not the same path as paint_strokes, and deliberately: that one goes through a
+    // pipeline context and needs the whole stack re-composed behind it, which is far
+    // longer than a drag can wait. This works on the pixels already on screen, over the
+    // patch the segment can reach and no further. The stage's answer replaces all of it
+    // when the button comes up.
+    //
+    // `strength` is how hard the stroke has hit each pixel so far, RF, updated in place by
+    // taking the strongest dab; the patch is worked out from `base`, the untouched
+    // picture, rather than from what the last segment left. That is what stops a soft
+    // brush hardening as it overlaps its own rim along a stroke — see the note on the
+    // definition. `beneath` is the source over the same region and may be null.
+    static Ref<Image> paint_patch(
+            const Ref<Image> &base,
+            const Ref<Image> &strength,
+            const Ref<Image> &beneath,
+            const Vector2i &origin,
+            const Vector2i &from,
+            const Vector2i &to,
+            int64_t radius,
+            double sharpness,
+            bool adding);
 };
 
 } // namespace godot

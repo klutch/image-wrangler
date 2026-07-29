@@ -195,6 +195,12 @@ func draft_index() -> int:
     return _draft
 
 
+## The stroke being drawn, or null. The dock reads the brush off it so that its live paint
+## is laid down at the same width and softness the stage will use.
+func draft_stroke() -> BrushStroke:
+    return _draft_stroke()
+
+
 ## Every stroke's path, for the dock to hand to the preview.
 func get_paths() -> Array:
     var out := []
@@ -228,19 +234,6 @@ func get_enabled_flags() -> PackedByteArray:
     return out
 
 
-## Whether each stroke paints solid rather than erasing, in the same order. The overlay
-## draws the two differently, since which one a drag is laying down is the thing you most
-## need to know while laying it down.
-func get_adding_flags() -> PackedByteArray:
-    var out := PackedByteArray()
-    var strokes := _stroke_list()
-    if strokes == null:
-        return out
-    for stroke in strokes.strokes:
-        out.append(1 if stroke != null and stroke.mode == IWAlphaMode.Mode.ADD else 0)
-    return out
-
-
 # --- The drawing session ------------------------------------------------
 
 ## Opens a stroke at [param at], on the brush the sliders are currently set to.
@@ -260,14 +253,18 @@ func begin_stroke(at: Vector2i) -> void:
     _draft = strokes.size() - 1
     _refresh_rows()
     _set_hint("Painting. Release to finish the stroke.")
+    # The overlay drops the highlighted stroke's outline while one is being drawn, so it
+    # still has to hear about the start — just not about every point after it.
     selection_changed.emit()
 
 
 ## Adds a point to the open stroke.
 ##
-## Deliberately does not emit [signal strokes_changed]: a drag reports motion many times a
-## second, and re-running the stack that often would be unusable. The dock re-runs once the
-## drag ends. The overlay is told, so the paint is still seen going down.
+## Deliberately emits nothing. [signal strokes_changed] would re-run the stack, which a
+## drag reporting many times a second cannot afford; [signal selection_changed] would
+## rebuild the overlay, and there is no longer anything in it that a growing stroke
+## changes — the paint going down is shown by the dock repainting the image itself. What is
+## left is the row's own label, which is one Label write.
 func extend_stroke(at: Vector2i) -> void:
     var stroke := _draft_stroke()
     if stroke == null:
@@ -275,7 +272,6 @@ func extend_stroke(at: Vector2i) -> void:
     if not stroke.extend(at):
         return
     _redraw_row(_draft)
-    selection_changed.emit()
 
 
 ## Ends the open stroke, keeping it only if it put any paint down.
@@ -405,8 +401,10 @@ func _update_buttons() -> void:
     _remove_button.disabled = not _interactive or selected_index() < 0
     _clear_button.disabled = not _interactive or _list.count() == 0
     _draw_button.disabled = not _interactive
-    _radius.editable = _interactive
-    _sharpness.editable = _interactive
+    # read_only rather than the editable a Range has: EditorSpinSlider does not carry that
+    # property, and assigning it fails at runtime rather than at parse.
+    _radius.read_only = not _interactive
+    _sharpness.read_only = not _interactive
 
 
 ## Shows [param text] under the list, or gives the line back when it is empty.

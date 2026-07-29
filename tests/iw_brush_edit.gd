@@ -54,11 +54,15 @@ func _initialize() -> void:
     _check_switches()
     _check_identity()
     _check_round_trip()
+    _check_live_matches_the_stage()
+    _check_patch_matches_the_whole()
+    _check_incremental_patches_match()
+    _check_add_takes_the_source_colour()
     await _check_preview_reports_a_drag()
 
     if _failures == 0:
-        print("Brush Edit OK — strokes are continuous, they stack in order, and one "
-                + "stroke cannot paint over itself.")
+        print("Brush Edit OK — strokes are continuous, they stack in order, one stroke "
+                + "cannot paint over itself, and the live brush matches the stage.")
     quit(1 if _failures > 0 else 0)
 
 
@@ -341,6 +345,179 @@ func _check_round_trip() -> void:
             "Brush Edit settings did not survive the sidecar codec")
 
 
+# --- The live brush agrees with the stage ------------------------------
+
+## The whole point of the live path: what the dock paints between two mouse events has to
+## be what the run puts there when the button comes up. Two separate pieces of code — one
+## painting a pipeline context, one painting composed pixels — and if they ever disagree
+## the stroke visibly jumps at the end of every drag.
+func _check_live_matches_the_stage() -> void:
+    var rows := _solid(24, 24)
+    # A path whose samples are far apart, so the walk between them has work to do, and one
+    # that doubles back over itself — which is where applying each segment to the last one
+    # rather than to the untouched picture shows up as a hardened rim.
+    var path := [
+        Vector2i(4, 5), Vector2i(18, 9), Vector2i(11, 20), Vector2i(12, 19), Vector2i(6, 7),
+    ]
+    for radius: int in [1, 5]:
+        for sharpness: float in [1.0, 0.35, 0.0]:
+            var ctx := IWPipelineContext.from_image(_image(rows))
+            _stage([_stroke(path, radius, sharpness, false)]).process_context(ctx)
+            var by_stage := IWCompose.compose(ctx)
+
+            var live := _live_paint(rows, path, radius, sharpness, false)
+
+            var differing := 0
+            var worst := 0
+            for y in 24:
+                for x in 24:
+                    var want: int = by_stage.get_pixel(x, y).a8
+                    var got: int = live.get_pixel(x, y).a8
+                    if want != got:
+                        differing += 1
+                        worst = maxi(worst, absi(want - got))
+            _expect(differing == 0,
+                    "the live brush and the stage disagree on %d pixels (worst %d/255) at "
+                    % [differing, worst] + "radius %d, sharpness %.2f" % [radius, sharpness])
+
+
+## Drives the live brush over a whole path the way the dock does: a dab where the button
+## went down, then one call per segment, each handed the untouched picture and the strength
+## the stroke has built up so far.
+func _live_paint(rows: Array, path: Array, radius: int, sharpness: float,
+        adding: bool) -> Image:
+    var base := _image(rows)
+    var strength := Image.create_empty(
+            base.get_width(), base.get_height(), false, Image.FORMAT_RF)
+    var shown: Image = IWStageKernels.paint_patch(base, strength, null, Vector2i.ZERO,
+            path[0], path[0], radius, sharpness, adding)
+    for i in range(1, path.size()):
+        shown = IWStageKernels.paint_patch(base, strength, null, Vector2i.ZERO,
+                path[i - 1], path[i], radius, sharpness, adding)
+    return shown
+
+
+## And that painting a patch of the image gives the same answer as painting all of it,
+## which is what makes it safe to only ever touch the region a segment can reach.
+func _check_patch_matches_the_whole() -> void:
+    var rows := _solid(20, 20)
+    var from := Vector2i(6, 6)
+    var to := Vector2i(13, 11)
+
+    var base := _image(rows)
+    var full_strength := Image.create_empty(20, 20, false, Image.FORMAT_RF)
+    var whole: Image = IWStageKernels.paint_patch(base, full_strength, null, Vector2i.ZERO,
+            from, to, 4, 0.3, false)
+
+    # The same segment, painted into just the box it can reach and put back.
+    var pieced := _image(rows)
+    var region := Rect2i(2, 2, 16, 14)
+    var strength := Image.create_empty(20, 20, false, Image.FORMAT_RF).get_region(region)
+    var patch: Image = IWStageKernels.paint_patch(base.get_region(region), strength, null,
+            region.position, from, to, 4, 0.3, false)
+    pieced.blit_rect(patch, Rect2i(Vector2i.ZERO, region.size), region.position)
+
+    var differing := 0
+    for y in 20:
+        for x in 20:
+            if whole.get_pixel(x, y).a8 != pieced.get_pixel(x, y).a8:
+                differing += 1
+    _expect(differing == 0,
+            "%d pixels differ between painting the whole image and painting the patch "
+            % differing + "the segment reaches")
+
+
+## And that the dock's own arithmetic — a base, a strength buffer, and one patch per
+## segment, each only as big as that segment can reach — lands on the same picture as
+## painting the whole image every time.
+##
+## [b]This mirrors [code]_extend_live_paint[/code] rather than calling it.[/b] The dock
+## cannot be built headless: its settings form is made of [EditorSpinSlider], which only
+## the real editor can instantiate. So the loop is written out again here, which does not
+## prove the dock's copy of the bounds maths is right — but it does prove the approach is,
+## and it runs every Godot call that path depends on, including the ones a parse check
+## cannot see through.
+func _check_incremental_patches_match() -> void:
+    var rows := _solid(28, 28)
+    var path := [Vector2i(5, 6), Vector2i(20, 10), Vector2i(9, 22), Vector2i(10, 21)]
+    var radius := 4
+    var sharpness := 0.3
+
+    var want := _live_paint(rows, path, radius, sharpness, false)
+
+    var base := _image(rows)
+    var strength := Image.create_empty(28, 28, false, Image.FORMAT_RF)
+    var shown := base.duplicate()
+    var bounds := Rect2i()
+    var at: Vector2i = path[0]
+    for i in path.size():
+        var to: Vector2i = path[i]
+        var touched := _reach_of(at, to, radius, base.get_size())
+        var whole := Rect2i(Vector2i.ZERO, touched.size)
+        var piece := strength.get_region(touched)
+        var patch: Image = IWStageKernels.paint_patch(base.get_region(touched), piece, null,
+                touched.position, at, to, radius, sharpness, false)
+        if not _expect(patch != null, "the kernel returned nothing for segment %d" % i):
+            return
+        strength.blit_rect(piece, whole, touched.position)
+        shown.blit_rect(patch, whole, touched.position)
+        at = to
+        bounds = touched if bounds.size.x <= 0 else bounds.merge(touched)
+        # What the view would be handed. Only asked for its size, since the point here is
+        # that the region exists and covers everything painted so far.
+        var upload: Image = shown.get_region(bounds)
+        _expect(upload.get_size() == bounds.size,
+                "the upload region does not match the bounds at segment %d" % i)
+
+    var differing := 0
+    for y in 28:
+        for x in 28:
+            if want.get_pixel(x, y).a8 != shown.get_pixel(x, y).a8:
+                differing += 1
+    _expect(differing == 0,
+            "%d pixels differ between painting segment by segment and painting the whole "
+            % differing + "image at once")
+
+
+## The pixels a segment of the brush can reach, clamped. Mirrors the dock's own
+## [code]_brush_bounds[/code]; see the note above.
+func _reach_of(from: Vector2i, to: Vector2i, radius: int, size: Vector2i) -> Rect2i:
+    var low := Vector2i(mini(from.x, to.x), mini(from.y, to.y)) - Vector2i.ONE * radius
+    var high := Vector2i(maxi(from.x, to.x), maxi(from.y, to.y)) + Vector2i.ONE * radius
+    return Rect2i(low, high - low + Vector2i.ONE).intersection(Rect2i(Vector2i.ZERO, size))
+
+
+## Add lifts a pixel out of nothing, and has to take a colour from somewhere. The composed
+## image has none worth having at a pixel that was showing nothing, so it comes from the
+## source.
+func _check_add_takes_the_source_colour() -> void:
+    var base := Image.create_empty(9, 9, false, Image.FORMAT_RGBA8)
+    base.fill(Color(0, 0, 0, 0))
+    var beneath := Image.create_empty(9, 9, false, Image.FORMAT_RGBA8)
+    beneath.fill(Color8(200, 60, 30))
+    var strength := Image.create_empty(9, 9, false, Image.FORMAT_RF)
+
+    var patch: Image = IWStageKernels.paint_patch(base, strength, beneath, Vector2i.ZERO,
+            Vector2i(4, 4), Vector2i(4, 4), 2, 1.0, true)
+
+    var painted := patch.get_pixel(4, 4)
+    _expect(painted.a8 == 255, "Add did not make the pixel solid (%d)" % painted.a8)
+    _expect(painted.r8 == 200 and painted.g8 == 60 and painted.b8 == 30,
+            "Add took the colour from the wrong place (%d, %d, %d)"
+            % [painted.r8, painted.g8, painted.b8])
+
+    # Outside the brush nothing is touched at all, colour included.
+    _expect(patch.get_pixel(0, 0).a8 == 0, "Add reached past its own radius")
+
+    # With no source to read, the alpha still moves — a caller that has nothing to offer
+    # gets a stroke rather than an error.
+    var bare: Image = IWStageKernels.paint_patch(base,
+            Image.create_empty(9, 9, false, Image.FORMAT_RF), null, Vector2i.ZERO,
+            Vector2i(4, 4), Vector2i(4, 4), 2, 1.0, true)
+    _expect(bare.get_pixel(4, 4).a8 == 255,
+            "Add with no source image left the pixel transparent")
+
+
 # --- The preview turns a drag into points ------------------------------
 
 ## The one piece of this feature that lives in the interface and can still be checked
@@ -396,10 +573,19 @@ func _check_preview_reports_a_drag() -> void:
     _expect(finished[0] == 1,
             "the release reported %d endings rather than one" % finished[0])
 
-    # And the overlay draws both ways without complaint.
-    view.set_brush_overlay([Vector2i(4, 4), Vector2i(9, 12)], 6, true, [Vector2i(1, 1)], 3)
+    # The highlighted-stroke outline draws both ways without complaint.
+    view.set_brush_overlay([Vector2i(4, 4), Vector2i(9, 12)], 6)
     await process_frame
-    view.set_brush_overlay([], 1, false, [], 1)
+    view.set_brush_overlay([], 1)
+    await process_frame
+
+    # And so does a live patch, including the hole it cuts in the image behind it — at a
+    # region in the middle, one against an edge, and one covering the lot, which are the
+    # three shapes the four surrounding bands collapse into.
+    for region: Rect2i in [Rect2i(8, 8, 6, 6), Rect2i(0, 0, 5, 32), Rect2i(0, 0, 32, 32)]:
+        view.set_live_patch(image.get_region(region), region)
+        await process_frame
+    view.clear_live_patch()
     await process_frame
 
     view.queue_free()

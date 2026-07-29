@@ -100,21 +100,8 @@ const MARKER_WIDTH := 1.5
 const MARKER_DASH := 5.0
 const MARKER_FILL_ALPHA := 0.14
 
-## What a stroke being painted is drawn in, by what it is doing.
-##
-## Red for taking away and green for putting back, which is the one place in this view a
-## colour carries meaning rather than identity: while a drag is in flight the result has
-## not caught up, so nothing else on screen says which of the two is happening.
-const BRUSH_SUBTRACT_COLOR := Color(1.0, 0.35, 0.3)
-const BRUSH_ADD_COLOR := Color(0.4, 1.0, 0.45)
-
-## How present the paint going down looks, and how present the highlighted stroke's
-## outline is.
-##
-## The draft is deliberately faint. It stands in for a result that has not been computed
-## yet, and paint drawn at full strength would be a claim about the answer rather than a
-## sketch of where it is going.
-const BRUSH_FILL_ALPHA := 0.45
+## How present the highlighted stroke's outline is. Short of solid, because it lies on top
+## of the pixels the stroke changed and those are what the row was clicked to look at.
 const BRUSH_OUTLINE_ALPHA := 0.7
 
 ## Segments in the circle drawn for a one-point stroke. Enough that a dab at high zoom
@@ -391,12 +378,16 @@ var _region_cursor := Vector2i(-1, -1)
 var _painting := false
 var _paint_last := Vector2i(-1, -1)
 
-## The stroke being painted right now, in image coordinates, and the brush it is being
-## painted with. Drawn as it is made, because a run only lands once the drag is over and a
-## brush that showed nothing until then would be a brush you cannot aim.
-var _brush_draft := PackedVector2Array()
-var _brush_draft_radius := 1
-var _brush_draft_adding := false
+## The patch of the image the brush has repainted during the drag in flight, and where it
+## sits. Null when nothing is being painted.
+##
+## [b]The paint is shown as image, not as an outline over one.[/b] A path drawn at the
+## brush's width says where the stroke went; it does not say what the stroke did, and on a
+## soft brush or a Subtract over something already faint those are different pictures. The
+## patch is the answer itself, laid over the region it covers — see
+## [method _draw_image_around].
+var _patch_texture: Texture2D
+var _patch_region := Rect2i()
 
 ## The highlighted stroke's path and brush, drawn as a thin outline so a row in the list
 ## can be found on the image. Empty when nothing is selected.
@@ -585,30 +576,48 @@ func set_polygons(polygons: Array, selected: int, draft: int, enabled := PackedB
     _canvas.queue_redraw()
 
 
-## Shows the two brush overlays: the stroke being painted right now, and the highlighted
-## one.
+## Shows the highlighted stroke's path, as a thin outline at its own brush width.
 ##
-## [param draft] is drawn at its full width and filled, because it is the paint going down
-## and the run that renders it has not happened yet — without it a drag would leave the
-## preview unchanged until the button came up. [param selected] is drawn as a thin outline
-## instead: that stroke is already in the result, and filling over it would hide the very
-## thing the user is looking at.
-##
-## Pass empty arrays for either to clear it.
-func set_brush_overlay(
-        draft: Array,
-        draft_radius: int,
-        draft_adding: bool,
-        selected: Array,
-        selected_radius: int) -> void:
+## An outline rather than a fill: that stroke is already in the result, and painting over
+## it would hide the very thing the row was clicked to look at. Pass an empty array to
+## clear it.
+func set_brush_overlay(selected: Array, selected_radius: int) -> void:
     # Converted to float points once here rather than per redraw, and copied for the same
-    # reason the polygons are: the caller's arrays belong to the operation and can change
+    # reason the polygons are: the caller's array belongs to the operation and can change
     # underneath us without a redraw being asked for.
-    _brush_draft = _to_points(draft)
-    _brush_draft_radius = maxi(draft_radius, 1)
-    _brush_draft_adding = draft_adding
     _brush_path = _to_points(selected)
     _brush_path_radius = maxi(selected_radius, 1)
+    if _canvas != null:
+        _canvas.queue_redraw()
+
+
+## Lays [param patch] over [param region] of the image, in place of what is there.
+##
+## What the live brush reports between mouse events. Only the region is uploaded, so the
+## cost of a drag is the area the stroke has reached rather than the size of the sheet —
+## which is the whole reason this exists rather than the view being handed a fresh copy of
+## the image on every motion event.
+##
+## Replaced rather than blended: a Subtract stroke takes alpha away, and paint drawn over
+## the top can only ever add. See [method _draw_image_around], which is what makes the
+## replacement possible at all.
+func set_live_patch(patch: Image, region: Rect2i) -> void:
+    if patch == null or patch.is_empty() or region.size.x <= 0 or region.size.y <= 0:
+        clear_live_patch()
+        return
+    _patch_texture = ImageTexture.create_from_image(patch)
+    _patch_region = region
+    if _canvas != null:
+        _canvas.queue_redraw()
+
+
+## Puts the view back to showing the image alone, for when the drag has ended and the run
+## has taken over.
+func clear_live_patch() -> void:
+    if _patch_texture == null:
+        return
+    _patch_texture = null
+    _patch_region = Rect2i()
     if _canvas != null:
         _canvas.queue_redraw()
 
@@ -1269,7 +1278,11 @@ func _draw_canvas() -> void:
     # ends. See the note on the property.
     if magenta_background:
         _canvas.draw_rect(frame, TRANSPARENCY_COLOR, true)
-    _canvas.draw_texture_rect(_texture, frame, false)
+    if _patch_texture != null:
+        _draw_image_around(_patch_region)
+        _canvas.draw_texture_rect(_patch_texture, _image_rect(_patch_region), false)
+    else:
+        _canvas.draw_texture_rect(_texture, frame, false)
     # Over the top rather than blended into it. Where the source is opaque this
     # is an ordinary cross-fade; where the result cut something away, the source
     # comes back over the checkerboard, which is exactly the comparison being
@@ -1283,6 +1296,41 @@ func _draw_canvas() -> void:
     # Over everything, including the overlays, since it is about the whole view
     # rather than about anything drawn on it.
     _draw_busy()
+
+
+## Where a rectangle of image pixels lands on screen.
+func _image_rect(region: Rect2i) -> Rect2:
+    var scale := _scale()
+    return Rect2(_content_origin + Vector2(region.position) * scale, Vector2(region.size) * scale)
+
+
+## Draws the image everywhere except [param hole], as up to four bands around it.
+##
+## [b]The hole is what lets the live patch replace rather than blend.[/b] A patch drawn
+## over a complete image can only ever add to it, and a Subtract stroke takes alpha away —
+## so the pixels it is replacing must not be underneath it. Cutting the hole is the whole
+## of the trick, and it costs four draw calls against the one it replaces.
+##
+## Written as regions of the source texture rather than by clipping, since the canvas has
+## one clip rectangle and it is already spent on the viewport.
+func _draw_image_around(hole: Rect2i) -> void:
+    var frame := Rect2i(Vector2i.ZERO, _image_size)
+    var gap := hole.intersection(frame)
+    if gap.size.x <= 0 or gap.size.y <= 0:
+        _canvas.draw_texture_rect(_texture, Rect2(_content_origin, _content_size), false)
+        return
+
+    for band: Rect2i in [
+        # Full width above and below, then the two stubs either side of the hole, so no
+        # band overlaps another and every pixel outside the hole is drawn exactly once.
+        Rect2i(0, 0, frame.size.x, gap.position.y),
+        Rect2i(0, gap.end.y, frame.size.x, frame.size.y - gap.end.y),
+        Rect2i(0, gap.position.y, gap.position.x, gap.size.y),
+        Rect2i(gap.end.x, gap.position.y, frame.size.x - gap.end.x, gap.size.y),
+    ]:
+        if band.size.x <= 0 or band.size.y <= 0:
+            continue
+        _canvas.draw_texture_rect_region(_texture, _image_rect(band), band)
 
 
 ## [b]A single picked pixel draws nothing at all until a run has reported.[/b] It used to
@@ -1371,56 +1419,38 @@ func _draw_dashed_rect(box: Rect2, color: Color, width: float) -> void:
     _canvas.draw_dashed_line(bottom_left, top_left, color, width, MARKER_DASH)
 
 
-## The two brush overlays: the stroke going down now, and the highlighted one.
+## The highlighted stroke's path, outlined at its own brush width.
 ##
-## The draft is drawn whether or not the overlays are showing, for the reason the polygon
-## draft is: a stroke being painted this instant is not an overlay on the result, it is the
-## thing being done. The highlighted path is an overlay and obeys the switch.
+## The only brush overlay there is. What a stroke is doing while it is being drawn is shown
+## by repainting the image itself — see [method set_live_patch] — rather than by a shape
+## laid over it: a path at the brush's width says where the stroke went and not what it
+## did, and on a soft brush or a Subtract over something already faint those are different
+## pictures. This one is a different question, and an outline is the right answer to it:
+## which of these rows is that.
 ##
-## Both are drawn as a polyline at the brush's own width, which is a round-capped, round-
-## jointed line — the same shape a run of overlapping round dabs makes, so what is on
-## screen during the drag is the shape that lands when it ends.
+## Drawn as a round-capped, round-jointed polyline, which is the shape a run of overlapping
+## round dabs makes. A single point is a dab rather than a line, and draw_polyline draws
+## nothing at all for one point, so that case is a circle of its own.
 func _draw_brush() -> void:
-    if markers_visible and _brush_path.size() > 0:
-        _draw_brush_path(_brush_path, _brush_path_radius, MARKER_SELECTED_COLOR, false)
-    if _brush_draft.size() > 0:
-        # Add and Subtract are told apart by colour, because which one is going down is
-        # the thing you most need to know while it is going down — and on a preview where
-        # the result has not caught up yet there is nothing else saying so.
-        var color := BRUSH_ADD_COLOR if _brush_draft_adding else BRUSH_SUBTRACT_COLOR
-        _draw_brush_path(_brush_draft, _brush_draft_radius, color, true)
-
-
-## One path at the brush's width: filled while it is being painted, outlined when it is
-## the highlighted row.
-##
-## A single point is a dab rather than a line, and draw_polyline draws nothing at all for
-## one point, so that case is a circle of its own.
-func _draw_brush_path(path: PackedVector2Array, radius: int, color: Color, filled: bool) -> void:
+    if not markers_visible or _brush_path.is_empty():
+        return
     var scale := _scale()
     # The brush reaches half a pixel short of its radius, matching the kernel, so a radius
     # of 1 is one pixel across rather than three.
-    var width := maxf((radius * 2.0 - 1.0) * scale, 1.0)
-    var screen := _to_screen(path)
+    var width := maxf((_brush_path_radius * 2.0 - 1.0) * scale, 1.0)
+    var screen := _to_screen(_brush_path)
 
-    if filled:
-        if screen.size() == 1:
-            _canvas.draw_circle(screen[0], width * 0.5, Color(color, BRUSH_FILL_ALPHA))
-        else:
-            _canvas.draw_polyline(screen, Color(color, BRUSH_FILL_ALPHA), width, true)
-        return
-
-    # Outlined: two circles or two polylines, the outer one dark, so the shape reads
-    # against light and dark art alike the way every other marker here does.
+    # Two passes, the outer one dark, so the shape reads against light and dark art alike
+    # the way every other marker here does.
     if screen.size() == 1:
         _canvas.draw_arc(screen[0], width * 0.5, 0.0, TAU, BRUSH_OUTLINE_SEGMENTS,
                 MARKER_SHADOW_COLOR, MARKER_WIDTH + 2.0)
         _canvas.draw_arc(screen[0], width * 0.5, 0.0, TAU, BRUSH_OUTLINE_SEGMENTS,
-                color, MARKER_WIDTH)
+                MARKER_SELECTED_COLOR, MARKER_WIDTH)
         return
     _canvas.draw_polyline(screen, Color(MARKER_SHADOW_COLOR, BRUSH_OUTLINE_ALPHA),
             width, true)
-    _canvas.draw_polyline(screen, Color(color, BRUSH_OUTLINE_ALPHA),
+    _canvas.draw_polyline(screen, Color(MARKER_SELECTED_COLOR, BRUSH_OUTLINE_ALPHA),
             maxf(width - MARKER_WIDTH * 2.0, 1.0), true)
 
 

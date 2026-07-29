@@ -174,6 +174,36 @@ var _sources: PackedStringArray = PackedStringArray()
 var _source_image: Image
 var _result_image: Image
 
+## The live brush's working copy of what is on screen, and the state of the drag painting
+## into it.
+##
+## [b]Held for the length of one drag and thrown away at the end of it.[/b] A stroke cannot
+## wait for the stack to re-run between two mouse events, so the paint goes straight onto
+## the composed pixels here and the real run replaces the lot when the button comes up.
+##
+## [member _paint_base] is the untouched picture and [member _paint_strength] is how hard
+## the stroke has hit each pixel so far. Every patch is worked out from those two rather
+## than from the last one, so that a soft brush overlapping its own rim a dozen times along
+## a stroke stays soft. [member _paint_image] is only where the patches are kept, for the
+## upload and for the hand-off at the end.
+##
+## [member _paint_beneath] is the source at the same size, for the colour Add needs where
+## it lifts a pixel out of full transparency — there is nothing meaningful in the composed
+## image at such a pixel. Built only for an Add stroke, since Subtract never asks.
+##
+## [member _paint_bounds] is everything the stroke has reached so far, which is what gets
+## uploaded. It grows with the stroke and no faster, which is the point: the cost of a drag
+## is the area it covers rather than the size of the sheet.
+var _paint_image: Image
+var _paint_base: Image
+var _paint_strength: Image
+var _paint_beneath: Image
+var _paint_bounds := Rect2i()
+var _paint_at := Vector2i(-1, -1)
+var _paint_radius := 1
+var _paint_sharpness := 1.0
+var _paint_adding := false
+
 ## Whether a run is in flight.
 ##
 ## A run sits between two stages while the editor goes on painting, and the editor is
@@ -2296,27 +2326,143 @@ func _pick_color_region(region: Rect2i) -> void:
 
 ## One pixel a stroke drag has reached.
 ##
-## The overlay is redrawn and nothing else: a drag reports many times a second, and
-## re-running the stack on every point would be unusable on any real image. The run waits
-## for the button to come up. What the overlay draws in the meantime is the paint going
-## down, which is why it can be seen at all before then.
+## [b]The stack is not re-run here.[/b] A drag reports many times a second and a run takes
+## as long as the whole stack, so what the preview shows in the meantime is painted
+## directly onto the pixels already on screen — over the patch this segment can reach and
+## no further. The real run happens once, when the button comes up, and replaces all of it.
 func _on_stroke_point(pixel: Vector2i, starting: bool) -> void:
     var painting := _painting_list()
     if painting == null:
         return
     if starting:
         painting.begin_stroke(pixel)
+        _begin_live_paint(painting, pixel)
     else:
         painting.extend_stroke(pixel)
+        _extend_live_paint(pixel)
 
 
 ## The drag ended. This is the one that re-runs, through the list's own changed signal.
+##
+## What was painted live stays on screen as the image until that run lands. Clearing it
+## here instead would drop the preview back to the picture from before the stroke and then
+## snap forward again a moment later, which reads as the stroke having failed.
 func _on_stroke_finished() -> void:
+    # The live paint is committed before anything else and without asking who owns the
+    # tool, because this also fires when the tool is taken away mid-drag — and a patch left
+    # on screen with nothing behind it able to clear it would outlive the stroke it
+    # belongs to.
     var painting := _painting_list()
+    if _paint_image != null:
+        _result_image = _paint_image
+        _preview.clear_live_patch()
+        _preview.set_image(_result_image)
+    _end_live_paint()
     if painting == null:
         return
     painting.finish_stroke()
     _update_overlays()
+
+
+## Takes a working copy of what is on screen and starts painting into it.
+##
+## The copy is per drag rather than per motion event: one duplicate at the start, and after
+## that nothing but the patches. Falls back to the source when no run has landed yet, which
+## is what an image looks like before its first preview.
+func _begin_live_paint(painting: BrushList, at: Vector2i) -> void:
+    _end_live_paint()
+    var shown := _result_image if _result_image != null else _source_image
+    if shown == null or shown.is_empty():
+        return
+
+    _paint_base = shown.duplicate()
+    if _paint_base.get_format() != Image.FORMAT_RGBA8:
+        _paint_base.convert(Image.FORMAT_RGBA8)
+    # What the patches are kept in. Starts as the picture, and only the pixels the stroke
+    # reaches are ever written into it.
+    _paint_image = _paint_base.duplicate()
+
+    var stroke := painting.draft_stroke()
+    if stroke == null:
+        _end_live_paint()
+        return
+    _paint_radius = stroke.radius
+    _paint_sharpness = stroke.sharpness
+    _paint_adding = stroke.mode == IWAlphaMode.Mode.ADD
+
+    # One float per pixel, all zero: nothing has been hit yet.
+    _paint_strength = Image.create_empty(
+            _paint_base.get_width(), _paint_base.get_height(), false, Image.FORMAT_RF)
+
+    # Only an Add stroke asks what colour is under a pixel that is showing nothing, so
+    # only an Add stroke pays for the copy.
+    if _paint_adding and _source_image != null and not _source_image.is_empty() \
+            and _source_image.get_size() == _paint_base.get_size():
+        _paint_beneath = _source_image.duplicate()
+        if _paint_beneath.get_format() != Image.FORMAT_RGBA8:
+            _paint_beneath.convert(Image.FORMAT_RGBA8)
+
+    _paint_at = at
+    _paint_bounds = Rect2i()
+    _extend_live_paint(at)
+
+
+## Lays one segment onto the working copy and shows the result.
+##
+## Two regions are in play and they are different sizes on purpose. The segment's own box
+## is what gets painted, and is as small as the brush and the distance moved allow. The
+## accumulated box is what gets uploaded, since the view replaces one rectangle of the
+## image and everything painted so far has to be inside it.
+func _extend_live_paint(to: Vector2i) -> void:
+    if _paint_image == null:
+        return
+    var touched := _brush_bounds(_paint_at, to)
+    if touched.size.x <= 0 or touched.size.y <= 0:
+        return
+
+    var whole := Rect2i(Vector2i.ZERO, touched.size)
+    var strength := _paint_strength.get_region(touched)
+    var beneath: Image = null
+    if _paint_beneath != null:
+        beneath = _paint_beneath.get_region(touched)
+    var patch: Image = IWStageKernels.paint_patch(
+            _paint_base.get_region(touched), strength, beneath, touched.position,
+            _paint_at, to, _paint_radius, _paint_sharpness, _paint_adding)
+    if patch == null:
+        return
+    # The kernel updated the strength for this region in place; putting it back is what
+    # carries the stroke's history into the next segment.
+    _paint_strength.blit_rect(strength, whole, touched.position)
+    _paint_image.blit_rect(patch, whole, touched.position)
+
+    _paint_at = to
+    _paint_bounds = touched if _paint_bounds.size.x <= 0 else _paint_bounds.merge(touched)
+    _preview.set_live_patch(_paint_image.get_region(_paint_bounds), _paint_bounds)
+
+
+## The pixels a segment of the brush can reach, clamped to the image.
+##
+## Grown by the whole radius rather than by the reach, which is half a pixel less: a
+## rectangle a pixel too generous costs one row and column, and one too tight would clip
+## the paint.
+func _brush_bounds(from: Vector2i, to: Vector2i) -> Rect2i:
+    if _paint_base == null:
+        return Rect2i()
+    var low := Vector2i(mini(from.x, to.x), mini(from.y, to.y)) - Vector2i.ONE * _paint_radius
+    var high := Vector2i(maxi(from.x, to.x), maxi(from.y, to.y)) + Vector2i.ONE * _paint_radius
+    return Rect2i(low, high - low + Vector2i.ONE).intersection(
+            Rect2i(Vector2i.ZERO, _paint_base.get_size()))
+
+
+## Drops the working copies. Four images the size of the sheet is the largest thing the
+## dock ever holds, so they go as soon as the drag that needed them is over.
+func _end_live_paint() -> void:
+    _paint_image = null
+    _paint_base = null
+    _paint_strength = null
+    _paint_beneath = null
+    _paint_bounds = Rect2i()
+    _paint_at = Vector2i(-1, -1)
 
 
 ## Whichever brush list currently owns the preview, or null.
@@ -2437,13 +2583,11 @@ func _update_overlays() -> void:
     var selected_region := -1
     var draft_region := -1
 
-    # The brush overlays are not merged the way the others are. A path is drawn at its own
-    # brush width, so a flat list of paths would need a parallel list of widths and modes
-    # to go with it — and only two of them are ever on screen: the one being painted and
-    # the highlighted one. Naming those two directly is the whole of what is needed.
-    var draft_path := []
-    var draft_radius := 1
-    var draft_adding := false
+    # The brush overlay is not merged the way the others are. A path is drawn at its own
+    # brush width, so a flat list of paths would need a parallel list of widths to go with
+    # it — and only one is ever on screen, since the stroke being drawn shows as paint on
+    # the image rather than as an outline over it. Naming that one directly is the whole of
+    # what is needed.
     var brush_path := []
     var brush_radius := 1
 
@@ -2482,28 +2626,23 @@ func _update_overlays() -> void:
                 regions.append_array(own_regions)
                 region_flags.append_array(list.get_enabled_flags())
             elif control is BrushList:
-                var brush := control as BrushList
-                var paths := brush.get_paths()
-                var radii := brush.get_radii()
-                # At most one list has a stroke in flight, because drawing is arbitrated.
-                var draft := brush.draft_index()
-                if draft >= 0 and draft < paths.size():
-                    draft_path = paths[draft]
-                    draft_radius = radii[draft]
-                    draft_adding = brush.get_adding_flags()[draft] != 0
                 # The highlighted stroke, and only from the list the user is working in —
                 # the same rule the merged selections above follow, and for the same
                 # reason: two lists each highlighting a row would draw two answers to a
-                # question that has one.
+                # question that has one. Never the one being drawn: that one is showing as
+                # paint on the image already, and an outline round it would be the second
+                # picture the switch to live painting was made to get rid of.
+                var brush := control as BrushList
                 var chosen := brush.selected_index()
+                var paths := brush.get_paths()
                 if brush == _overlay_owner and chosen >= 0 and chosen < paths.size() \
-                        and chosen != draft:
+                        and chosen != brush.draft_index():
                     brush_path = paths[chosen]
-                    brush_radius = radii[chosen]
+                    brush_radius = brush.get_radii()[chosen]
 
     _preview.set_markers(islands, selected_island, island_flags, island_flooded)
     _preview.set_polygons(regions, selected_region, draft_region, region_flags)
-    _preview.set_brush_overlay(draft_path, draft_radius, draft_adding, brush_path, brush_radius)
+    _preview.set_brush_overlay(brush_path, brush_radius)
 
 
 func _on_setting_changed() -> void:

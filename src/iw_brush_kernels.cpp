@@ -32,15 +32,48 @@ struct Stamp {
     double inner = 0.5;
 
     double strength_at(double distance) const {
-        if (distance > reach) {
-            return 0.0;
-        }
-        if (distance <= inner) {
-            return 1.0;
-        }
-        return (reach - distance) / iw::maxf(reach - inner, FEATHER_EPSILON);
+        return distance > reach
+                ? 0.0
+                : (distance <= inner
+                        ? 1.0
+                        : (reach - distance) / iw::maxf(reach - inner, FEATHER_EPSILON));
+    }
+
+    static Stamp of(int64_t radius, double sharpness) {
+        Stamp stamp;
+        stamp.reach = static_cast<double>(iw::maxi(radius, 1)) - 0.5;
+        stamp.inner = stamp.reach * iw::clampf(sharpness, 0.0, 1.0);
+        return stamp;
     }
 };
+
+// Walks the pixels from (x0, y0) to (x1, y1) a pixel at a time, calling `dab` on each.
+//
+// Bresenham, in the form that handles every octant without a special case. The starting
+// pixel is left to the caller: a stroke's segments share their ends, and both users here
+// have already dabbed the one they are starting from.
+template <typename Dab>
+void walk(int64_t x0, int64_t y0, int64_t x1, int64_t y1, const Dab &dab) {
+    int64_t x = x0;
+    int64_t y = y0;
+    const int64_t step_x = x1 >= x ? 1 : -1;
+    const int64_t step_y = y1 >= y ? 1 : -1;
+    const int64_t span_x = (x1 >= x ? x1 - x : x - x1);
+    const int64_t span_y = -(y1 >= y ? y1 - y : y - y1);
+    int64_t error = span_x + span_y;
+    while (x != x1 || y != y1) {
+        const int64_t doubled = error * 2;
+        if (doubled >= span_y) {
+            error += span_y;
+            x += step_x;
+        }
+        if (doubled <= span_x) {
+            error += span_x;
+            y += step_y;
+        }
+        dab(x, y);
+    }
+}
 
 } // namespace
 
@@ -131,9 +164,7 @@ PackedInt32Array IWStageKernels::paint_strokes(
             continue;
         }
 
-        Stamp stamp;
-        stamp.reach = static_cast<double>(iw::maxi(radius_ptr[s], 1)) - 0.5;
-        stamp.inner = stamp.reach * iw::clampf(sharp_ptr[s], 0.0, 1.0);
+        const Stamp stamp = Stamp::of(radius_ptr[s], sharp_ptr[s]);
         const bool is_adding = adding_ptr[s] != 0;
         const int32_t here = static_cast<int32_t>(s);
         const int64_t radius = iw::maxi(radius_ptr[s], 1);
@@ -182,29 +213,10 @@ PackedInt32Array IWStageKernels::paint_strokes(
             const int64_t to_x = point_ptr[(first + n) * 2];
             const int64_t to_y = point_ptr[(first + n) * 2 + 1];
 
-            // Bresenham, in the form that handles every octant without a special case.
             // The starting pixel is skipped rather than re-dabbed: the previous segment
             // already laid it down, and a dab is idempotent anyway since stamps combine
             // by taking the strongest.
-            int64_t x = from_x;
-            int64_t y = from_y;
-            const int64_t step_x = to_x >= x ? 1 : -1;
-            const int64_t step_y = to_y >= y ? 1 : -1;
-            const int64_t span_x = (to_x >= x ? to_x - x : x - to_x);
-            const int64_t span_y = -(to_y >= y ? to_y - y : y - to_y);
-            int64_t error = span_x + span_y;
-            while (x != to_x || y != to_y) {
-                const int64_t doubled = error * 2;
-                if (doubled >= span_y) {
-                    error += span_y;
-                    x += step_x;
-                }
-                if (doubled <= span_x) {
-                    error += span_x;
-                    y += step_y;
-                }
-                dab(x, y);
-            }
+            walk(from_x, from_y, to_x, to_y, dab);
             from_x = to_x;
             from_y = to_y;
         }
@@ -272,4 +284,128 @@ PackedInt32Array IWStageKernels::paint_strokes(
     }
 
     return touched;
+}
+
+// Adds one segment to a stroke in flight and returns the patch of the preview it leaves.
+//
+// [b]This is the live half of the brush, and it is not the same code path as the stage.[/b]
+// The stage paints alpha into a pipeline context and the run composes the answer; that
+// takes as long as the whole stack, which is far longer than the gap between two mouse
+// events. So while the drag is in flight the paint goes onto the pixels already on screen,
+// over the patch the segment can reach and no further. When the button comes up the real
+// run lands and replaces all of it.
+//
+// [b]The stroke's strength is accumulated, not its result.[/b] `strength` carries how
+// hard the stroke has hit each pixel so far and is updated in place, taking the strongest
+// dab rather than adding them up — and the patch is then worked out from `base`, which is
+// the untouched picture, and never from what the last segment left. Applying each segment
+// to the one before it would be the wrong arithmetic: consecutive samples are a pixel or
+// two apart, so a soft brush overlaps its own rim a dozen times along any stroke, and
+// lerping once per overlap would drive a feathered edge hard within a few pixels of
+// travel. It is the same rule the stage keeps within a stroke, kept the same way, so the
+// two agree at the moment the drag ends and the picture does not jump.
+//
+// [b]What it costs is exactness where a stage sits below Brush Edit.[/b] Anything that
+// re-derives alpha from the stroke — Refine Edges, Edge Cleanup, the colour bleed — has
+// not run here, so the live picture is the paint alone. The stage's answer is the one that
+// survives; this is a sketch of where it is going, which is what a brush needs and what
+// the run cannot deliver in time.
+//
+// `base`, `strength` and `beneath` all cover the same region, `origin` says where that
+// region sits in the image, and `from` and `to` are in image coordinates. Both ends are
+// dabbed, so a segment that starts and ends on the same pixel is the single dab a click
+// puts down. `beneath` is the source over the region, read only where Add lifts a pixel
+// out of full transparency — the colour already showing means nothing there, since nothing
+// was — and may be null on a Subtract stroke, which never asks.
+Ref<Image> IWStageKernels::paint_patch(
+        const Ref<Image> &base,
+        const Ref<Image> &strength,
+        const Ref<Image> &beneath,
+        const Vector2i &origin,
+        const Vector2i &from,
+        const Vector2i &to,
+        int64_t radius,
+        double sharpness,
+        bool adding) {
+    ERR_FAIL_COND_V(base.is_null() || strength.is_null(), Ref<Image>());
+    const int64_t width = base->get_width();
+    const int64_t height = base->get_height();
+    ERR_FAIL_COND_V(width <= 0 || height <= 0, Ref<Image>());
+    ERR_FAIL_COND_V_MSG(base->get_format() != Image::FORMAT_RGBA8, Ref<Image>(),
+            "Image Wrangler: the brush's base patch must be RGBA8.");
+    ERR_FAIL_COND_V_MSG(strength->get_format() != Image::FORMAT_RF, Ref<Image>(),
+            "Image Wrangler: the brush's strength patch must be RF.");
+    ERR_FAIL_COND_V(strength->get_width() != width || strength->get_height() != height,
+            Ref<Image>());
+
+    const int64_t count = width * height;
+    PackedByteArray out = base->get_data();
+    PackedByteArray marks = strength->get_data();
+    if (out.size() != count * 4 || marks.size() != count * 4) {
+        return Ref<Image>();
+    }
+    uint8_t *pixels = out.ptrw();
+    // The strength map is a one-channel float image, so its bytes are the floats.
+    float *hit = reinterpret_cast<float *>(marks.ptrw());
+
+    // The source colours over the same region, when there are any. Checked for size as
+    // well as for null: a caller handing over a differently sized region would otherwise
+    // read colours from the wrong pixels rather than fail.
+    PackedByteArray under;
+    const uint8_t *source = nullptr;
+    if (beneath.is_valid() && beneath->get_format() == Image::FORMAT_RGBA8
+            && beneath->get_width() == width && beneath->get_height() == height) {
+        under = beneath->get_data();
+        source = under.ptr();
+    }
+
+    const Stamp stamp = Stamp::of(radius, sharpness);
+    const int64_t reach = iw::maxi(radius, 1);
+
+    const auto dab = [&](int64_t cx, int64_t cy) {
+        const int64_t local_x = cx - origin.x;
+        const int64_t local_y = cy - origin.y;
+        const int64_t first_col = iw::maxi(local_x - reach, 0);
+        const int64_t last_col = iw::mini(local_x + reach, width - 1);
+        const int64_t first_row = iw::maxi(local_y - reach, 0);
+        const int64_t last_row = iw::mini(local_y + reach, height - 1);
+        for (int64_t y = first_row; y <= last_row; y++) {
+            const double dy = static_cast<double>(y - local_y);
+            for (int64_t x = first_col; x <= last_col; x++) {
+                const double dx = static_cast<double>(x - local_x);
+                const double value = stamp.strength_at(std::sqrt(dx * dx + dy * dy));
+                const int64_t at = y * width + x;
+                if (value > iw::widen(hit[at])) {
+                    hit[at] = iw::narrow(value);
+                }
+            }
+        }
+    };
+
+    dab(from.x, from.y);
+    if (from != to) {
+        walk(from.x, from.y, to.x, to.y, dab);
+    }
+
+    const double to_unit = 1.0 / 255.0;
+    for (int64_t i = 0; i < count; i++) {
+        const double value = iw::widen(hit[i]);
+        if (value <= 0.0) {
+            continue;
+        }
+        const int64_t at = i * 4;
+        // Off the untouched picture, never off what the previous segment left. See the
+        // note above — this is the line that keeps a soft brush soft.
+        const double was = pixels[at + 3] * to_unit;
+        const double now = iw::clampf(iw::lerpf(was, adding ? 1.0 : 0.0, value), 0.0, 1.0);
+        if (adding && was <= 0.0 && source != nullptr) {
+            pixels[at] = source[at];
+            pixels[at + 1] = source[at + 1];
+            pixels[at + 2] = source[at + 2];
+        }
+        pixels[at + 3] = static_cast<uint8_t>(iw::roundi(now * 255.0));
+    }
+
+    strength->set_data(width, height, false, Image::FORMAT_RF, marks);
+    return Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, out);
 }
