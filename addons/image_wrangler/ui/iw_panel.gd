@@ -85,6 +85,17 @@ result on its own.
 It changes nothing about what is processed — only what is drawn over
 the preview."""
 
+const MAGENTA_TOOLTIP := """Lays solid magenta under the image instead of the checkerboard.
+
+The checkerboard is two greys a shade apart, which is what makes it read
+as backing — and also what hides a pixel at a tenth alpha. Magenta gives
+that up to answer the other question: anything short of solid takes on
+some of it, so a pinhole or a surviving fringe shows as colour rather
+than having to be spotted.
+
+Only under the image, so the margins still say where it ends. It changes
+nothing about what is processed or what is written out."""
+
 ## Whether saving one of this addon's own scripts rebuilds the interface by itself.
 ##
 ## On, because the alternative is remembering to press the shortcut — and an edit that
@@ -300,6 +311,7 @@ var _original_fade: HSlider
 var _zoom_select: OptionButton
 var _zoom_entry: LineEdit
 var _indicator_toggle: CheckBox
+var _magenta_toggle: CheckBox
 var _refresh_button: Button
 var _remove_button: Button
 var _clear_button: Button
@@ -548,6 +560,7 @@ func _rebuild_ui() -> void:
     var fade := _original_fade.value
     var zoom := _preview.get_zoom()
     var indicators := _preview.markers_visible
+    var magenta := _preview.magenta_background
     # Back into the store the rebuild reads it out of, so the new form comes up pointed
     # at the same operation instances rather than at fresh ones carrying defaults.
     _store_stack(path)
@@ -564,6 +577,8 @@ func _rebuild_ui() -> void:
 
     _preview.markers_visible = indicators
     _indicator_toggle.set_pressed_no_signal(indicators)
+    _preview.magenta_background = magenta
+    _magenta_toggle.set_pressed_no_signal(magenta)
     _apply_stack_for(path)
     _refresh_file_list()
     if selected >= 0 and selected < _file_list.item_count:
@@ -609,6 +624,7 @@ func _forget_controls() -> void:
     _zoom_select = null
     _zoom_entry = null
     _indicator_toggle = null
+    _magenta_toggle = null
     _refresh_button = null
     _remove_button = null
     _clear_button = null
@@ -661,6 +677,13 @@ func _build_ui() -> void:
 func _on_indicators_toggled(pressed: bool) -> void:
     if _preview != null:
         _preview.markers_visible = pressed
+
+
+## Nothing is reprocessed either: the ground is drawn under the result rather than into
+## it, so what gets written out is untouched.
+func _on_magenta_toggled(pressed: bool) -> void:
+    if _preview != null:
+        _preview.magenta_background = pressed
 
 
 func _build_source_column() -> Control:
@@ -752,6 +775,17 @@ func _build_preview_column() -> Control:
     _indicator_toggle.button_pressed = true
     _indicator_toggle.toggled.connect(_on_indicators_toggled)
     toolbar.add_child(_indicator_toggle)
+
+    # Beside the indicator switch because the two are the same kind of control — neither
+    # touches the result, both change what you are looking at while judging it. The second
+    # long label on this toolbar, and it widens the preview column's minimum again for the
+    # same reason that one does: a switch you reach for mid-judgement has to be in sight.
+    _magenta_toggle = CheckBox.new()
+    _magenta_toggle.text = "Magenta Background"
+    _magenta_toggle.tooltip_text = MAGENTA_TOOLTIP
+    _magenta_toggle.button_pressed = false
+    _magenta_toggle.toggled.connect(_on_magenta_toggled)
+    toolbar.add_child(_magenta_toggle)
 
     var spacer := Control.new()
     spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL

@@ -42,6 +42,15 @@ const CHECKER_SIZE := 8
 const CHECKER_DARK := Color(0.16, 0.16, 0.18)
 const CHECKER_LIGHT := Color(0.24, 0.24, 0.27)
 
+## What [member magenta_background] lays under the image.
+##
+## Full magenta rather than anything softer, and deliberately a colour no photograph and
+## almost no piece of art contains: the whole job is to be a colour that cannot be mistaken
+## for the picture, so that a pixel showing any of it is a pixel that is not fully there.
+## The checkerboard is the everyday backing and this is the one you switch to when a faint
+## fringe or a pinhole has to be found rather than judged.
+const TRANSPARENCY_COLOR := Color(1, 0, 1)
+
 ## What a marker is drawn in, alpha included.
 ##
 ## The alpha belongs here rather than being mixed in at each draw. There is one answer
@@ -233,6 +242,25 @@ var markers_visible := true:
         if markers_visible == value:
             return
         markers_visible = value
+        if _canvas != null:
+            _canvas.queue_redraw()
+
+## Whether a solid magenta ground is laid under the image in place of the checkerboard.
+##
+## The checkerboard is two greys a shade apart, which is what makes it read as backing
+## rather than as picture — and is also what makes a pixel at a tenth alpha invisible over
+## it. [constant TRANSPARENCY_COLOR] gives up being unobtrusive to answer the other
+## question: anything short of solid takes on some magenta, so a pinhole or a surviving
+## fringe shows up as colour rather than having to be spotted as a texture.
+##
+## Only under the image, not across the whole view. The margins keep their checkerboard, so
+## where the image ends is still visible — a magenta view with a magenta image in it would
+## have no edges at all.
+var magenta_background := false:
+    set(value):
+        if magenta_background == value:
+            return
+        magenta_background = value
         if _canvas != null:
             _canvas.queue_redraw()
 
@@ -1069,6 +1097,10 @@ func _draw_canvas() -> void:
         _draw_busy()
         return
     var frame := Rect2(_content_origin, _content_size)
+    # Over the checkerboard and under the image, so the margins still say where the image
+    # ends. See the note on the property.
+    if magenta_background:
+        _canvas.draw_rect(frame, TRANSPARENCY_COLOR, true)
     _canvas.draw_texture_rect(_texture, frame, false)
     # Over the top rather than blended into it. Where the source is opaque this
     # is an ordinary cross-fade; where the result cut something away, the source
