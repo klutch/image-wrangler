@@ -76,6 +76,10 @@ void IWStageKernels::_bind_methods() {
 	// Defined in iw_hsv_kernels.cpp; bound here so every entry point is in one list.
 	ClassDB::bind_static_method("IWStageKernels",
 			D_METHOD("adjust_hsv", "ctx", "rects", "shifts"), &IWStageKernels::adjust_hsv);
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("random_hsv_tiles", "ctx", "rng_seed", "hue_amount", "saturation_amount",
+                    "value_amount"),
+            &IWStageKernels::random_hsv_tiles);
 }
 
 // Rasterises this stage's shapes and folds them into whatever is already declared.

@@ -28,11 +28,18 @@ func get_at(index: int) -> HSVRegion:
 ##
 ## An empty rectangle is refused: it would be a row that could never do anything and
 ## could not be told apart from any other empty one.
+##
+## [b]The hue starts somewhere random rather than at zero.[/b] A region added neutral does
+## nothing until a slider is dragged, so picking one looked like it had failed. Starting it
+## off the wheel's origin means a pick shows its result immediately, and two picks come out
+## different colours. Saturation and value still start where they do nothing — those two
+## are corrections rather than colours, and a random one of either reads as damage.
 func add(rect: Rect2i) -> HSVRegion:
     if rect.size.x <= 0 or rect.size.y <= 0:
         return null
     var region := HSVRegion.new()
     region.rect = rect
+    region.hue = randf_range(-0.5, 0.5)
     regions.append(region)
     return region
 

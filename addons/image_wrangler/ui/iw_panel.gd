@@ -21,6 +21,7 @@ const OPERATION_SCRIPTS := [
     "res://addons/image_wrangler/core/smooth_halos.gd",
     "res://addons/image_wrangler/core/smooth_color.gd",
     "res://addons/image_wrangler/core/hsv_adjust.gd",
+    "res://addons/image_wrangler/core/random_hsv_tiles.gd",
     "res://addons/image_wrangler/core/remove_background.gd",
     "res://addons/image_wrangler/core/remove_crevice.gd",
     "res://addons/image_wrangler/core/refine_edges.gd",

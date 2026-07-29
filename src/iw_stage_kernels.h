@@ -186,6 +186,23 @@ public:
 	// everything that keys.
 	static void adjust_hsv(const Ref<IWPipelineContext> &ctx, const PackedInt32Array &rects,
 			const PackedFloat64Array &shifts);
+
+    // RandomHSVTiles.process_context: finds every island of visible pixels and gives each
+    // one its own random HSV shift.
+    //
+    // Takes numbers rather than a list of regions, which is the one kernel here that
+    // works the other way round: the caller cannot name the regions because it does not
+    // know them yet — finding them is the job. The three amounts are how far the hue,
+    // the saturation and the value are allowed to wander, 0 to 1, and the seed is what
+    // makes the same image come out the same way twice.
+    //
+    // Returns x, y, w, h per island: the smallest rectangle containing each one. Reads
+    // the alpha the run currently shows, so where it sits in the stack decides what
+    // counts as an object. Rewrites the source pixels, so the caller owes the run a
+    // rebuild of the distance map afterwards.
+    static PackedInt32Array random_hsv_tiles(const Ref<IWPipelineContext> &ctx,
+            int64_t rng_seed, double hue_amount, double saturation_amount,
+            double value_amount);
 };
 
 } // namespace godot
