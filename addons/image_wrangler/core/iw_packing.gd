@@ -1,5 +1,5 @@
 @tool
-class_name IWRepack
+class_name IWPacking
 extends IWOperation
 
 ## Lifts every separate object out of the open images and lays them all on one sheet.
@@ -18,14 +18,16 @@ extends IWOperation
 ##
 ## [b]The sheet starts at the size you chose and doubles until everything fits.[/b] Width
 ## first, then height, then width again, stopping at the largest a texture may be. Switch
-## [member RepackSettings.expand_to_fit] off to hold it at exactly the size asked for
+## [member PackingSettings.expand_to_fit] off to hold it at exactly the size asked for
 ## instead, which is the right way round when that size is one something else has already
 ## decided — a texture budget, a hardware limit, an atlas the rest of the project agrees
 ## on. Either way, running out of room is reported and the packing stops rather than
 ## quietly dropping whichever sprites were awkward.
 ##
-## Preview only. Nothing is written, and the Process buttons stand down while this is
-## showing — see [method transforms_pixels].
+## [b]One sheet, so one thing to save.[/b] Save Current writes it as a PNG; Save All has
+## nothing to mean here, since the whole list has already gone into the one image, and
+## stands down while this is showing. Nothing is written to a sidecar either — these
+## settings describe the batch, like [Rename]'s.
 
 ## How the sprites are arranged.
 ##
@@ -77,19 +79,19 @@ const MODE_DESCRIPTIONS := [
 const MIN_SIZE := 1
 const MAX_SIZE := 16384
 
-var settings: RepackSettings
+var settings: PackingSettings
 
 
 func _init() -> void:
-    settings = RepackSettings.new()
+    settings = PackingSettings.new()
 
 
 func get_operation_name() -> String:
-    return "Repack"
+    return "Packing"
 
 
 func get_operation_id() -> StringName:
-    return &"repack"
+    return &"packing"
 
 
 func get_settings() -> Resource:
@@ -97,15 +99,15 @@ func get_settings() -> Resource:
 
 
 func set_settings(new_settings: Resource) -> void:
-    var typed := new_settings as RepackSettings
+    var typed := new_settings as PackingSettings
     if typed == null:
-        push_error("Image Wrangler: IWRepack was handed settings of the wrong type.")
+        push_error("Image Wrangler: IWPacking was handed settings of the wrong type.")
         return
     settings = typed
 
 
 func make_settings() -> Resource:
-    return RepackSettings.new()
+    return PackingSettings.new()
 
 
 func get_output_suffix() -> String:
@@ -118,8 +120,9 @@ func settings_are_per_image() -> bool:
     return false
 
 
-## Nothing is written. The Process buttons read this to stand down, which is what makes
-## Repack preview-only rather than an operation that quietly did nothing when pressed.
+## False, because this does not turn one image into another — it turns a list of them into
+## a single sheet, which is a different shape of job and does not go through the per-file
+## write path at all. The dock saves the sheet itself; see the class note.
 func transforms_pixels() -> bool:
     return false
 
@@ -179,7 +182,7 @@ static func describe_mode(mode: int) -> String:
 ## [code]{"positions": Array[Vector2i], "placed": int, "width": int, "height": int}[/code],
 ## where positions runs alongside [param sizes] and holds the top-left corner each sprite
 ## was given, and the two sizes are the sheet it was planned for — which is not the one in
-## the settings once [member RepackSettings.expand_to_fit] has grown it.
+## the settings once [member PackingSettings.expand_to_fit] has grown it.
 ##
 ## [b]It stops at the first sprite that does not fit rather than skipping it.[/b] A packer
 ## that carried on would produce a sheet missing whichever sprites happened to be awkward,

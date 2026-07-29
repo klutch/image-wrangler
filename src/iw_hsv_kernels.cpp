@@ -166,7 +166,7 @@ void IWStageKernels::adjust_hsv(const Ref<IWPipelineContext> &ctx,
 // background removed. Nothing here decides what an object is; the alpha already did.
 //
 // What counts as one island — two passes for the solid part and its fringe, 8-connected —
-// is decided by iw::label_islands and explained there. Repack asks the same question of
+// is decided by iw::label_islands and explained there. Packing asks the same question of
 // the same code, so a sheet coloured by this stage and packed by that one cannot disagree
 // about where one object ends and the next begins.
 //

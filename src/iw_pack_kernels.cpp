@@ -7,7 +7,7 @@ using namespace godot;
 
 // Every separate object in the image, as the smallest rectangle round each.
 //
-// What Repack lifts its sprites out of. The labelling is iw::label_islands, which is the
+// What Packing lifts its sprites out of. The labelling is iw::label_islands, which is the
 // same code RandomHSVTiles finds its tiles with — see the note there for what counts as
 // one object and why.
 //

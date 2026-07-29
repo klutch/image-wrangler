@@ -1,6 +1,6 @@
 extends SceneTree
 
-## The Repack packer, and the island finder it takes its sprites from.
+## The Packing packer, and the island finder it takes its sprites from.
 ##
 ## [b]The packing is checked as a set of properties rather than against fixed layouts.[/b]
 ## Where a sprite lands is an implementation detail and four modes' worth of coordinates
@@ -11,10 +11,10 @@ extends SceneTree
 ##
 ## Run it:
 ## [codeblock]
-## godot --headless --path . --script res://tests/iw_repack.gd
+## godot --headless --path . --script res://tests/iw_packing.gd
 ## [/codeblock]
 
-const OP_REPACK := "res://addons/image_wrangler/core/iw_repack.gd"
+const OP_PACKING := "res://addons/image_wrangler/core/iw_packing.gd"
 const OP_RANDOM_HSV_TILES := "res://addons/image_wrangler/core/random_hsv_tiles.gd"
 
 ## Every mode, by the index the dropdown uses.
@@ -39,7 +39,7 @@ func _initialize() -> void:
     _check_nothing_is_lost()
 
     if _failures == 0:
-        print("Repack OK — nothing overlaps, nothing leaves the sheet, and a sheet too "
+        print("Packing OK — nothing overlaps, nothing leaves the sheet, and a sheet too "
                 + "small says so.")
     quit(1 if _failures > 0 else 0)
 
@@ -221,7 +221,7 @@ func _check_overflow_is_reported() -> void:
 func _check_expand_to_fit() -> void:
     # It ships on, which is what makes the switch-off in _packer worth explaining. Read off
     # a packer nothing has touched.
-    var fresh: IWOperation = load(OP_REPACK).new()
+    var fresh: IWOperation = load(OP_PACKING).new()
     _expect(fresh.get_settings().expand_to_fit,
             "Expand to Fit is not on by default")
 
@@ -338,7 +338,7 @@ func _check_degenerate_input() -> void:
 ## description, which would read as an empty gap under the dropdown rather than as an
 ## oversight.
 func _check_mode_descriptions() -> void:
-    var packer: IWOperation = load(OP_REPACK).new()
+    var packer: IWOperation = load(OP_PACKING).new()
     var labels: Array = packer.MODE_LABELS
     var notes: Array = packer.MODE_DESCRIPTIONS
 
@@ -362,7 +362,7 @@ func _check_mode_descriptions() -> void:
 
 # --- The sprites themselves --------------------------------------------
 
-## The islands Repack packs have to be the islands Random HSV Tiles colours — the two go
+## The islands Packing packs have to be the islands Random HSV Tiles colours — the two go
 ## through one labeller precisely so a sheet coloured by one and packed by the other agree
 ## about where one object ends and the next begins.
 func _check_find_islands() -> void:
@@ -380,7 +380,7 @@ func _check_find_islands() -> void:
     settings.hue_amount = 1.0
     var theirs: PackedInt32Array = IWStageKernels.random_hsv_tiles(other, 1, 1.0, 0.0, 0.0)
     _expect(found == theirs,
-            "the islands Repack finds are not the ones Random HSV Tiles colours\n  %s\n  %s"
+            "the islands Packing finds are not the ones Random HSV Tiles colours\n  %s\n  %s"
             % [found, theirs])
 
     # And the rectangles are the objects that were drawn.
@@ -545,7 +545,7 @@ func _interlocked() -> Image:
 ## check about running out of room would pass for the wrong reason. The default itself is
 ## checked once, in [method _check_expand_to_fit], which is where it belongs.
 func _packer(mode: int, width: int, height: int) -> IWOperation:
-    var packer: IWOperation = load(OP_REPACK).new()
+    var packer: IWOperation = load(OP_PACKING).new()
     var settings := packer.get_settings()
     settings.mode = mode
     settings.output_width = width

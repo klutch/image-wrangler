@@ -1,12 +1,12 @@
 @tool
-class_name RepackSettings
+class_name PackingSettings
 extends Resource
 
-## Every tunable of [IWRepack].
+## Every tunable of [IWPacking].
 ##
-## Ranges live in [method IWRepack.get_settings_schema], not here.
+## Ranges live in [method IWPacking.get_settings_schema], not here.
 
-## Which arrangement the sprites are laid out in. See [enum IWRepack.PackMode].
+## Which arrangement the sprites are laid out in. See [enum IWPacking.PackMode].
 @export var mode: int = 0
 
 ## How big the sheet being packed into starts, in pixels.
@@ -20,7 +20,7 @@ extends Resource
 
 ## Whether the sheet may double until everything fits.
 ##
-## On by default, and for every mode: a repack that comes back with the sprites on it is
+## On by default, and for every mode: a packing that comes back with the sprites on it is
 ## almost always what was wanted, and the size is easier to argue with once you can see
 ## what went on it. Switch it off to hold the sheet at exactly the size asked for and be
 ## told when that is not enough — which is the right way round when the size is one
@@ -31,7 +31,7 @@ extends Resource
 ## A copy that belongs to no image.
 ##
 ## Nothing here is a coordinate, so the plain duplicate is the whole of it — but this is
-## never actually asked for, since the repack settings describe the batch rather than any
+## never actually asked for, since the packing settings describe the batch rather than any
 ## one image. It is here because the dock's codec walks every settings Resource alike.
-func duplicate_for_new_image() -> RepackSettings:
+func duplicate_for_new_image() -> PackingSettings:
     return duplicate()

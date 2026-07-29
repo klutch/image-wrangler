@@ -292,7 +292,7 @@ public:
     // same picture, being the same numbers.
     static Ref<Image> strength_overlay(const Ref<Image> &strength, const Color &color);
 
-    // IWRepack: every separate object in the image, as the smallest rectangle round each.
+    // IWPacking: every separate object in the image, as the smallest rectangle round each.
     //
     // The same labelling RandomHSVTiles finds its tiles with — iw::label_islands, which
     // both go through — so a sheet coloured by one and packed by the other cannot

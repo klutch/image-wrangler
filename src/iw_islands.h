@@ -3,7 +3,7 @@
 // Finding the separate objects in an image, off nothing but its alpha.
 //
 // Two stages ask this question and they have to get the same answer. RandomHSVTiles gives
-// every object its own colour; Repack lifts every object out and lays it somewhere else.
+// every object its own colour; Packing lifts every object out and lays it somewhere else.
 // If the two disagreed about what an object is, a sheet coloured by one and packed by the
 // other would come apart — so the labelling lives here rather than in either of them, and
 // "the same islands as Random HSV Tiles" is a fact about the code rather than a claim in a

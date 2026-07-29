@@ -55,10 +55,10 @@ const DEFAULT_STACK := [
 ## touch pixels, and its settings describe the batch rather than any one image.
 const RENAME_SCRIPT := "res://addons/image_wrangler/core/rename.gd"
 
-## Repack is not a stack operation either, and for a different reason again: it does not
+## Packing is not a stack operation either, and for a different reason again: it does not
 ## take an image and give one back. It takes every image on the list and gives back one
 ## sheet, so there is nowhere in a per-image stack it could sit.
-const REPACK_SCRIPT := "res://addons/image_wrangler/core/iw_repack.gd"
+const PACKING_SCRIPT := "res://addons/image_wrangler/core/iw_packing.gd"
 
 ## Extensions [method Image.load_from_file] can read.
 const SUPPORTED_EXTENSIONS := ["png", "jpg", "jpeg", "bmp", "tga", "webp"]
@@ -132,12 +132,12 @@ const ADDON_ROOT := "res://addons/image_wrangler/"
 ## Settings edits arrive in bursts while a slider is dragged; collapse them.
 const PREVIEW_DEBOUNCE := 0.15
 
-## How long the Repack tab waits after a change before rebuilding the sheet.
+## How long the Packing tab waits after a change before rebuilding the sheet.
 ##
-## Far longer than the preview's, because the work behind it is far larger: a repack runs
+## Far longer than the preview's, because the work behind it is far larger: a packing runs
 ## every open image's whole stack, where a preview runs one image's. Dragging the width
 ## spinner would otherwise start a batch run per pixel travelled.
-const REPACK_DEBOUNCE := 0.6
+const PACKING_DEBOUNCE := 0.6
 
 ## How close a zoom has to be to a ladder rung to count as that rung rather than
 ## as a value of its own. Comfortably under the smallest gap in the ladder.
@@ -156,13 +156,13 @@ const AUTOSAVE_DEBOUNCE := 0.75
 const SUFFIX_TOOLTIP := """Goes on the end of the output name, before the extension —
 flower.png with "_nobg" becomes flower_nobg.png.
 
-Process Current Only just suggests it, so you can still rename the
-file in the Save As dialog. Process All applies it to every file
-without asking again, which makes the suffix the only thing keeping
-the results apart from the sources.
+Save Current just suggests it, so you can still rename the file in
+the Save As dialog. Save All applies it to every file without asking
+again, which makes the suffix the only thing keeping the results
+apart from the sources.
 
 So take care when it is blank: each output then keeps its source's
-own name, and pointing Process All at the folder the sources are in
+own name, and pointing Save All at the folder the sources are in
 will overwrite the originals in place. You are asked to confirm, but
 the prompt only says those files already exist — not that they are
 the images you are processing. There is no undo.
@@ -180,12 +180,12 @@ file untouched, so it keeps whatever format it already had."""
 ## a rename scheme has no history because it belongs to the batch rather than to an image.
 ##
 ## For everything that follows from the mode, History [i]is[/i] image mode — it previews,
-## it autosaves, it processes pixels. Rename and Repack are the two that are not: one
+## it autosaves, it processes pixels. Rename and Packing are the two that are not: one
 ## describes what the batch is called and the other makes a single sheet out of all of it,
 ## and neither has anything to do with whichever file happens to be highlighted. That line
 ## is drawn by [method _is_image_mode] rather than by testing for one tab by name, which is
 ## what every one of these did while Rename was the only tab on the far side of it.
-enum Mode { IMAGE, HISTORY, RENAME, REPACK }
+enum Mode { IMAGE, HISTORY, RENAME, PACKING }
 
 var _mode := Mode.IMAGE
 
@@ -193,7 +193,7 @@ var _mode := Mode.IMAGE
 ## Whether [param mode] is one of the tabs that works on the highlighted image.
 ##
 ## Operations and History both are — they preview it, they autosave its stack, they process
-## its pixels. Rename and Repack are not, and everything that used to be spelled
+## its pixels. Rename and Packing are not, and everything that used to be spelled
 ## [code]!= Mode.RENAME[/code] meant this rather than that: it was only ever right while
 ## Rename was the one tab on the far side of the line, and adding a second would otherwise
 ## have meant finding every site again.
@@ -204,19 +204,23 @@ static func _is_image_mode(mode: int) -> bool:
 ## The two operations that describe the batch rather than an image, held for the session.
 ## One set of settings each, no sidecar.
 var _rename: IWOperation
-var _repack: IWOperation
+var _packing: IWOperation
 
-## The sheet Repack last built, shown in the viewport while its tab is up.
+## The sheet Packing last built, shown in the viewport while its tab is up.
 ##
-## Null until the button is pressed. Repack is not a preview that follows what you type —
+## Null until the button is pressed. Packing is not a preview that follows what you type —
 ## it runs every open image's whole stack, which is far too much to do on a keystroke — so
 ## it is asked for and then stands until asked again.
-var _repack_image: Image
+var _packing_image: Image
 
-## Whether a repack is running, so a change arriving mid-run cannot start a second on top
+## Whether a packing is running, so a change arriving mid-run cannot start a second on top
 ## of the first, and whether one asked for itself while that was true.
-var _repack_running := false
-var _repack_pending := false
+var _packing_running := false
+var _packing_pending := false
+
+## Set between asking where to put the packed sheet and being told, so the one file dialog
+## the dock has knows which of its two callers it is answering.
+var _saving_sheet := false
 var _sources: PackedStringArray = PackedStringArray()
 var _source_image: Image
 var _result_image: Image
@@ -385,12 +389,12 @@ var _modes: TabContainer
 
 ## Rename's form, built into its own box and hidden while the stack is showing.
 var _rename_box: VBoxContainer
-var _repack_box: VBoxContainer
-## Says how the last repack went — how many sprites off how many images, or why it stopped.
-var _repack_status: Label
+var _packing_box: VBoxContainer
+## Says how the last packing went — how many sprites off how many images, or why it stopped.
+var _packing_status: Label
 ## Says what the selected packing mode does, sitting under the dropdown and above the rest
 ## of the form.
-var _repack_mode_note: Label
+var _packing_mode_note: Label
 ## How much of the source image is faded over the result, 0 to 100.
 var _original_fade: HSlider
 var _zoom_select: OptionButton
@@ -404,7 +408,7 @@ var _suffix_edit: LineEdit
 var _process_selected_button: Button
 var _process_all_button: Button
 var _debounce: Timer
-var _repack_debounce: Timer
+var _packing_debounce: Timer
 var _autosave: Timer
 var _open_dialog: FileDialog
 var _output_dialog: FileDialog
@@ -415,9 +419,9 @@ var _save_dialog: FileDialog
 var _save_source := ""
 var _overwrite_dialog: ConfirmationDialog
 var _removal_dialog: ConfirmationDialog
-## Says a repack ran out of room. An AcceptDialog rather than a Confirmation: there is
+## Says a packing ran out of room. An AcceptDialog rather than a Confirmation: there is
 ## nothing to agree to, since the run has already stopped.
-var _repack_dialog: AcceptDialog
+var _packing_dialog: AcceptDialog
 var _reset_dialog: ConfirmationDialog
 var _stack_save_dialog: FileDialog
 var _stack_load_dialog: FileDialog
@@ -454,7 +458,7 @@ func _ready() -> void:
     # The forms are built into containers the layout owns, so the layout goes first.
     _build_ui()
     _build_rename()
-    _build_repack()
+    _build_packing()
     _apply_stack_for("")
     _select_mode(Mode.IMAGE)
     _refresh_file_list()
@@ -575,14 +579,14 @@ func _build_rename() -> void:
 
 
 ## The same, for the other operation that belongs to the batch rather than to an image.
-func _build_repack() -> void:
-    if _repack == null:
-        var script: GDScript = load(REPACK_SCRIPT)
+func _build_packing() -> void:
+    if _packing == null:
+        var script: GDScript = load(PACKING_SCRIPT)
         if script == null:
-            push_error("Image Wrangler: could not load operation script at %s" % REPACK_SCRIPT)
+            push_error("Image Wrangler: could not load operation script at %s" % PACKING_SCRIPT)
             return
-        _repack = script.new()
-    SettingsBuilder.build(_repack, _repack_box, _on_setting_changed, _fold_state, "repack")
+        _packing = script.new()
+    SettingsBuilder.build(_packing, _packing_box, _on_setting_changed, _fold_state, "packing")
 
     # The note goes under the dropdown rather than at the top or the bottom of the form,
     # because it is about the one control above it and not about the sheet size below.
@@ -590,12 +594,12 @@ func _build_repack() -> void:
     # and a line of prose is not one — it has no property to write and nothing to read
     # back, and giving the schema a way to say "and now some words" would be a new kind of
     # entry for every other operation to ignore.
-    if _repack_mode_note != null:
-        if _repack_mode_note.get_parent() != null:
-            _repack_mode_note.get_parent().remove_child(_repack_mode_note)
-        _repack_box.add_child(_repack_mode_note)
-        _repack_box.move_child(_repack_mode_note, _repack_note_index())
-    _refresh_repack_note()
+    if _packing_mode_note != null:
+        if _packing_mode_note.get_parent() != null:
+            _packing_mode_note.get_parent().remove_child(_packing_mode_note)
+        _packing_box.add_child(_packing_mode_note)
+        _packing_box.move_child(_packing_mode_note, _packing_note_index())
+    _refresh_packing_note()
 
 
 ## Where the mode note belongs: directly after whichever row carries the mode dropdown.
@@ -603,18 +607,18 @@ func _build_repack() -> void:
 ## Found rather than counted, so reordering the schema moves the note with it. Falls to the
 ## top of the form if the dropdown cannot be found at all, which is the harmless place for
 ## a line of prose to end up.
-func _repack_note_index() -> int:
-    for child in _repack_box.get_children():
+func _packing_note_index() -> int:
+    for child in _packing_box.get_children():
         if child.has_meta(SettingsBuilder.META_PROPERTY) \
                 and child.get_meta(SettingsBuilder.META_PROPERTY) == &"mode":
             return child.get_index() + 1
     return 0
 
 
-func _refresh_repack_note() -> void:
-    if _repack_mode_note == null or _repack == null:
+func _refresh_packing_note() -> void:
+    if _packing_mode_note == null or _packing == null:
         return
-    _repack_mode_note.text = IWRepack.describe_mode(_repack.get_settings().mode)
+    _packing_mode_note.text = IWPacking.describe_mode(_packing.get_settings().mode)
 
 
 ## Rebuilds the dock when one of this addon's scripts has been reloaded.
@@ -715,7 +719,7 @@ func _rebuild_ui() -> void:
 
     _build_ui()
     _build_rename()
-    _build_repack()
+    _build_packing()
 
     _preview.markers_visible = indicators
     _indicator_toggle.set_pressed_no_signal(indicators)
@@ -762,9 +766,9 @@ func _forget_controls() -> void:
     _stack_view = null
     _modes = null
     _rename_box = null
-    _repack_box = null
-    _repack_status = null
-    _repack_mode_note = null
+    _packing_box = null
+    _packing_status = null
+    _packing_mode_note = null
     _original_fade = null
     _zoom_select = null
     _zoom_entry = null
@@ -777,14 +781,14 @@ func _forget_controls() -> void:
     _process_selected_button = null
     _process_all_button = null
     _debounce = null
-    _repack_debounce = null
+    _packing_debounce = null
     _autosave = null
     _open_dialog = null
     _output_dialog = null
     _save_dialog = null
     _overwrite_dialog = null
     _removal_dialog = null
-    _repack_dialog = null
+    _packing_dialog = null
 
 
 # --- Layout -------------------------------------------------------------
@@ -812,11 +816,11 @@ func _build_ui() -> void:
     _debounce.timeout.connect(_run_preview)
     add_child(_debounce)
 
-    _repack_debounce = Timer.new()
-    _repack_debounce.one_shot = true
-    _repack_debounce.wait_time = REPACK_DEBOUNCE
-    _repack_debounce.timeout.connect(_run_repack_now)
-    add_child(_repack_debounce)
+    _packing_debounce = Timer.new()
+    _packing_debounce.one_shot = true
+    _packing_debounce.wait_time = PACKING_DEBOUNCE
+    _packing_debounce.timeout.connect(_run_packing_now)
+    add_child(_packing_debounce)
 
     _autosave = Timer.new()
     _autosave.one_shot = true
@@ -1055,7 +1059,7 @@ func _build_operation_column() -> Control:
     _modes.tab_changed.connect(_on_tab_changed)
     # [b]The strip is what sets this column's minimum width.[/b] Left to clip, a TabBar
     # reports a minimum of almost nothing and hides whatever does not fit behind scroll
-    # arrows — so the column could be dragged narrow enough that Repack and Rename were
+    # arrows — so the column could be dragged narrow enough that Packing and Rename were
     # only reachable by scrolling a strip of four short words. Refusing to clip makes the
     # bar report what it actually needs, and a container's minimum is its children's, so
     # the splitter stops where the last tab does.
@@ -1104,37 +1108,37 @@ func _build_operation_column() -> Control:
     _rename_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     rename_page.add_child(_rename_box)
 
-    var repack_page := ScrollContainer.new()
-    repack_page.name = "Repack"
-    repack_page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    _modes.add_child(repack_page)
+    var packing_page := ScrollContainer.new()
+    packing_page.name = "Packing"
+    packing_page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    _modes.add_child(packing_page)
 
-    var repack_column := VBoxContainer.new()
-    repack_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    repack_page.add_child(repack_column)
+    var packing_column := VBoxContainer.new()
+    packing_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    packing_page.add_child(packing_column)
 
-    _repack_box = VBoxContainer.new()
-    _repack_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    repack_column.add_child(_repack_box)
+    _packing_box = VBoxContainer.new()
+    _packing_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    packing_column.add_child(_packing_box)
 
     # Says what the mode in the dropdown above it does. Built here and moved into the form
-    # by _build_repack, which is the only thing that knows where the dropdown ended up.
-    _repack_mode_note = Label.new()
-    _repack_mode_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _repack_mode_note.modulate = Color(1, 1, 1, 0.6)
+    # by _build_packing, which is the only thing that knows where the dropdown ended up.
+    _packing_mode_note = Label.new()
+    _packing_mode_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    _packing_mode_note.modulate = Color(1, 1, 1, 0.6)
 
-    _repack_status = Label.new()
-    _repack_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _repack_status.modulate = Color(1, 1, 1, 0.6)
-    repack_column.add_child(_repack_status)
+    _packing_status = Label.new()
+    _packing_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    _packing_status.modulate = Color(1, 1, 1, 0.6)
+    packing_column.add_child(_packing_status)
 
     _modes.set_tab_tooltip(Mode.IMAGE, "Build a stack of operations that rewrite the pixels.")
     _modes.set_tab_tooltip(Mode.HISTORY,
             "Every edit made to this image's stack this session.\nClick one to rewind to it. Held in memory only, and never saved.")
     _modes.set_tab_tooltip(Mode.RENAME,
             "Write the files out under new names, pixels untouched.\nDescribes the whole batch rather than one image, so it is not part of the stack.")
-    _modes.set_tab_tooltip(Mode.REPACK,
-            "Lay the objects from every open image out on one sheet.\nShown in the viewport only — nothing is written.")
+    _modes.set_tab_tooltip(Mode.PACKING,
+            "Lay the objects from every open image out on one sheet.\nShown in the viewport; Save Current writes it.")
 
     column.add_child(HSeparator.new())
     column.add_child(_build_output_section())
@@ -1183,8 +1187,11 @@ func _select_mode(mode: int) -> void:
     # Arriving on the tab is itself a reason to build one: an empty viewport under a form
     # full of settings reads as a tool that has not worked rather than one that has not
     # been asked.
-    if mode == Mode.REPACK:
-        _schedule_repack()
+    if mode == Mode.PACKING:
+        _schedule_packing()
+    # Which of the two Save buttons has anything to do depends on the tab, so the switch
+    # itself has to say so — nothing else runs on the way in.
+    _update_controls()
 
 
 func _on_tab_changed(tab: int) -> void:
@@ -1215,14 +1222,20 @@ func _build_output_section() -> Control:
     suffix_row.add_child(_suffix_edit)
 
     _process_selected_button = Button.new()
-    _process_selected_button.text = "Process Current Only"
-    _process_selected_button.tooltip_text = "Process the selected image and ask where to save it."
+    _process_selected_button.text = "Save Current"
+    _process_selected_button.tooltip_text = "Process the selected image and ask where to save it.
+
+On the Packing tab it saves the packed sheet instead, which is the one
+thing there is to save there."
     _process_selected_button.pressed.connect(_on_process_selected)
     section.add_child(_process_selected_button)
 
     _process_all_button = Button.new()
-    _process_all_button.text = "Process All"
-    _process_all_button.tooltip_text = "Process every image in the list and ask for a folder to put them in."
+    _process_all_button.text = "Save All"
+    _process_all_button.tooltip_text = "Process every image in the list and ask for a folder to put them in.
+
+Nothing to do on the Packing tab, where the whole list makes one sheet —
+use Save Current for that."
     _process_all_button.pressed.connect(_on_process_all)
     section.add_child(_process_all_button)
 
@@ -1244,7 +1257,7 @@ func _build_dialogs() -> void:
     _output_dialog = FileDialog.new()
     _output_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
     _output_dialog.access = FileDialog.ACCESS_FILESYSTEM
-    _output_dialog.title = "Process All Into Folder"
+    _output_dialog.title = "Save All Into Folder"
     _output_dialog.dir_selected.connect(_on_output_dir_chosen)
     add_child(_output_dialog)
 
@@ -1256,6 +1269,10 @@ func _build_dialogs() -> void:
     _save_dialog.title = "Save Processed Image"
     _save_dialog.add_filter("*.png", "PNG Image")
     _save_dialog.file_selected.connect(_on_save_file_chosen)
+    # Cleared on the way out as well as on the way through: the flag says which of the two
+    # callers the dialog is answering, and one left set by a cancel would send the next
+    # ordinary save down the packed-sheet path.
+    _save_dialog.canceled.connect(func() -> void: _saving_sheet = false)
     add_child(_save_dialog)
 
     _overwrite_dialog = ConfirmationDialog.new()
@@ -1272,9 +1289,9 @@ func _build_dialogs() -> void:
     _removal_dialog.canceled.connect(func() -> void: _pending_removals.clear())
     add_child(_removal_dialog)
 
-    _repack_dialog = AcceptDialog.new()
-    _repack_dialog.title = "Not Enough Room"
-    add_child(_repack_dialog)
+    _packing_dialog = AcceptDialog.new()
+    _packing_dialog.title = "Not Enough Room"
+    add_child(_packing_dialog)
 
     # A stack file is not an image and does not belong in the Images list, so these two
     # are their own dialogs rather than a mode of the ones above.
@@ -1352,13 +1369,13 @@ func _add_sources(paths: PackedStringArray) -> void:
     _update_controls()
 
 
-## Rewrites the Images list, and asks for a repack.
+## Rewrites the Images list, and asks for a packing.
 ##
 ## [b]Every path that changes what is open ends here[/b] — adding, removing, clearing — so
 ## it is the one place that has to know a sheet made from those images is now out of date.
 ## Hooking the three of them separately would be three chances to add a fourth and forget.
 func _refresh_file_list() -> void:
-    _schedule_repack()
+    _schedule_packing()
     var selected := _selected_index()
     _file_list.clear()
     for path in _sources:
@@ -2168,8 +2185,8 @@ func _refresh_suffix() -> void:
 func _active_operation() -> IWOperation:
     if _mode == Mode.RENAME:
         return _rename
-    if _mode == Mode.REPACK:
-        return _repack
+    if _mode == Mode.PACKING:
+        return _packing
     var pipeline := IWPipeline.new()
     for stage: IWStackOperation in _stack_view.stages():
         pipeline.stages.append(stage)
@@ -2851,8 +2868,8 @@ func _on_setting_changed() -> void:
     # notice it had been thrown.
     if _mode == Mode.RENAME:
         SettingsBuilder.refresh_visibility(_rename, _rename_box)
-    elif _mode == Mode.REPACK:
-        SettingsBuilder.refresh_visibility(_repack, _repack_box)
+    elif _mode == Mode.PACKING:
+        SettingsBuilder.refresh_visibility(_packing, _packing_box)
     else:
         for entry: Control in _stack_view.entries():
             SettingsBuilder.refresh_visibility(entry.stage, entry.settings_box())
@@ -2861,11 +2878,11 @@ func _on_setting_changed() -> void:
         _refresh_notes()
         _capture_history()
     _schedule_autosave()
-    if _mode == Mode.REPACK:
+    if _mode == Mode.PACKING:
         # The note under the dropdown is the one part of this form that is not a setting,
         # so nothing else would notice the mode had moved.
-        _refresh_repack_note()
-        _schedule_repack()
+        _refresh_packing_note()
+        _schedule_packing()
         return
     if _mode == Mode.RENAME:
         _update_detail_label()
@@ -3057,19 +3074,19 @@ func _stack_summary() -> String:
 ## of the thread — and a stage reading them mid-run would see a value change underneath
 ## it. So the worker gets its own instances and its own settings, deep-copied through
 ## the sidecar codec, which already knows how to walk every nested resource these have.
-# --- Repack -------------------------------------------------------------
+# --- Packing -------------------------------------------------------------
 
 ## Asks for a rebuild shortly, for a change that ought to produce one.
 ##
 ## Debounced rather than immediate, and by a good deal more than the preview is: every
 ## change here costs a run of every open image's stack, and a spinner being dragged reports
 ## a change per pixel.
-func _schedule_repack() -> void:
+func _schedule_packing() -> void:
     # The timer is null while the dock is being built, and _refresh_file_list runs during
     # that — so this is reached before there is anything to start.
-    if _mode != Mode.REPACK or _shutting_down or _repack_debounce == null:
+    if _mode != Mode.PACKING or _shutting_down or _packing_debounce == null:
         return
-    _repack_debounce.start()
+    _packing_debounce.start()
 
 
 ## Builds the sheet, or says why it could not.
@@ -3078,33 +3095,33 @@ func _schedule_repack() -> void:
 ## fight over the preview, but dropping the second would leave the sheet describing
 ## settings that are no longer on screen — which is the one thing an automatic rebuild must
 ## not do. So the request is remembered and answered as soon as the run in flight is done.
-func _run_repack_now() -> void:
-    if _mode != Mode.REPACK or _shutting_down or _repack == null:
+func _run_packing_now() -> void:
+    if _mode != Mode.PACKING or _shutting_down or _packing == null:
         return
-    if _repack_running:
-        _repack_pending = true
+    if _packing_running:
+        _packing_pending = true
         return
     if _sources.is_empty():
-        _repack_image = null
+        _packing_image = null
         _update_preview_texture()
-        _set_repack_status("Nothing to pack: add some images to the list.")
+        _set_packing_status("Nothing to pack: add some images to the list.")
         return
 
-    _repack_running = true
+    _packing_running = true
     _update_controls()
     _preview.set_busy(true)
-    await _run_repack()
+    await _run_packing()
     if _shutting_down:
         return
-    _repack_running = false
+    _packing_running = false
     _preview.set_busy(false)
     _update_controls()
 
     # Something changed while that was running, so the sheet just built is already out of
     # date. Round again, through the debounce so a burst of changes still collapses.
-    if _repack_pending:
-        _repack_pending = false
-        _schedule_repack()
+    if _packing_pending:
+        _packing_pending = false
+        _schedule_packing()
 
 
 ## Reads every open image, cuts the objects out of each, and lays them on one sheet.
@@ -3113,7 +3130,7 @@ func _run_repack_now() -> void:
 ## running a dozen stacks straight through would freeze the dock and land every progress
 ## report as one repaint on the way out. Awaiting between images gets each of them drawn,
 ## and leaves the editor live enough to be closed halfway through.
-func _run_repack() -> void:
+func _run_packing() -> void:
     var sprites := []
     var read := 0
     var total := _sources.size()
@@ -3122,7 +3139,7 @@ func _run_repack() -> void:
         if _shutting_down:
             return
         var path := _sources[i]
-        _set_repack_status("Reading %s  (%d of %d)" % [path.get_file(), i + 1, total])
+        _set_packing_status("Reading %s  (%d of %d)" % [path.get_file(), i + 1, total])
         _preview.set_progress(float(i) / float(total))
 
         var image := _load_image(path)
@@ -3138,9 +3155,9 @@ func _run_repack() -> void:
         sprites.append_array(_sprites_in(result))
 
     if sprites.is_empty():
-        _repack_image = null
+        _packing_image = null
         _update_preview_texture()
-        _set_repack_status("Nothing to pack: no objects were found in %d image%s."
+        _set_packing_status("Nothing to pack: no objects were found in %d image%s."
                 % [read, "" if read == 1 else "s"])
         return
 
@@ -3148,7 +3165,7 @@ func _run_repack() -> void:
     for sprite: Image in sprites:
         sizes.append(sprite.get_size())
 
-    var plan: Dictionary = _repack.plan(sizes)
+    var plan: Dictionary = _packing.plan(sizes)
     var positions: Array = plan["positions"]
     var placed: int = plan["placed"]
     # The size the plan was actually made for, which is not the one in the settings once
@@ -3156,7 +3173,7 @@ func _run_repack() -> void:
     var packed_width: int = plan["width"]
     var packed_height: int = plan["height"]
     if placed < sprites.size():
-        _warn_repack_overflowed(placed, sprites.size(), packed_width, packed_height)
+        _warn_packing_overflowed(placed, sprites.size(), packed_width, packed_height)
         return
 
     var sheet := Image.create_empty(
@@ -3168,14 +3185,14 @@ func _run_repack() -> void:
             continue
         sheet.blit_rect(sprites[i], Rect2i(Vector2i.ZERO, sizes[i]), at)
 
-    _repack_image = sheet
+    _packing_image = sheet
     _update_preview_texture()
     _preview.fit_to_view()
-    var settings := _repack.get_settings()
+    var settings := _packing.get_settings()
     var grown := ""
     if packed_width != settings.output_width or packed_height != settings.output_height:
         grown = "  (expanded from %d x %d)" % [settings.output_width, settings.output_height]
-    _set_repack_status("Packed %d sprite%s from %d image%s onto %d x %d.%s"
+    _set_packing_status("Packed %d sprite%s from %d image%s onto %d x %d.%s"
             % [sprites.size(), "" if sprites.size() == 1 else "s",
                     read, "" if read == 1 else "s",
                     packed_width, packed_height, grown])
@@ -3215,8 +3232,8 @@ func _pipeline_for(path: String) -> IWPipeline:
 ## [param width] and [param height] are the sheet actually tried, which is the grown one
 ## when Expand to Fit has been at it — so the number in the message is the number that was
 ## not enough rather than the one still showing in the form.
-func _warn_repack_overflowed(placed: int, total: int, width: int, height: int) -> void:
-    var settings := _repack.get_settings()
+func _warn_packing_overflowed(placed: int, total: int, width: int, height: int) -> void:
+    var settings := _packing.get_settings()
     var expanded: bool = width != settings.output_width or height != settings.output_height
     var title := ""
     var message := ""
@@ -3227,18 +3244,18 @@ func _warn_repack_overflowed(placed: int, total: int, width: int, height: int) -
         title = "Not Enough Room"
         message = "Ran out of room on the %d x %d sheet.\n\n%d of %d sprites fitted. Make the sheet larger, or try a different packing mode — Tight fits the most." % [width, height, placed, total]
 
-    _set_repack_status("Ran out of room: %d of %d sprites fitted on %d x %d."
+    _set_packing_status("Ran out of room: %d of %d sprites fitted on %d x %d."
             % [placed, total, width, height])
-    if _repack_dialog == null:
+    if _packing_dialog == null:
         return
-    _repack_dialog.title = title
-    _repack_dialog.dialog_text = message
-    _repack_dialog.popup_centered()
+    _packing_dialog.title = title
+    _packing_dialog.dialog_text = message
+    _packing_dialog.popup_centered()
 
 
-func _set_repack_status(text: String) -> void:
-    if _repack_status != null:
-        _repack_status.text = text
+func _set_packing_status(text: String) -> void:
+    if _packing_status != null:
+        _packing_status.text = text
 
 
 func _snapshot_operation() -> IWOperation:
@@ -3271,12 +3288,12 @@ func _snapshot_pipeline(stages: Array) -> IWPipeline:
 ## slider then has the same image on both sides and does nothing visible, which
 ## is the honest answer to fading between an image and itself.
 func _update_preview_texture() -> void:
-    # Repack shows the sheet it made rather than the highlighted file, which is the whole
+    # Packing shows the sheet it made rather than the highlighted file, which is the whole
     # point of it — and no original underneath, since there is no one source for the fade
-    # to bring back. Before the null test below, because a repack is worth looking at
+    # to bring back. Before the null test below, because a packing is worth looking at
     # whether or not a file happens to be highlighted.
-    if _mode == Mode.REPACK:
-        _preview.set_image(_repack_image)
+    if _mode == Mode.PACKING:
+        _preview.set_image(_packing_image)
         _preview.set_original(null)
         return
     if _source_image == null:
@@ -3398,12 +3415,17 @@ func _update_controls() -> void:
     _remove_button.disabled = not has_selection
     _clear_button.disabled = not has_any
     _refresh_button.disabled = _source_image == null
-    # Repack writes nothing, so neither button has anything to do while it is showing.
-    # Disabled rather than hidden: a button that comes and goes with a tab reads as a bug
-    # in the layout, where a dead one reads as "not from here".
-    var packs := _mode == Mode.REPACK
-    _process_selected_button.disabled = packs or _source_image == null
-    _process_all_button.disabled = packs or not has_any
+    # Packing has one thing to save and it is not a file from the list, so Save Current
+    # writes the sheet and Save All has nothing to mean. Disabled rather than hidden: a
+    # button that comes and goes with a tab reads as a bug in the layout, where a dead one
+    # reads as "not from here".
+    var packs := _mode == Mode.PACKING
+    if packs:
+        _process_selected_button.disabled = _packing_image == null
+        _process_all_button.disabled = true
+    else:
+        _process_selected_button.disabled = _source_image == null
+        _process_all_button.disabled = not has_any
 
 
 
@@ -3412,6 +3434,9 @@ func _update_controls() -> void:
 ## Processing one image asks where to put it, so the Save As dialog carries the
 ## whole decision — no destination is remembered between runs.
 func _on_process_selected() -> void:
+    if _mode == Mode.PACKING:
+        _save_packed_sheet()
+        return
     var index := _selected_index()
     if index < 0:
         return
@@ -3423,6 +3448,12 @@ func _on_process_selected() -> void:
 
 
 func _on_save_file_chosen(destination: String) -> void:
+    # The sheet is not one of the sources and has nothing to be processed from, so it
+    # takes the short way out rather than through the job list below.
+    if _saving_sheet:
+        _saving_sheet = false
+        _write_packed_sheet(destination)
+        return
     var source := _save_source
     _save_source = ""
     if source.is_empty():
@@ -3431,6 +3462,45 @@ func _on_save_file_chosen(destination: String) -> void:
     # this goes straight to writing.
     _pending_outputs = {source: destination}
     _write_pending_outputs()
+
+
+## Asks where to put the packed sheet.
+##
+## [b]Named off the first image rather than off the highlighted one.[/b] The sheet is made
+## from the whole list and belongs to none of them, but a name has to come from somewhere —
+## and the first is the one that does not change when you click down the list looking at
+## what went into it.
+func _save_packed_sheet() -> void:
+    if _packing_image == null or _sources.is_empty():
+        _set_status("Nothing packed yet.")
+        return
+    _saving_sheet = true
+    _save_source = ""
+    var first := _sources[0]
+    _save_dialog.current_dir = first.get_base_dir()
+    _save_dialog.current_file = "%s%s.png" % [first.get_file().get_basename(),
+            _packing.get_output_suffix() if _packing != null else "_packed"]
+    _save_dialog.popup_centered_ratio(0.6)
+
+
+## Writes the sheet, and says so.
+##
+## PNG regardless of what the name says, which is what the dialog offers and what every
+## other write here does — and the only one of the formats on offer that keeps the
+## transparency between the sprites.
+func _write_packed_sheet(destination: String) -> void:
+    if _packing_image == null:
+        return
+    var directory := destination.get_base_dir()
+    if not DirAccess.dir_exists_absolute(directory):
+        if DirAccess.make_dir_recursive_absolute(directory) != OK:
+            _set_status("Could not make %s." % directory)
+            return
+    if _packing_image.save_png(destination) != OK:
+        _set_status("Could not write %s." % destination.get_file())
+        return
+    _set_status("Saved %s." % destination.get_file())
+    _set_packing_status("Saved %s." % destination.get_file())
 
 
 ## Processing the whole list asks for a folder instead: one dialog cannot name
