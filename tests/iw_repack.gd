@@ -214,10 +214,16 @@ func _check_overflow_is_reported() -> void:
 
 # --- Growing the sheet -------------------------------------------------
 
-## Grid may double until its cells fit. Width first, then height, then width again — so
-## the sizes it walks through are a fixed sequence and the one it stops on is the first in
-## that sequence with room.
+## The sheet may double until everything fits, in every mode. Width first, then height,
+## then width again — so the sizes it walks through are a fixed sequence and the one it
+## stops on is the first in that sequence with room.
 func _check_expand_to_fit() -> void:
+    # It ships on, which is what makes the switch-off in _packer worth explaining. Read off
+    # a packer nothing has touched.
+    var fresh: IWOperation = load(OP_REPACK).new()
+    _expect(fresh.get_settings().expand_to_fit,
+            "Expand to Fit is not on by default")
+
     var sizes := []
     for _i in 30:
         sizes.append(Vector2i(20, 20))
@@ -276,15 +282,33 @@ func _check_expand_to_fit() -> void:
             "Expand to Fit grew the sheet while switched off")
     _expect(unmoved["placed"] < sizes.size(), "the unexpanded sheet somehow fitted them all")
 
-    # And it is Grid's alone. The other three run out because the sprites genuinely do not
-    # fit, and doubling past that would be a size nobody asked for.
-    for mode: int in [0, 2, 3]:
-        var other := _packer(mode, 64, 64)
+    # Every mode grows, not just Grid — and whatever each one grows to has to be a sheet
+    # its own sprites actually sit on.
+    for mode: int in MODES:
+        var other := _packer(mode, 32, 32)
         other.get_settings().expand_to_fit = true
-        var untouched: Dictionary = other.plan(sizes)
-        _expect(untouched["width"] == 64 and untouched["height"] == 64,
-                "%s grew its sheet to %d x %d — Expand to Fit is Grid's alone"
-                % [MODE_NAMES[mode], untouched["width"], untouched["height"]])
+        var grown: Dictionary = other.plan(sizes)
+        _expect(grown["placed"] == sizes.size(),
+                "%s placed %d of %d with Expand to Fit on"
+                % [MODE_NAMES[mode], grown["placed"], sizes.size()])
+        _expect(grown["width"] > 32 or grown["height"] > 32,
+                "%s did not grow a 32 x 32 sheet at all" % MODE_NAMES[mode])
+        _expect_inside(grown["positions"], sizes, grown["width"], grown["height"],
+                MODE_NAMES[mode] + " (expanded)")
+        _expect_no_overlap(grown["positions"], sizes, MODE_NAMES[mode] + " (expanded)")
+
+    # A sprite wider than the sheet is the case the row modes bail on outright, and
+    # expansion has to reach it rather than reporting a failure it could have fixed.
+    for mode: int in MODES:
+        var cramped := _packer(mode, 16, 16)
+        cramped.get_settings().expand_to_fit = true
+        var reached: Dictionary = cramped.plan([Vector2i(40, 12)])
+        _expect(reached["placed"] == 1,
+                "%s could not grow a 16-wide sheet to take a 40-wide sprite"
+                % MODE_NAMES[mode])
+        _expect(reached["width"] >= 40,
+                "%s stopped at %d wide with a 40-wide sprite to place"
+                % [MODE_NAMES[mode], reached["width"]])
 
 
 # --- Nothing to do -----------------------------------------------------
@@ -485,12 +509,18 @@ func _interlocked() -> Image:
 
 ## Reached through [method load] rather than by its [code]class_name[/code], the way every
 ## other test here reaches its operation.
+##
+## [b]Expansion is switched off here and turned on where it is the subject.[/b] It ships on,
+## so most of these fixtures would otherwise grow themselves a sheet that fits and every
+## check about running out of room would pass for the wrong reason. The default itself is
+## checked once, in [method _check_expand_to_fit], which is where it belongs.
 func _packer(mode: int, width: int, height: int) -> IWOperation:
     var packer: IWOperation = load(OP_REPACK).new()
     var settings := packer.get_settings()
     settings.mode = mode
     settings.output_width = width
     settings.output_height = height
+    settings.expand_to_fit = false
     return packer
 
 

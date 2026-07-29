@@ -16,10 +16,13 @@ extends IWOperation
 ## file with no transparency is one sprite the size of itself, which is the honest answer
 ## and usually a sign the stack above it has not been built yet.
 ##
-## [b]The sheet is a size you chose, and it is told when it does not fit.[/b] Nothing here
-## grows the output to suit: a sheet is normally a size something else has already decided,
-## and a packer that quietly returned a different one would be answering a question nobody
-## asked. Running out of room is reported and the packing stops.
+## [b]The sheet starts at the size you chose and doubles until everything fits.[/b] Width
+## first, then height, then width again, stopping at the largest a texture may be. Switch
+## [member RepackSettings.expand_to_fit] off to hold it at exactly the size asked for
+## instead, which is the right way round when that size is one something else has already
+## decided — a texture budget, a hardware limit, an atlas the rest of the project agrees
+## on. Either way, running out of room is reported and the packing stops rather than
+## quietly dropping whichever sprites were awkward.
 ##
 ## Preview only. Nothing is written, and the Process buttons stand down while this is
 ## showing — see [method transforms_pixels].
@@ -120,7 +123,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "min": MIN_SIZE,
             "max": MAX_SIZE,
             "step": 1,
-            "tooltip": "How wide the packed sheet is, in pixels.\n\nNothing here grows the sheet to suit what it is given. If the sprites do not\nfit you are told, rather than handed a size you did not ask for.",
+            "tooltip": "How wide the packed sheet starts, in pixels.\n\nWhere it ends up depends on Expand to Fit: on, this is a starting point and the\nsheet doubles from it until everything fits; off, it is exactly the size used\nand you are told when the sprites do not fit in it.",
         },
         {
             "property": &"output_height",
@@ -129,13 +132,13 @@ func get_settings_schema() -> Array[Dictionary]:
             "min": MIN_SIZE,
             "max": MAX_SIZE,
             "step": 1,
-            "tooltip": "How tall the packed sheet is, in pixels.\n\nNothing here grows the sheet to suit what it is given. If the sprites do not\nfit you are told, rather than handed a size you did not ask for.",
+            "tooltip": "How tall the packed sheet starts, in pixels.\n\nWhere it ends up depends on Expand to Fit: on, this is a starting point and the\nsheet doubles from it until everything fits; off, it is exactly the size used\nand you are told when the sprites do not fit in it.",
         },
         {
             "property": &"expand_to_fit",
             "label": "Expand to Fit",
             "type": SettingType.BOOL,
-            "tooltip": "Grid only. Doubles the sheet until every cell fits, taking the width first,\nthen the height, then the width again.\n\nGrid runs out of room for a reason a bigger sheet reliably fixes: it counts\ncapacity in cells rather than in area, so one sprite larger than the rest costs\nevery other sprite the same room. The other three modes run out because the\nsprites genuinely do not fit, and doubling past that would be a guess at a size\nnobody asked for.\n\nIt stops at %d, the largest a texture is allowed to be almost anywhere, and\nsays so if it gets there with sprites still to place." % MAX_SIZE,
+            "tooltip": "Doubles the sheet until everything fits, taking the width first, then the\nheight, then the width again.\n\nOff, the sheet stays exactly the size above and you are told when that is not\nenough — which is what you want when the size is one something else has already\ndecided.\n\nIt stops at %d, the largest a texture is allowed to be almost anywhere, and\nsays so if it gets there with sprites still to place." % MAX_SIZE,
         },
     ]
 
@@ -168,14 +171,15 @@ func plan(sizes: Array) -> Dictionary:
     var wanted := _packable(sizes)
 
     var attempt := _plan_at(sizes, width, height, mode)
-    if attempt["placed"] >= wanted or not (mode == PackMode.GRID and settings.expand_to_fit):
+    if attempt["placed"] >= wanted or not settings.expand_to_fit:
         return _at_size(attempt, width, height)
 
-    # [b]Doubling, alternately, rather than working out the size that would fit.[/b] Grid's
-    # capacity is cells, and cells only appear when a whole one fits — so the sheet a
-    # calculation would arrive at is a sheet the packer might still refuse over a rounding.
-    # Doubling and asking is the answer that cannot be wrong, and it is at most a couple of
-    # dozen attempts from any starting size to the ceiling.
+    # [b]Doubling, alternately, rather than working out the size that would fit.[/b] There
+    # is no size to work out: Grid's capacity appears a whole cell at a time, and the row
+    # modes depend on which sprite lands where, so a sheet arrived at by calculation is one
+    # the packer might still refuse over a rounding. Doubling and asking is the answer that
+    # cannot be wrong, and it is at most a couple of dozen attempts from any starting size
+    # to the ceiling.
     #
     # Width first, then height, so a sheet grows wide before it grows tall — which is the
     # way a sprite sheet is usually looked at, and the way the rows already run.

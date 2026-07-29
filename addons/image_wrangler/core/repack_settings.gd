@@ -9,22 +9,23 @@ extends Resource
 ## Which arrangement the sprites are laid out in. See [enum IWRepack.PackMode].
 @export var mode: int = 0
 
-## How big the sheet being packed into is, in pixels.
+## How big the sheet being packed into starts, in pixels.
 ##
-## Not derived from what the sprites need, and deliberately: a sheet is usually a size
-## something else has already decided — a texture budget, a hardware limit, an atlas the
-## rest of the project agrees on. Packing into a size you chose and being told when it does
-## not fit is the useful answer; packing into whatever happens to fit is not.
+## Where it ends up is [member expand_to_fit]'s business: on, this is a starting point and
+## the sheet doubles from it; off, it is exactly the size used. Either way it is a size
+## chosen rather than derived, because a sheet is usually one something else has already
+## decided — a texture budget, a hardware limit, an atlas the rest of the project agrees on.
 @export var output_width: int = 1024
 @export var output_height: int = 1024
 
-## Whether Grid may double the sheet until its cells fit.
+## Whether the sheet may double until everything fits.
 ##
-## Grid alone, because Grid alone runs out for a reason a bigger sheet reliably fixes: its
-## capacity is counted in cells rather than in area, so one sprite larger than the rest
-## costs every other sprite the same room. The other three fail because the sprites genuinely
-## do not fit, and doubling past that is a guess at a size nobody asked for.
-@export var expand_to_fit: bool = false
+## On by default, and for every mode: a repack that comes back with the sprites on it is
+## almost always what was wanted, and the size is easier to argue with once you can see
+## what went on it. Switch it off to hold the sheet at exactly the size asked for and be
+## told when that is not enough — which is the right way round when the size is one
+## something else has already decided.
+@export var expand_to_fit: bool = true
 
 
 ## A copy that belongs to no image.
