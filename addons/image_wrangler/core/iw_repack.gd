@@ -51,6 +51,23 @@ enum PackMode {
 ## Dropdown labels, in enum order.
 const MODE_LABELS := ["Shelf", "Grid", "Tight", "Original Order"]
 
+## What each mode does, in enum order, for the dock to show under the dropdown.
+##
+## [b]A sentence about what it does and a sentence about what it costs.[/b] The four are
+## easy to tell apart once you know what each gives up, and impossible to choose between
+## from the names alone — Shelf and Tight in particular sound like the same idea, and the
+## thing that separates them is not density but whether you can predict where anything
+## landed.
+##
+## Kept here beside the enum rather than in the dock, so a mode cannot be added without the
+## line that explains it.
+const MODE_DESCRIPTIONS := [
+    "Sorts the sprites tallest first and fills rows left to right, starting a new row when one is full. Packs well and is the usual choice. The order is lost.",
+    "Gives every sprite an identical cell, as wide as the widest and as tall as the tallest. Wastes room, and is the only mode that puts frames on a fixed stride you can index by number. The order is kept.",
+    "Drops each sprite into the lowest gap wide enough to take it, so shapes of different heights interlock. Packs the tightest of the four. Where anything landed is anyone's guess.",
+    "Fills rows without sorting, so the sprites stay in the order they were found — image by image, and within an image top to bottom. Packs worst, and is the only mode where the order out means something.",
+]
+
 ## Widest and shortest sheet that can be asked for.
 ##
 ## The ceiling is what a texture is allowed to be almost everywhere, and the floor is one
@@ -147,6 +164,11 @@ func get_settings_schema() -> Array[Dictionary]:
 ## rather than from the dropdown.
 static func sanitise_mode(mode: int) -> int:
     return mode if mode >= 0 and mode < MODE_LABELS.size() else PackMode.SHELF
+
+
+## What [param mode] does, in a couple of sentences.
+static func describe_mode(mode: int) -> String:
+    return MODE_DESCRIPTIONS[sanitise_mode(mode)]
 
 
 # --- The packing --------------------------------------------------------

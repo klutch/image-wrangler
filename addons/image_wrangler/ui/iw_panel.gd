@@ -132,6 +132,13 @@ const ADDON_ROOT := "res://addons/image_wrangler/"
 ## Settings edits arrive in bursts while a slider is dragged; collapse them.
 const PREVIEW_DEBOUNCE := 0.15
 
+## How long the Repack tab waits after a change before rebuilding the sheet.
+##
+## Far longer than the preview's, because the work behind it is far larger: a repack runs
+## every open image's whole stack, where a preview runs one image's. Dragging the width
+## spinner would otherwise start a batch run per pixel travelled.
+const REPACK_DEBOUNCE := 0.6
+
 ## How close a zoom has to be to a ladder rung to count as that rung rather than
 ## as a value of its own. Comfortably under the smallest gap in the ladder.
 const _ZOOM_MATCH := 0.01
@@ -206,8 +213,10 @@ var _repack: IWOperation
 ## it is asked for and then stands until asked again.
 var _repack_image: Image
 
-## Whether a repack is running, so a second press cannot start one on top of the first.
+## Whether a repack is running, so a change arriving mid-run cannot start a second on top
+## of the first, and whether one asked for itself while that was true.
 var _repack_running := false
+var _repack_pending := false
 var _sources: PackedStringArray = PackedStringArray()
 var _source_image: Image
 var _result_image: Image
@@ -379,7 +388,9 @@ var _rename_box: VBoxContainer
 var _repack_box: VBoxContainer
 ## Says how the last repack went — how many sprites off how many images, or why it stopped.
 var _repack_status: Label
-var _repack_button: Button
+## Says what the selected packing mode does, sitting under the dropdown and above the rest
+## of the form.
+var _repack_mode_note: Label
 ## How much of the source image is faded over the result, 0 to 100.
 var _original_fade: HSlider
 var _zoom_select: OptionButton
@@ -393,6 +404,7 @@ var _suffix_edit: LineEdit
 var _process_selected_button: Button
 var _process_all_button: Button
 var _debounce: Timer
+var _repack_debounce: Timer
 var _autosave: Timer
 var _open_dialog: FileDialog
 var _output_dialog: FileDialog
@@ -572,6 +584,38 @@ func _build_repack() -> void:
         _repack = script.new()
     SettingsBuilder.build(_repack, _repack_box, _on_setting_changed, _fold_state, "repack")
 
+    # The note goes under the dropdown rather than at the top or the bottom of the form,
+    # because it is about the one control above it and not about the sheet size below.
+    # Moved into place rather than declared in the schema: the builder lays out settings,
+    # and a line of prose is not one — it has no property to write and nothing to read
+    # back, and giving the schema a way to say "and now some words" would be a new kind of
+    # entry for every other operation to ignore.
+    if _repack_mode_note != null:
+        if _repack_mode_note.get_parent() != null:
+            _repack_mode_note.get_parent().remove_child(_repack_mode_note)
+        _repack_box.add_child(_repack_mode_note)
+        _repack_box.move_child(_repack_mode_note, _repack_note_index())
+    _refresh_repack_note()
+
+
+## Where the mode note belongs: directly after whichever row carries the mode dropdown.
+##
+## Found rather than counted, so reordering the schema moves the note with it. Falls to the
+## top of the form if the dropdown cannot be found at all, which is the harmless place for
+## a line of prose to end up.
+func _repack_note_index() -> int:
+    for child in _repack_box.get_children():
+        if child.has_meta(SettingsBuilder.META_PROPERTY) \
+                and child.get_meta(SettingsBuilder.META_PROPERTY) == &"mode":
+            return child.get_index() + 1
+    return 0
+
+
+func _refresh_repack_note() -> void:
+    if _repack_mode_note == null or _repack == null:
+        return
+    _repack_mode_note.text = IWRepack.describe_mode(_repack.get_settings().mode)
+
 
 ## Rebuilds the dock when one of this addon's scripts has been reloaded.
 ##
@@ -720,7 +764,7 @@ func _forget_controls() -> void:
     _rename_box = null
     _repack_box = null
     _repack_status = null
-    _repack_button = null
+    _repack_mode_note = null
     _original_fade = null
     _zoom_select = null
     _zoom_entry = null
@@ -733,6 +777,7 @@ func _forget_controls() -> void:
     _process_selected_button = null
     _process_all_button = null
     _debounce = null
+    _repack_debounce = null
     _autosave = null
     _open_dialog = null
     _output_dialog = null
@@ -766,6 +811,12 @@ func _build_ui() -> void:
     _debounce.wait_time = PREVIEW_DEBOUNCE
     _debounce.timeout.connect(_run_preview)
     add_child(_debounce)
+
+    _repack_debounce = Timer.new()
+    _repack_debounce.one_shot = true
+    _repack_debounce.wait_time = REPACK_DEBOUNCE
+    _repack_debounce.timeout.connect(_run_repack_now)
+    add_child(_repack_debounce)
 
     _autosave = Timer.new()
     _autosave.one_shot = true
@@ -1066,14 +1117,11 @@ func _build_operation_column() -> Control:
     _repack_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     repack_column.add_child(_repack_box)
 
-    # Asked for rather than followed, unlike every other form in this dock. A repack runs
-    # the whole stack of every open image, which is not something to do on a keystroke — so
-    # the settings are set and then the button is pressed.
-    _repack_button = Button.new()
-    _repack_button.text = "Repack"
-    _repack_button.tooltip_text = "Find the separate objects in every open image and lay them all on one sheet.\n\nEach image is run through its own stack first, so what gets packed is what\nyou keyed out rather than what came off disk. The result is shown in the\nviewport and is not written anywhere."
-    _repack_button.pressed.connect(_on_repack_pressed)
-    repack_column.add_child(_repack_button)
+    # Says what the mode in the dropdown above it does. Built here and moved into the form
+    # by _build_repack, which is the only thing that knows where the dropdown ended up.
+    _repack_mode_note = Label.new()
+    _repack_mode_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    _repack_mode_note.modulate = Color(1, 1, 1, 0.6)
 
     _repack_status = Label.new()
     _repack_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1132,6 +1180,11 @@ func _select_mode(mode: int) -> void:
     _update_detail_label()
     if _is_image_mode(mode) and _auto_preview_allowed():
         _schedule_preview()
+    # Arriving on the tab is itself a reason to build one: an empty viewport under a form
+    # full of settings reads as a tool that has not worked rather than one that has not
+    # been asked.
+    if mode == Mode.REPACK:
+        _schedule_repack()
 
 
 func _on_tab_changed(tab: int) -> void:
@@ -1299,7 +1352,13 @@ func _add_sources(paths: PackedStringArray) -> void:
     _update_controls()
 
 
+## Rewrites the Images list, and asks for a repack.
+##
+## [b]Every path that changes what is open ends here[/b] — adding, removing, clearing — so
+## it is the one place that has to know a sheet made from those images is now out of date.
+## Hooking the three of them separately would be three chances to add a fourth and forget.
 func _refresh_file_list() -> void:
+    _schedule_repack()
     var selected := _selected_index()
     _file_list.clear()
     for path in _sources:
@@ -2803,11 +2862,10 @@ func _on_setting_changed() -> void:
         _capture_history()
     _schedule_autosave()
     if _mode == Mode.REPACK:
-        # Deliberately no rerun. Changing the sheet size or the arrangement is cheap to
-        # say and expensive to answer, so the sheet on screen is left as the answer to the
-        # settings it was asked with until the button is pressed again.
-        if _repack_image != null:
-            _set_repack_status("Settings changed. Press Repack to rebuild the sheet.")
+        # The note under the dropdown is the one part of this form that is not a setting,
+        # so nothing else would notice the mode had moved.
+        _refresh_repack_note()
+        _schedule_repack()
         return
     if _mode == Mode.RENAME:
         _update_detail_label()
@@ -3001,13 +3059,37 @@ func _stack_summary() -> String:
 ## the sidecar codec, which already knows how to walk every nested resource these have.
 # --- Repack -------------------------------------------------------------
 
+## Asks for a rebuild shortly, for a change that ought to produce one.
+##
+## Debounced rather than immediate, and by a good deal more than the preview is: every
+## change here costs a run of every open image's stack, and a spinner being dragged reports
+## a change per pixel.
+func _schedule_repack() -> void:
+    # The timer is null while the dock is being built, and _refresh_file_list runs during
+    # that — so this is reached before there is anything to start.
+    if _mode != Mode.REPACK or _shutting_down or _repack_debounce == null:
+        return
+    _repack_debounce.start()
+
+
 ## Builds the sheet, or says why it could not.
 ##
-## Guarded against a second press rather than queued: a repack runs every open image's
-## whole stack, and two of them interleaved would fight over the preview.
-func _on_repack_pressed() -> void:
-    if _repack_running or _sources.is_empty() or _repack == null:
+## [b]Queued rather than refused when one is already going.[/b] Two interleaved runs would
+## fight over the preview, but dropping the second would leave the sheet describing
+## settings that are no longer on screen — which is the one thing an automatic rebuild must
+## not do. So the request is remembered and answered as soon as the run in flight is done.
+func _run_repack_now() -> void:
+    if _mode != Mode.REPACK or _shutting_down or _repack == null:
         return
+    if _repack_running:
+        _repack_pending = true
+        return
+    if _sources.is_empty():
+        _repack_image = null
+        _update_preview_texture()
+        _set_repack_status("Nothing to pack: add some images to the list.")
+        return
+
     _repack_running = true
     _update_controls()
     _preview.set_busy(true)
@@ -3017,6 +3099,12 @@ func _on_repack_pressed() -> void:
     _repack_running = false
     _preview.set_busy(false)
     _update_controls()
+
+    # Something changed while that was running, so the sheet just built is already out of
+    # date. Round again, through the debounce so a burst of changes still collapses.
+    if _repack_pending:
+        _repack_pending = false
+        _schedule_repack()
 
 
 ## Reads every open image, cuts the objects out of each, and lays them on one sheet.
@@ -3316,8 +3404,7 @@ func _update_controls() -> void:
     var packs := _mode == Mode.REPACK
     _process_selected_button.disabled = packs or _source_image == null
     _process_all_button.disabled = packs or not has_any
-    if _repack_button != null:
-        _repack_button.disabled = _repack_running or _sources.is_empty()
+
 
 
 # --- Writing results ----------------------------------------------------

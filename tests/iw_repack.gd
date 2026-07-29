@@ -33,6 +33,7 @@ func _initialize() -> void:
     _check_overflow_is_reported()
     _check_expand_to_fit()
     _check_degenerate_input()
+    _check_mode_descriptions()
     _check_find_islands()
     _check_cut_islands()
     _check_nothing_is_lost()
@@ -328,6 +329,35 @@ func _check_degenerate_input() -> void:
                 % [MODE_NAMES[mode], plan["placed"]])
         _expect((plan["positions"] as Array)[1] == Vector2i(-1, -1),
                 "%s gave an empty sprite a place on the sheet" % MODE_NAMES[mode])
+
+
+# --- What the dock says about each mode ---------------------------------
+
+## The dropdown shows a line about whatever is selected, and it comes from the same array
+## the labels do. The failure worth catching is a fifth mode added with a label and no
+## description, which would read as an empty gap under the dropdown rather than as an
+## oversight.
+func _check_mode_descriptions() -> void:
+    var packer: IWOperation = load(OP_REPACK).new()
+    var labels: Array = packer.MODE_LABELS
+    var notes: Array = packer.MODE_DESCRIPTIONS
+
+    _expect(notes.size() == labels.size(),
+            "%d modes carry %d descriptions between them" % [labels.size(), notes.size()])
+
+    var seen := {}
+    for mode: int in MODES:
+        var note: String = packer.describe_mode(mode)
+        _expect(not note.is_empty(), "%s has no description" % MODE_NAMES[mode])
+        _expect(not seen.has(note),
+                "%s is described in the same words as another mode" % MODE_NAMES[mode])
+        seen[note] = true
+
+    # A value from a hand-edited file falls back rather than reaching off the end.
+    _expect(packer.describe_mode(-1) == packer.describe_mode(0),
+            "a mode below the range did not fall back to the first")
+    _expect(packer.describe_mode(99) == packer.describe_mode(0),
+            "a mode above the range did not fall back to the first")
 
 
 # --- The sprites themselves --------------------------------------------
