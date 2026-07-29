@@ -80,6 +80,9 @@ void IWStageKernels::_bind_methods() {
             D_METHOD("random_hsv_tiles", "ctx", "rng_seed", "hue_amount", "saturation_amount",
                     "value_amount"),
             &IWStageKernels::random_hsv_tiles);
+    // Defined in iw_hole_kernels.cpp; bound here so every entry point is in one list.
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("fill_pinholes", "ctx", "max_area"), &IWStageKernels::fill_pinholes);
 }
 
 // Rasterises this stage's shapes and folds them into whatever is already declared.

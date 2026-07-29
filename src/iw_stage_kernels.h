@@ -203,6 +203,22 @@ public:
     static PackedInt32Array random_hsv_tiles(const Ref<IWPipelineContext> &ctx,
             int64_t rng_seed, double hue_amount, double saturation_amount,
             double value_amount);
+
+    // FillPinholes.process_context: closes every enclosed patch of not-fully-opaque pixels
+    // of at most `max_area` pixels, colouring each from the solid pixels around it.
+    //
+    // Takes a number rather than a list of places, for the same reason random_hsv_tiles
+    // does: finding them is the job. A patch that reaches the edge of the image is the
+    // outside rather than a hole and is never touched, whatever its size, which is what
+    // lets this run below a keyer without undoing it.
+    //
+    // A hole is anything short of full alpha, not merely what is clear: a speck's own soft
+    // rim is part of it, counts toward the area, and comes out solid with the rest.
+    //
+    // Returns every index it filled. Reads the alpha the run currently shows, and writes
+    // the source pixels, the coverage and the mask — so the caller owes the run a rebuild
+    // of the distance map and of the nearest-subject map afterwards.
+    static PackedInt32Array fill_pinholes(const Ref<IWPipelineContext> &ctx, int64_t max_area);
 };
 
 } // namespace godot
