@@ -492,3 +492,52 @@ Ref<Image> IWStageKernels::stroke_overlay(
 
     return Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, data);
 }
+
+// The same mark as stroke_overlay, taken off a strength map that already exists.
+//
+// What the dock uses while a drag is in flight. The live brush is already accumulating
+// this stroke's strength patch by patch — see paint_patch — so the highlight over it is a
+// colouring of that map rather than a second walk down the path. Asking stroke_overlay
+// instead would re-walk every segment drawn so far on every mouse event, which is
+// quadratic in the length of the stroke and buys nothing: the two produce the same
+// picture, because they are reading the same numbers.
+Ref<Image> IWStageKernels::strength_overlay(const Ref<Image> &strength, const Color &color) {
+    ERR_FAIL_COND_V(strength.is_null(), Ref<Image>());
+    const int64_t width = strength->get_width();
+    const int64_t height = strength->get_height();
+    if (width <= 0 || height <= 0) {
+        return Ref<Image>();
+    }
+    ERR_FAIL_COND_V_MSG(strength->get_format() != Image::FORMAT_RF, Ref<Image>(),
+            "Image Wrangler: the brush's strength map must be RF.");
+
+    const int64_t count = width * height;
+    const PackedByteArray marks = strength->get_data();
+    if (marks.size() != count * 4) {
+        return Ref<Image>();
+    }
+    const float *hit = reinterpret_cast<const float *>(marks.ptr());
+
+    PackedByteArray data;
+    data.resize(count * 4);
+    data.fill(0);
+    uint8_t *out = data.ptrw();
+
+    const uint8_t red = static_cast<uint8_t>(iw::roundi(iw::clampf(color.r, 0.0, 1.0) * 255.0));
+    const uint8_t green = static_cast<uint8_t>(iw::roundi(iw::clampf(color.g, 0.0, 1.0) * 255.0));
+    const uint8_t blue = static_cast<uint8_t>(iw::roundi(iw::clampf(color.b, 0.0, 1.0) * 255.0));
+    const double alpha = iw::clampf(color.a, 0.0, 1.0);
+    for (int64_t i = 0; i < count; i++) {
+        const double value = iw::clampf(iw::widen(hit[i]), 0.0, 1.0);
+        if (value <= 0.0) {
+            continue;
+        }
+        const int64_t at = i * 4;
+        out[at] = red;
+        out[at + 1] = green;
+        out[at + 2] = blue;
+        out[at + 3] = static_cast<uint8_t>(iw::roundi(value * alpha * 255.0));
+    }
+
+    return Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, data);
+}

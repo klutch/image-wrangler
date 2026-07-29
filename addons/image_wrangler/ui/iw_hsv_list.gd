@@ -40,7 +40,6 @@ var _interactive := true
 
 var _list: EntryList
 var _pick_button: Button
-var _remove_button: Button
 var _clear_button: Button
 
 ## The three sliders for the highlighted row, hidden rather than disabled when nothing is
@@ -79,12 +78,6 @@ func _build() -> void:
     _pick_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _pick_button.toggled.connect(func(pressed: bool) -> void: pick_toggled.emit(pressed))
     buttons.add_child(_pick_button)
-
-    _remove_button = Button.new()
-    _remove_button.text = "Remove"
-    _remove_button.tooltip_text = "Remove the highlighted region."
-    _remove_button.pressed.connect(_on_remove_pressed)
-    buttons.add_child(_remove_button)
 
     _clear_button = Button.new()
     _clear_button.text = "Clear"
@@ -263,7 +256,6 @@ func _update_buttons() -> void:
     var regions := _region_list()
     var any := regions != null and not regions.is_empty()
     _pick_button.disabled = not _interactive
-    _remove_button.disabled = not _interactive or selected_index() < 0
     _clear_button.disabled = not _interactive or not any
     if _reset_button != null:
         _reset_button.disabled = not _interactive
@@ -334,9 +326,6 @@ func _on_reset_pressed() -> void:
     })
     regions_changed.emit()
 
-
-func _on_remove_pressed() -> void:
-    _remove_entry(selected_index())
 
 
 ## Takes one row off the list, whether the button asked or a row's own cross did.

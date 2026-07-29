@@ -60,7 +60,6 @@ var _interactive := true
 
 var _list: EntryList
 var _draw_button: Button
-var _remove_button: Button
 var _clear_button: Button
 ## The brush the next stroke will be drawn at. Always on screen, above the list.
 var _brush_radius: EditorSpinSlider
@@ -109,12 +108,6 @@ func _build() -> void:
     _draw_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _draw_button.toggled.connect(func(pressed: bool) -> void: draw_toggled.emit(pressed))
     buttons.add_child(_draw_button)
-
-    _remove_button = Button.new()
-    _remove_button.text = "Remove"
-    _remove_button.tooltip_text = "Remove the highlighted stroke."
-    _remove_button.pressed.connect(_on_remove_pressed)
-    buttons.add_child(_remove_button)
 
     _clear_button = Button.new()
     _clear_button.text = "Clear"
@@ -397,7 +390,6 @@ func _load_editor() -> void:
 
 
 func _update_buttons() -> void:
-    _remove_button.disabled = not _interactive or selected_index() < 0
     _clear_button.disabled = not _interactive or _list.count() == 0
     _draw_button.disabled = not _interactive
     # read_only rather than the editable a Range has: EditorSpinSlider does not carry that
@@ -474,9 +466,6 @@ func _on_mode_changed(index: int, mode: int) -> void:
     # The overlay tells Add and Subtract apart, so it has to be redrawn as well.
     selection_changed.emit()
 
-
-func _on_remove_pressed() -> void:
-    _remove_entry(selected_index())
 
 
 ## Takes one row off the list, whether the button asked or a row's own cross did.

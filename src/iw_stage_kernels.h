@@ -283,6 +283,14 @@ public:
             const Vector2i &origin,
             const Vector2i &size,
             const Color &color);
+
+    // The same mark, taken off a strength map that already exists.
+    //
+    // What the dock uses while a drag is in flight, where paint_patch is accumulating the
+    // stroke's strength anyway: the highlight is then a colouring of that map rather than
+    // a second walk down a path that grows with every mouse event. The two produce the
+    // same picture, being the same numbers.
+    static Ref<Image> strength_overlay(const Ref<Image> &strength, const Color &color);
 };
 
 } // namespace godot

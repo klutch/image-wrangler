@@ -59,6 +59,7 @@ func _initialize() -> void:
     _check_incremental_patches_match()
     _check_add_takes_the_source_colour()
     _check_overlay_matches_the_stroke()
+    _check_live_overlay_matches()
     await _check_preview_reports_a_drag()
 
     if _failures == 0:
@@ -580,6 +581,46 @@ func _check_overlay_matches_the_stroke() -> void:
             "the overlay did not come back at the size it was asked for")
     _expect(cropped.get_pixel(2, 2).a8 == 255,
             "the overlay's origin was not honoured — the dab landed off centre")
+
+
+## And the one the live brush uses mid-drag, which colours the strength map the paint is
+## already keeping rather than walking the path again, has to give the same picture. If it
+## did not, the highlight would jump the moment the button came up.
+func _check_live_overlay_matches() -> void:
+    var path := [Vector2i(4, 5), Vector2i(18, 9), Vector2i(11, 20)]
+    var radius := 4
+    var sharpness := 0.4
+    var mark := Color(1.0, 1.0, 0.2, 0.65)
+    var size := Vector2i(24, 24)
+
+    var points := PackedInt32Array()
+    for point: Vector2i in path:
+        points.append(point.x)
+        points.append(point.y)
+    var want: Image = IWStageKernels.stroke_overlay(points, radius, sharpness,
+            Vector2i.ZERO, size, mark)
+
+    # The strength map as a drag builds it: a dab where the button went down, then one
+    # call per segment, each handed the map the last one left.
+    var base := _image(_solid(size.x, size.y))
+    var strength := Image.create_empty(size.x, size.y, false, Image.FORMAT_RF)
+    IWStageKernels.paint_patch(base, strength, null, Vector2i.ZERO, path[0], path[0],
+            radius, sharpness, false)
+    for i in range(1, path.size()):
+        IWStageKernels.paint_patch(base, strength, null, Vector2i.ZERO, path[i - 1],
+                path[i], radius, sharpness, false)
+    var got: Image = IWStageKernels.strength_overlay(strength, mark)
+
+    if not _expect(want != null and got != null, "one of the overlay kernels returned nothing"):
+        return
+    var differing := 0
+    for y in size.y:
+        for x in size.x:
+            if want.get_pixel(x, y) != got.get_pixel(x, y):
+                differing += 1
+    _expect(differing == 0,
+            "%d pixels differ between the highlight drawn from a path and the one drawn "
+            % differing + "from the strength map the drag builds")
 
 
 # --- The preview turns a drag into points ------------------------------

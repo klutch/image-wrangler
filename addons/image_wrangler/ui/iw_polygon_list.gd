@@ -47,7 +47,6 @@ var _interactive := true
 
 var _list: EntryList
 var _draw_button: Button
-var _remove_button: Button
 var _clear_button: Button
 var _hint: Label
 
@@ -81,12 +80,6 @@ func _build() -> void:
 	_draw_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_draw_button.toggled.connect(func(pressed: bool) -> void: draw_toggled.emit(pressed))
 	buttons.add_child(_draw_button)
-
-	_remove_button = Button.new()
-	_remove_button.text = "Remove"
-	_remove_button.tooltip_text = "Remove the highlighted region."
-	_remove_button.pressed.connect(_on_remove_pressed)
-	buttons.add_child(_remove_button)
 
 	_clear_button = Button.new()
 	_clear_button.text = "Clear"
@@ -355,9 +348,6 @@ func _on_mode_changed(index: int, mode: int) -> void:
 	polygons_changed.emit()
 
 
-func _on_remove_pressed() -> void:
-	_remove_entry(selected_index())
-
 
 ## Takes one row off the list, whether the button asked or a row's own cross did.
 func _remove_entry(index: int) -> void:
@@ -433,6 +423,5 @@ func _row_data(index: int, polygon: PolygonRegion) -> Dictionary:
 
 
 func _update_buttons() -> void:
-	_remove_button.disabled = not _interactive or selected_index() < 0
 	_clear_button.disabled = not _interactive or _list.count() == 0
 	_draw_button.disabled = not _interactive

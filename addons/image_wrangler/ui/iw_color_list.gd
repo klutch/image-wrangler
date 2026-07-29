@@ -60,7 +60,6 @@ var _interactive := true
 
 var _list: EntryList
 var _pick_button: Button
-var _remove_button: Button
 var _clear_button: Button
 
 ## Editor for the highlighted row. Hidden rather than disabled when nothing is
@@ -112,12 +111,6 @@ func _build() -> void:
 	_pick_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_pick_button.toggled.connect(func(pressed: bool) -> void: pick_toggled.emit(pressed))
 	buttons.add_child(_pick_button)
-
-	_remove_button = Button.new()
-	_remove_button.text = "Remove"
-	_remove_button.tooltip_text = "Remove the highlighted color."
-	_remove_button.pressed.connect(_on_remove_pressed)
-	buttons.add_child(_remove_button)
 
 	_clear_button = Button.new()
 	_clear_button.text = "Clear"
@@ -312,14 +305,6 @@ func _on_enabled_toggled(index: int, on: bool) -> void:
 	_set_hint("")
 	colors_changed.emit()
 
-
-## Adds an entry at the default colour for the user to set by hand.
-##
-## White rather than anything cleverer: it is what a fresh image starts at, and
-## guessing from the image would be picking without the user having pointed at
-## anything.
-func _on_remove_pressed() -> void:
-	_remove_entry(_selected_index())
 
 
 ## Takes one row off the list, whether the button asked or a row's own cross did.
@@ -619,7 +604,6 @@ func _row_data(index: int, entry: RemoveColorEntry) -> Dictionary:
 
 
 func _update_buttons() -> void:
-	_remove_button.disabled = not _interactive or _selected_index() < 0
 	_clear_button.disabled = not _interactive or _list.count() == 0
 	_pick_button.disabled = not _interactive
 	if _color_button != null:

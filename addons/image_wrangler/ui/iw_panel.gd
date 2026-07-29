@@ -2445,6 +2445,13 @@ func _extend_live_paint(to: Vector2i) -> void:
     _paint_at = to
     _paint_bounds = touched if _paint_bounds.size.x <= 0 else _paint_bounds.merge(touched)
     _preview.set_live_patch(_paint_image.get_region(_paint_bounds), _paint_bounds)
+    # The same highlight a selected stroke gets, over the one being drawn. Taken off the
+    # strength map the paint is already keeping rather than by walking the path again,
+    # which would grow with every mouse event and give the same answer.
+    _preview.set_brush_overlay(
+            IWStageKernels.strength_overlay(
+                    _paint_strength.get_region(_paint_bounds), BRUSH_OVERLAY_COLOR),
+            _paint_bounds)
 
 
 ## The pixels a segment of the brush can reach, clamped to the image.
