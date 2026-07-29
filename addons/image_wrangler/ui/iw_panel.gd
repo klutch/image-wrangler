@@ -989,6 +989,10 @@ func _build_status_row() -> Control:
 
 func _build_operation_column() -> Control:
     var column := VBoxContainer.new()
+    # A floor for the contents rather than for the tab strip, which sets its own below and
+    # is very likely the larger of the two. It still matters if the tabs are ever renamed
+    # shorter: a settings form has a width it stops being usable under, and that width has
+    # nothing to do with how the strip above it happens to read.
     column.custom_minimum_size = Vector2(220, 0)
 
     # Tabs rather than toggles, because the two are not settings of one thing: one
@@ -998,6 +1002,16 @@ func _build_operation_column() -> Control:
     _modes = TabContainer.new()
     _modes.size_flags_vertical = Control.SIZE_EXPAND_FILL
     _modes.tab_changed.connect(_on_tab_changed)
+    # [b]The strip is what sets this column's minimum width.[/b] Left to clip, a TabBar
+    # reports a minimum of almost nothing and hides whatever does not fit behind scroll
+    # arrows — so the column could be dragged narrow enough that Repack and Rename were
+    # only reachable by scrolling a strip of four short words. Refusing to clip makes the
+    # bar report what it actually needs, and a container's minimum is its children's, so
+    # the splitter stops where the last tab does.
+    #
+    # Measured rather than written down as a number: the answer depends on the editor's
+    # font and scale, and on how many tabs there are. A fifth one widens this by itself.
+    _modes.get_tab_bar().clip_tabs = false
     column.add_child(_modes)
 
     # Each tab gets its own scroll, so switching does not carry the other one's scroll
