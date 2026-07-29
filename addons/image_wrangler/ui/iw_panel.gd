@@ -87,6 +87,13 @@ result on its own.
 It changes nothing about what is processed — only what is drawn over
 the preview."""
 
+## What a highlighted brush stroke is lit up in.
+##
+## The same yellow the preview picks a marker out in, so a selected row means one thing
+## across the whole dock. Short of solid: it lies on top of the pixels that stroke changed,
+## and those are what the row was clicked to look at.
+const BRUSH_OVERLAY_COLOR := Color(1.0, 1.0, 0.2, 0.65)
+
 const MAGENTA_TOOLTIP := """Lays solid magenta under the image instead of the checkerboard.
 
 The checkerboard is two greys a shade apart, which is what makes it read
@@ -2583,13 +2590,11 @@ func _update_overlays() -> void:
     var selected_region := -1
     var draft_region := -1
 
-    # The brush overlay is not merged the way the others are. A path is drawn at its own
-    # brush width, so a flat list of paths would need a parallel list of widths to go with
-    # it — and only one is ever on screen, since the stroke being drawn shows as paint on
-    # the image rather than as an outline over it. Naming that one directly is the whole of
-    # what is needed.
-    var brush_path := []
-    var brush_radius := 1
+    # The brush overlay is not merged the way the others are. It is a picture of one
+    # stroke's own pixels rather than a shape, and only one is ever on screen — the stroke
+    # being drawn shows as paint on the image rather than as a mark over it, and two lists
+    # each lighting up a row would be two answers to a question that has one.
+    var brush_stroke: BrushStroke = null
 
     if _mode != Mode.RENAME:
         for control: Control in _pick_controls:
@@ -2626,23 +2631,48 @@ func _update_overlays() -> void:
                 regions.append_array(own_regions)
                 region_flags.append_array(list.get_enabled_flags())
             elif control is BrushList:
-                # The highlighted stroke, and only from the list the user is working in —
-                # the same rule the merged selections above follow, and for the same
-                # reason: two lists each highlighting a row would draw two answers to a
-                # question that has one. Never the one being drawn: that one is showing as
-                # paint on the image already, and an outline round it would be the second
-                # picture the switch to live painting was made to get rid of.
+                # Only from the list the user is working in, and never the stroke being
+                # drawn: that one is showing as paint on the image already, and a second
+                # picture of it is what the switch to live painting was made to get rid of.
                 var brush := control as BrushList
-                var chosen := brush.selected_index()
-                var paths := brush.get_paths()
-                if brush == _overlay_owner and chosen >= 0 and chosen < paths.size() \
-                        and chosen != brush.draft_index():
-                    brush_path = paths[chosen]
-                    brush_radius = brush.get_radii()[chosen]
+                if brush == _overlay_owner and brush.selected_index() != brush.draft_index():
+                    brush_stroke = brush.selected_stroke()
 
     _preview.set_markers(islands, selected_island, island_flags, island_flooded)
     _preview.set_polygons(regions, selected_region, draft_region, region_flags)
-    _preview.set_brush_overlay(brush_path, brush_radius)
+    _push_brush_overlay(brush_stroke)
+
+
+## Renders one stroke's own pixels and hands them to the preview, or clears the overlay.
+##
+## [b]The stroke rather than a line through it.[/b] A path drawn at the brush's width was
+## how this started, and it marked where the stroke went rather than what it did — on a
+## soft brush or a Subtract over something already faint, those are different pictures.
+## Rendering the stroke through the same accumulation the paint uses lights up exactly the
+## pixels it is responsible for, as strongly as it is responsible for them.
+##
+## Bounded by the stroke's own box grown by its brush, so a dab on a large sheet costs a
+## picture the size of the dab. Rebuilt when the selection changes rather than per frame.
+func _push_brush_overlay(stroke: BrushStroke) -> void:
+    var shown := _result_image if _result_image != null else _source_image
+    if stroke == null or not stroke.is_drawable() or shown == null or shown.is_empty():
+        _preview.set_brush_overlay(null, Rect2i())
+        return
+
+    var radius: int = clampi(stroke.radius, BrushStroke.MIN_RADIUS, BrushStroke.MAX_RADIUS)
+    var region := stroke.bounds().grow(radius).intersection(
+            Rect2i(Vector2i.ZERO, shown.get_size()))
+    if region.size.x <= 0 or region.size.y <= 0:
+        _preview.set_brush_overlay(null, Rect2i())
+        return
+
+    var points := PackedInt32Array()
+    for point: Vector2i in stroke.points:
+        points.append(point.x)
+        points.append(point.y)
+    var overlay: Image = IWStageKernels.stroke_overlay(points, radius, stroke.sharpness,
+            region.position, region.size, BRUSH_OVERLAY_COLOR)
+    _preview.set_brush_overlay(overlay, region)
 
 
 func _on_setting_changed() -> void:

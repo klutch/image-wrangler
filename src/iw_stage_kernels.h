@@ -268,6 +268,21 @@ public:
             int64_t radius,
             double sharpness,
             bool adding);
+
+    // One stroke's own pixels in one colour, for the dock to lay over the preview so a
+    // highlighted row can be found on the image.
+    //
+    // The same accumulation the paint uses, so what lights up is exactly what that stroke
+    // is responsible for and as strongly as it is responsible for it — where a line drawn
+    // at the brush's width would only say where the stroke went. Returns an RGBA8 image of
+    // `size` covering `origin` onwards, or null when there is nothing to draw.
+    static Ref<Image> stroke_overlay(
+            const PackedInt32Array &points,
+            int64_t radius,
+            double sharpness,
+            const Vector2i &origin,
+            const Vector2i &size,
+            const Color &color);
 };
 
 } // namespace godot

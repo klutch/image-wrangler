@@ -60,7 +60,6 @@ var _interactive := true
 
 var _list: EntryList
 var _pick_button: Button
-var _add_button: Button
 var _remove_button: Button
 var _clear_button: Button
 
@@ -114,12 +113,6 @@ func _build() -> void:
 	_pick_button.toggled.connect(func(pressed: bool) -> void: pick_toggled.emit(pressed))
 	buttons.add_child(_pick_button)
 
-	_add_button = Button.new()
-	_add_button.text = "Add"
-	_add_button.tooltip_text = "Add an entry to set by hand, without picking off the image."
-	_add_button.pressed.connect(_on_add_pressed)
-	buttons.add_child(_add_button)
-
 	_remove_button = Button.new()
 	_remove_button.text = "Remove"
 	_remove_button.tooltip_text = "Remove the highlighted color."
@@ -140,6 +133,7 @@ func _build() -> void:
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.row_selected.connect(_on_row_selected)
 	_list.enabled_toggled.connect(_on_enabled_toggled)
+	_list.remove_requested.connect(_remove_entry)
 	add_child(_list)
 
 	_editor = HBoxContainer.new()
@@ -324,19 +318,12 @@ func _on_enabled_toggled(index: int, on: bool) -> void:
 ## White rather than anything cleverer: it is what a fresh image starts at, and
 ## guessing from the image would be picking without the user having pointed at
 ## anything.
-func _on_add_pressed() -> void:
-	var colors := _color_list()
-	if colors == null:
-		return
-	colors.add(Color.WHITE)
-	_refresh()
-	_select(colors.size() - 1)
-	_set_hint("Set the color with the swatch, or use Pick to take one off the image.")
-	colors_changed.emit()
-
-
 func _on_remove_pressed() -> void:
-	var index := _selected_index()
+	_remove_entry(_selected_index())
+
+
+## Takes one row off the list, whether the button asked or a row's own cross did.
+func _remove_entry(index: int) -> void:
 	var colors := _color_list()
 	if colors == null or index < 0 or index >= colors.size():
 		return
@@ -635,7 +622,6 @@ func _update_buttons() -> void:
 	_remove_button.disabled = not _interactive or _selected_index() < 0
 	_clear_button.disabled = not _interactive or _list.count() == 0
 	_pick_button.disabled = not _interactive
-	_add_button.disabled = not _interactive
 	if _color_button != null:
 		_color_button.disabled = not _interactive
 	if _tolerance_slider != null:

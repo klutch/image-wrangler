@@ -99,6 +99,7 @@ func _build() -> void:
     _list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _list.row_selected.connect(_on_row_selected)
     _list.enabled_toggled.connect(_on_enabled_toggled)
+    _list.remove_requested.connect(_remove_entry)
     add_child(_list)
 
     _editor = VBoxContainer.new()
@@ -335,10 +336,15 @@ func _on_reset_pressed() -> void:
 
 
 func _on_remove_pressed() -> void:
+    _remove_entry(selected_index())
+
+
+## Takes one row off the list, whether the button asked or a row's own cross did.
+func _remove_entry(index: int) -> void:
     var regions := _region_list()
-    if regions == null or selected_index() < 0:
+    if regions == null or index < 0 or index >= regions.size():
         return
-    regions.remove_at(selected_index())
+    regions.remove_at(index)
     _refresh()
     regions_changed.emit()
     selection_changed.emit()

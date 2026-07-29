@@ -92,6 +92,10 @@ void IWStageKernels::_bind_methods() {
             D_METHOD("paint_patch", "base", "strength", "beneath", "origin", "from", "to",
                     "radius", "sharpness", "adding"),
             &IWStageKernels::paint_patch);
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("stroke_overlay", "points", "radius", "sharpness", "origin", "size",
+                    "color"),
+            &IWStageKernels::stroke_overlay);
 }
 
 // Rasterises this stage's shapes and folds them into whatever is already declared.

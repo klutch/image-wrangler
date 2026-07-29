@@ -409,3 +409,86 @@ Ref<Image> IWStageKernels::paint_patch(
     strength->set_data(width, height, false, Image::FORMAT_RF, marks);
     return Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, out);
 }
+
+// Draws one stroke's own pixels, in one colour, for the dock to lay over the preview.
+//
+// [b]The stroke itself rather than a line through it.[/b] The path drawn at the brush's
+// width was the obvious way to say which row is highlighted, and it said the wrong thing:
+// it marks where the stroke went, not what it did, and on a soft brush or a Subtract over
+// something already faint those are different pictures. This is the same accumulation the
+// paint uses, so what lights up is exactly the pixels that stroke is responsible for, as
+// strongly as it is responsible for them.
+//
+// The alpha is the stroke's own strength times the colour's, so a feathered rim fades out
+// rather than ending on a hard line — which is the part a line at the brush's width could
+// never show. Returns an RGBA8 image of `size` covering `origin` onwards, or null when
+// there is nothing to draw.
+Ref<Image> IWStageKernels::stroke_overlay(
+        const PackedInt32Array &points,
+        int64_t radius,
+        double sharpness,
+        const Vector2i &origin,
+        const Vector2i &size,
+        const Color &color) {
+    const int64_t width = size.x;
+    const int64_t height = size.y;
+    const int64_t sample_count = points.size() / 2;
+    if (width <= 0 || height <= 0 || sample_count <= 0) {
+        return Ref<Image>();
+    }
+
+    const int64_t count = width * height;
+    PackedByteArray data;
+    data.resize(count * 4);
+    data.fill(0);
+    uint8_t *out = data.ptrw();
+
+    std::vector<float> strength(static_cast<size_t>(count), 0.0f);
+    const Stamp stamp = Stamp::of(radius, sharpness);
+    const int64_t reach = iw::maxi(radius, 1);
+
+    const auto dab = [&](int64_t cx, int64_t cy) {
+        const int64_t local_x = cx - origin.x;
+        const int64_t local_y = cy - origin.y;
+        const int64_t first_col = iw::maxi(local_x - reach, 0);
+        const int64_t last_col = iw::mini(local_x + reach, width - 1);
+        const int64_t first_row = iw::maxi(local_y - reach, 0);
+        const int64_t last_row = iw::mini(local_y + reach, height - 1);
+        for (int64_t y = first_row; y <= last_row; y++) {
+            const double dy = static_cast<double>(y - local_y);
+            for (int64_t x = first_col; x <= last_col; x++) {
+                const double dx = static_cast<double>(x - local_x);
+                const double value = stamp.strength_at(std::sqrt(dx * dx + dy * dy));
+                const int64_t at = y * width + x;
+                if (value > iw::widen(strength[at])) {
+                    strength[at] = iw::narrow(value);
+                }
+            }
+        }
+    };
+
+    const int32_t *point_ptr = points.ptr();
+    dab(point_ptr[0], point_ptr[1]);
+    for (int64_t n = 1; n < sample_count; n++) {
+        walk(point_ptr[(n - 1) * 2], point_ptr[(n - 1) * 2 + 1],
+                point_ptr[n * 2], point_ptr[n * 2 + 1], dab);
+    }
+
+    const uint8_t red = static_cast<uint8_t>(iw::roundi(iw::clampf(color.r, 0.0, 1.0) * 255.0));
+    const uint8_t green = static_cast<uint8_t>(iw::roundi(iw::clampf(color.g, 0.0, 1.0) * 255.0));
+    const uint8_t blue = static_cast<uint8_t>(iw::roundi(iw::clampf(color.b, 0.0, 1.0) * 255.0));
+    const double alpha = iw::clampf(color.a, 0.0, 1.0);
+    for (int64_t i = 0; i < count; i++) {
+        const double value = iw::widen(strength[i]);
+        if (value <= 0.0) {
+            continue;
+        }
+        const int64_t at = i * 4;
+        out[at] = red;
+        out[at + 1] = green;
+        out[at + 2] = blue;
+        out[at + 3] = static_cast<uint8_t>(iw::roundi(value * alpha * 255.0));
+    }
+
+    return Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, data);
+}

@@ -100,14 +100,6 @@ const MARKER_WIDTH := 1.5
 const MARKER_DASH := 5.0
 const MARKER_FILL_ALPHA := 0.14
 
-## How present the highlighted stroke's outline is. Short of solid, because it lies on top
-## of the pixels the stroke changed and those are what the row was clicked to look at.
-const BRUSH_OUTLINE_ALPHA := 0.7
-
-## Segments in the circle drawn for a one-point stroke. Enough that a dab at high zoom
-## reads as round rather than as a polygon.
-const BRUSH_OUTLINE_SEGMENTS := 24
-
 ## Half-width of a polygon's draggable corner handle, in screen pixels, and how
 ## near the pointer has to be to grab one. Generous on purpose: at low zoom a
 ## whole image pixel is a fraction of a screen pixel and an exact hit would be
@@ -389,10 +381,14 @@ var _paint_last := Vector2i(-1, -1)
 var _patch_texture: Texture2D
 var _patch_region := Rect2i()
 
-## The highlighted stroke's path and brush, drawn as a thin outline so a row in the list
-## can be found on the image. Empty when nothing is selected.
-var _brush_path := PackedVector2Array()
-var _brush_path_radius := 1
+## The highlighted stroke's own pixels, in one colour, and where they sit. Null when
+## nothing is selected.
+##
+## An image rather than a line at the brush's width: a line says where the stroke went and
+## not what it did, and on a soft brush or a Subtract over something already faint those
+## are different pictures.
+var _brush_overlay: Texture2D
+var _brush_overlay_region := Rect2i()
 
 ## Drawn regions, as an Array of PackedVector2Array in image coordinates.
 var _polygons: Array = []
@@ -576,17 +572,19 @@ func set_polygons(polygons: Array, selected: int, draft: int, enabled := PackedB
     _canvas.queue_redraw()
 
 
-## Shows the highlighted stroke's path, as a thin outline at its own brush width.
+## Shows the highlighted stroke's own pixels over [param region] of the image.
 ##
-## An outline rather than a fill: that stroke is already in the result, and painting over
-## it would hide the very thing the row was clicked to look at. Pass an empty array to
-## clear it.
-func set_brush_overlay(selected: Array, selected_radius: int) -> void:
-    # Converted to float points once here rather than per redraw, and copied for the same
-    # reason the polygons are: the caller's array belongs to the operation and can change
-    # underneath us without a redraw being asked for.
-    _brush_path = _to_points(selected)
-    _brush_path_radius = maxi(selected_radius, 1)
+## Laid over rather than replacing, unlike the live patch: this is a mark on the result,
+## not a correction to it. Pass null to clear it.
+func set_brush_overlay(overlay: Image, region: Rect2i) -> void:
+    if overlay == null or overlay.is_empty() or region.size.x <= 0 or region.size.y <= 0:
+        if _brush_overlay == null:
+            return
+        _brush_overlay = null
+        _brush_overlay_region = Rect2i()
+    else:
+        _brush_overlay = ImageTexture.create_from_image(overlay)
+        _brush_overlay_region = region
     if _canvas != null:
         _canvas.queue_redraw()
 
@@ -620,13 +618,6 @@ func clear_live_patch() -> void:
     _patch_region = Rect2i()
     if _canvas != null:
         _canvas.queue_redraw()
-
-
-static func _to_points(from: Array) -> PackedVector2Array:
-    var out := PackedVector2Array()
-    for point: Vector2i in from:
-        out.append(Vector2(point))
-    return out
 
 
 ## Puts the view into or out of its working state.
@@ -1419,39 +1410,16 @@ func _draw_dashed_rect(box: Rect2, color: Color, width: float) -> void:
     _canvas.draw_dashed_line(bottom_left, top_left, color, width, MARKER_DASH)
 
 
-## The highlighted stroke's path, outlined at its own brush width.
+## The highlighted stroke's own pixels, laid over the result.
 ##
 ## The only brush overlay there is. What a stroke is doing while it is being drawn is shown
-## by repainting the image itself — see [method set_live_patch] — rather than by a shape
-## laid over it: a path at the brush's width says where the stroke went and not what it
-## did, and on a soft brush or a Subtract over something already faint those are different
-## pictures. This one is a different question, and an outline is the right answer to it:
-## which of these rows is that.
-##
-## Drawn as a round-capped, round-jointed polyline, which is the shape a run of overlapping
-## round dabs makes. A single point is a dab rather than a line, and draw_polyline draws
-## nothing at all for one point, so that case is a circle of its own.
+## by repainting the image itself — see [method set_live_patch] — and what a highlighted
+## stroke did is shown by lighting up the pixels it is responsible for. Neither is a shape
+## drawn beside the answer; both are the answer.
 func _draw_brush() -> void:
-    if not markers_visible or _brush_path.is_empty():
+    if not markers_visible or _brush_overlay == null:
         return
-    var scale := _scale()
-    # The brush reaches half a pixel short of its radius, matching the kernel, so a radius
-    # of 1 is one pixel across rather than three.
-    var width := maxf((_brush_path_radius * 2.0 - 1.0) * scale, 1.0)
-    var screen := _to_screen(_brush_path)
-
-    # Two passes, the outer one dark, so the shape reads against light and dark art alike
-    # the way every other marker here does.
-    if screen.size() == 1:
-        _canvas.draw_arc(screen[0], width * 0.5, 0.0, TAU, BRUSH_OUTLINE_SEGMENTS,
-                MARKER_SHADOW_COLOR, MARKER_WIDTH + 2.0)
-        _canvas.draw_arc(screen[0], width * 0.5, 0.0, TAU, BRUSH_OUTLINE_SEGMENTS,
-                MARKER_SELECTED_COLOR, MARKER_WIDTH)
-        return
-    _canvas.draw_polyline(screen, Color(MARKER_SHADOW_COLOR, BRUSH_OUTLINE_ALPHA),
-            width, true)
-    _canvas.draw_polyline(screen, Color(MARKER_SELECTED_COLOR, BRUSH_OUTLINE_ALPHA),
-            maxf(width - MARKER_WIDTH * 2.0, 1.0), true)
+    _canvas.draw_texture_rect(_brush_overlay, _image_rect(_brush_overlay_region), false)
 
 
 ## The rectangle being swept, drawn as it is dragged.

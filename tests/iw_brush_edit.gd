@@ -58,6 +58,7 @@ func _initialize() -> void:
     _check_patch_matches_the_whole()
     _check_incremental_patches_match()
     _check_add_takes_the_source_colour()
+    _check_overlay_matches_the_stroke()
     await _check_preview_reports_a_drag()
 
     if _failures == 0:
@@ -518,6 +519,69 @@ func _check_add_takes_the_source_colour() -> void:
             "Add with no source image left the pixel transparent")
 
 
+# --- The overlay is the stroke, not a line through it ------------------
+
+## What a highlighted row lights up. It has to be the same set of pixels the stroke acts
+## on, at the same strengths — that is the whole difference between it and the line at the
+## brush's width it replaced, which marked where the stroke went rather than what it did.
+func _check_overlay_matches_the_stroke() -> void:
+    var rows := _solid(24, 24)
+    var path := [Vector2i(4, 5), Vector2i(18, 9), Vector2i(11, 20)]
+    var radius := 4
+    var sharpness := 0.4
+    var mark := Color(1.0, 1.0, 0.2, 1.0)
+
+    var points := PackedInt32Array()
+    for point: Vector2i in path:
+        points.append(point.x)
+        points.append(point.y)
+    var overlay: Image = IWStageKernels.stroke_overlay(points, radius, sharpness,
+            Vector2i.ZERO, Vector2i(24, 24), mark)
+    if not _expect(overlay != null, "the overlay kernel returned nothing"):
+        return
+
+    # A Subtract stroke on a solid image takes away exactly its own strength, so what is
+    # left is one minus it — which is what the overlay's alpha has to be.
+    var painted := _alpha_after(rows, [_stroke(path, radius, sharpness, false)])
+    var differing := 0
+    var worst := 0
+    for y in 24:
+        for x in 24:
+            var want: int = 255 - roundi(painted[y * 24 + x] * 255.0)
+            var got: int = overlay.get_pixel(x, y).a8
+            if absi(want - got) > 1:
+                differing += 1
+                worst = maxi(worst, absi(want - got))
+    _expect(differing == 0,
+            "the overlay lights up %d pixels the stroke does not act on, or at the wrong "
+            % differing + "strength (worst %d/255)" % worst)
+
+    # And it is all one colour, wherever it shows at all.
+    var off_colour := 0
+    for y in 24:
+        for x in 24:
+            var pixel := overlay.get_pixel(x, y)
+            if pixel.a8 > 0 and (pixel.r8 != 255 or pixel.g8 != 255 or pixel.b8 != 51):
+                off_colour += 1
+    _expect(off_colour == 0, "%d pixels of the overlay came out the wrong colour" % off_colour)
+
+    # A one-point stroke is a dab, and has to light up rather than draw nothing — the case
+    # a polyline could not handle and needed a circle of its own.
+    var dab: Image = IWStageKernels.stroke_overlay(PackedInt32Array([5, 5]), 3, 1.0,
+            Vector2i.ZERO, Vector2i(11, 11), mark)
+    _expect(dab != null and dab.get_pixel(5, 5).a8 == 255,
+            "a one-point stroke drew no overlay")
+
+    # Bounded by the region it was asked for, so a dab on a large sheet costs a picture the
+    # size of the dab.
+    var cropped: Image = IWStageKernels.stroke_overlay(PackedInt32Array([12, 12]), 2, 1.0,
+            Vector2i(10, 10), Vector2i(5, 5), mark)
+    _expect(cropped != null and cropped.get_size() == Vector2i(5, 5),
+            "the overlay did not come back at the size it was asked for")
+    _expect(cropped.get_pixel(2, 2).a8 == 255,
+            "the overlay's origin was not honoured — the dab landed off centre")
+
+
 # --- The preview turns a drag into points ------------------------------
 
 ## The one piece of this feature that lives in the interface and can still be checked
@@ -573,10 +637,13 @@ func _check_preview_reports_a_drag() -> void:
     _expect(finished[0] == 1,
             "the release reported %d endings rather than one" % finished[0])
 
-    # The highlighted-stroke outline draws both ways without complaint.
-    view.set_brush_overlay([Vector2i(4, 4), Vector2i(9, 12)], 6)
+    # The highlighted-stroke overlay draws both ways without complaint.
+    var mark: Image = IWStageKernels.stroke_overlay(
+            PackedInt32Array([4, 4, 9, 12]), 6, 0.5, Vector2i.ZERO, Vector2i(32, 32),
+            Color(1, 1, 0.2, 0.65))
+    view.set_brush_overlay(mark, Rect2i(0, 0, 32, 32))
     await process_frame
-    view.set_brush_overlay([], 1)
+    view.set_brush_overlay(null, Rect2i())
     await process_frame
 
     # And so does a live patch, including the hole it cuts in the image behind it — at a

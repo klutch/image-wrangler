@@ -124,6 +124,7 @@ func _build() -> void:
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.row_selected.connect(_on_row_selected)
 	_list.enabled_toggled.connect(_on_enabled_toggled)
+	_list.remove_requested.connect(_remove_entry)
 	_list.mode_changed.connect(_on_mode_changed)
 	add_child(_list)
 
@@ -474,7 +475,11 @@ func _on_mode_changed(index: int, mode: int) -> void:
 
 
 func _on_remove_pressed() -> void:
-	var index := selected_index()
+	_remove_entry(selected_index())
+
+
+## Takes one row off the list, whether the button asked or a row's own cross did.
+func _remove_entry(index: int) -> void:
 	var islands := _island_list()
 	if islands == null or index < 0 or index >= islands.size():
 		return

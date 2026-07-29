@@ -1,8 +1,8 @@
 @tool
 extends VBoxContainer
 
-## Rows of entries with a swatch, a label, an optional mode dropdown and an
-## on/off box, shared by all three of the dock's list controls.
+## Rows of entries with a swatch, a label, an optional mode dropdown, an on/off
+## box and a remove cross, shared by all of the dock's list controls.
 ##
 ## Replaces the [ItemList] these used to be. An ItemList row is an icon and a
 ## string and nothing else — there is no way to sit a [CheckBox] or an
@@ -26,7 +26,24 @@ signal enabled_toggled(index: int, on: bool)
 ## Emitted when a row's mode dropdown changes. See [IWAlphaMode].
 signal mode_changed(index: int, mode: int)
 
+## Emitted when a row's remove cross is clicked.
+##
+## The owning control does the removing, because what a row stands for and what has to
+## happen to the rest of the list when one goes are both its business — a drawing session
+## to close, a selection to move, a settings Resource to write.
+signal remove_requested(index: int)
+
 const SWATCH_SIZE := 14
+
+## The remove cross: what it says, and the two shades it says it in.
+##
+## Grey at rest so a list of eight does not read as eight buttons, white under the pointer
+## so it is unmistakably a thing you can press. Flat, and the last control on the row, so
+## the eye reaches the swatch and the label first — removing an entry is not what the row
+## is for.
+const REMOVE_GLYPH := "✕"
+const REMOVE_COLOR := Color(1, 1, 1, 0.45)
+const REMOVE_HOVER_COLOR := Color(1, 1, 1, 1)
 
 ## Alpha of the selected row's backing. Enough to read as picked out against the
 ## dock, little enough that the swatch on it still reads true.
@@ -78,6 +95,9 @@ func _apply_interactive(row: PanelContainer) -> void:
 		var choice := row.get_meta(&"mode") as OptionButton
 		if choice != null:
 			choice.disabled = not _interactive
+	var cross := row.get_meta(&"remove") as Button
+	if cross != null:
+		cross.disabled = not _interactive
 
 
 ## Whether rows should carry a mode dropdown. Call before the first [method set_rows].
@@ -197,11 +217,29 @@ func _build_row(index: int, entry: Dictionary) -> PanelContainer:
 	)
 	line.add_child(box)
 
+	var cross := Button.new()
+	cross.text = REMOVE_GLYPH
+	cross.flat = true
+	cross.focus_mode = Control.FOCUS_NONE
+	cross.tooltip_text = "Remove this entry."
+	cross.add_theme_color_override(&"font_color", REMOVE_COLOR)
+	cross.add_theme_color_override(&"font_hover_color", REMOVE_HOVER_COLOR)
+	# Pressed reads the same as hovered, since the pointer is on it either way and a
+	# third shade would be a state nobody is looking for.
+	cross.add_theme_color_override(&"font_pressed_color", REMOVE_HOVER_COLOR)
+	cross.pressed.connect(
+		func() -> void:
+			if not _loading and _interactive:
+				remove_requested.emit(index)
+	)
+	line.add_child(cross)
+
 	# Fetched by name on update rather than tracked in parallel arrays, which
 	# would need keeping in step with every insert and removal.
 	row.set_meta(&"swatch", swatch)
 	row.set_meta(&"label", label)
 	row.set_meta(&"check", box)
+	row.set_meta(&"remove", cross)
 	if choice != null:
 		row.set_meta(&"mode", choice)
 	return row

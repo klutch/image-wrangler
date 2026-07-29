@@ -8,17 +8,16 @@ extends VBoxContainer
 ## started, extended and ended rather than finished by one click; and the per-row editor
 ## from [code]iw_hsv_list.gd[/code], since a stroke carries settings of its own.
 ##
-## [b]One pair of sliders, not two.[/b] The radius and sharpness edit the highlighted
-## stroke when there is one, and the brush the next stroke will be drawn at when there is
-## not. Two pairs — one for the tool, one for the selection — was the obvious layout and
-## the wrong one: they sit a centimetre apart, say the same two words, and there is no
-## reading of the form that tells you which is which. The caption above them does that
-## instead, and there is only ever one thing to reach for.
+## [b]Two pairs of sliders, and the list between them is what tells them apart.[/b] The
+## pair above the list is the brush: what the next stroke will be drawn at, and nothing
+## about the ones already down. The pair below appears when a row is highlighted and edits
+## that stroke, which re-lays its path at the new setting. Putting them side by side would
+## be two controls a centimetre apart saying the same two words; separated by the rows they
+## belong to, each sits with the thing it changes.
 ##
 ## Drawing deliberately does not highlight the stroke it just made. Painting a series of
 ## strokes at one brush is the ordinary case, and selecting each one as it landed would
-## repoint the sliders at it and turn every following adjustment into an edit of the last
-## stroke rather than a change of brush.
+## open the editor under it every time.
 ##
 ## The [BrushStrokeList] it edits is resolved through the operation's settings on every
 ## access, so when the dock swaps in another image's settings this control follows without
@@ -44,6 +43,11 @@ const EntryList := preload("res://addons/image_wrangler/ui/iw_entry_list.gd")
 ## blue one reads as permanently armed.
 const DRAW_ICON := &"Line2D"
 
+## Said once and used by both pairs of sliders, so the brush and a stroke's own copy of it
+## cannot end up described differently.
+const RADIUS_TOOLTIP := "How wide the brush is, in pixels out from the centre.\n\n1 is a single pixel, 2 is three across, 3 is five, and so on — so the\nsmallest setting is the pencil it looks like rather than a five-pixel cross."
+const SHARPNESS_TOOLTIP := "How hard the edge of the brush is.\n\nAt 1 the stroke has a hard rim. Below that it ramps to nothing over the\nouter part of the brush, and at 0 the ramp runs the whole way from the\ncentre. The centre is solid at every setting, so a one-pixel brush still\npaints however soft it is set."
+
 var _operation: IWOperation
 var _property: StringName
 
@@ -58,9 +62,18 @@ var _list: EntryList
 var _draw_button: Button
 var _remove_button: Button
 var _clear_button: Button
-var _caption: Label
+## The brush the next stroke will be drawn at. Always on screen, above the list.
+var _brush_radius: EditorSpinSlider
+var _brush_sharpness: EditorSpinSlider
+
+## The highlighted stroke's own brush, under the list. Hidden rather than disabled when
+## nothing is selected — a control that edits nothing should not be on screen, which is the
+## rule [code]iw_hsv_list.gd[/code] follows for the same reason.
+var _editor: VBoxContainer
+var _editor_caption: Label
 var _radius: EditorSpinSlider
 var _sharpness: EditorSpinSlider
+
 var _hint: Label
 
 ## Set while the sliders are being pointed at another stroke, so their change signal does
@@ -109,17 +122,16 @@ func _build() -> void:
     _clear_button.pressed.connect(_on_clear_pressed)
     buttons.add_child(_clear_button)
 
-    # Says what the two sliders under it are pointed at, which is the whole of what stops
-    # one pair of sliders being ambiguous. See the class note.
-    _caption = Label.new()
-    _caption.modulate = Color(1, 1, 1, 0.6)
-    _caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-    add_child(_caption)
+    var brush_caption := Label.new()
+    brush_caption.text = "Brush for the next stroke"
+    brush_caption.modulate = Color(1, 1, 1, 0.6)
+    brush_caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+    add_child(brush_caption)
 
-    _radius = _add_slider("Radius", BrushStroke.MIN_RADIUS, BrushStroke.MAX_RADIUS, 1, true,
-            "How wide the brush is, in pixels out from the centre.\n\n1 is a single pixel, 2 is three across, 3 is five, and so on — so the\nsmallest setting is the pencil it looks like rather than a five-pixel cross.")
-    _sharpness = _add_slider("Sharpness", 0.0, 1.0, 0.01, false,
-            "How hard the edge of the brush is.\n\nAt 1 the stroke has a hard rim. Below that it ramps to nothing over the\nouter part of the brush, and at 0 the ramp runs the whole way from the\ncentre. The centre is solid at every setting, so a one-pixel brush still\npaints however soft it is set.")
+    _brush_radius = _add_slider(self, "Radius", BrushStroke.MIN_RADIUS,
+            BrushStroke.MAX_RADIUS, 1, true, RADIUS_TOOLTIP, _on_brush_changed)
+    _brush_sharpness = _add_slider(self, "Sharpness", 0.0, 1.0, 0.01, false,
+            SHARPNESS_TOOLTIP, _on_brush_changed)
 
     _list = EntryList.new()
     _list.configure(true)
@@ -127,7 +139,22 @@ func _build() -> void:
     _list.row_selected.connect(_on_row_selected)
     _list.enabled_toggled.connect(_on_enabled_toggled)
     _list.mode_changed.connect(_on_mode_changed)
+    _list.remove_requested.connect(_remove_entry)
     add_child(_list)
+
+    _editor = VBoxContainer.new()
+    _editor.add_theme_constant_override("separation", 0)
+    add_child(_editor)
+
+    _editor_caption = Label.new()
+    _editor_caption.modulate = Color(1, 1, 1, 0.6)
+    _editor_caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+    _editor.add_child(_editor_caption)
+
+    _radius = _add_slider(_editor, "Radius", BrushStroke.MIN_RADIUS, BrushStroke.MAX_RADIUS,
+            1, true, RADIUS_TOOLTIP, _on_stroke_slider_changed)
+    _sharpness = _add_slider(_editor, "Sharpness", 0.0, 1.0, 0.01, false, SHARPNESS_TOOLTIP,
+            _on_stroke_slider_changed)
 
     _hint = Label.new()
     _hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -136,8 +163,8 @@ func _build() -> void:
     add_child(_hint)
 
 
-func _add_slider(label: String, low: float, high: float, step: float, whole: bool,
-        hint: String) -> EditorSpinSlider:
+func _add_slider(into: Container, label: String, low: float, high: float, step: float,
+        whole: bool, hint: String, on_changed: Callable) -> EditorSpinSlider:
     var slider := EditorSpinSlider.new()
     slider.label = label
     slider.min_value = low
@@ -146,8 +173,8 @@ func _add_slider(label: String, low: float, high: float, step: float, whole: boo
     slider.rounded = whole
     slider.tooltip_text = hint
     slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    slider.value_changed.connect(_on_slider_changed)
-    add_child(slider)
+    slider.value_changed.connect(on_changed)
+    into.add_child(slider)
     return slider
 
 
@@ -201,37 +228,10 @@ func draft_stroke() -> BrushStroke:
     return _draft_stroke()
 
 
-## Every stroke's path, for the dock to hand to the preview.
-func get_paths() -> Array:
-    var out := []
-    var strokes := _stroke_list()
-    if strokes == null:
-        return out
-    for stroke in strokes.strokes:
-        out.append(stroke.points if stroke != null else ([] as Array[Vector2i]))
-    return out
-
-
-## Every stroke's brush radius, in the same order as [method get_paths].
-func get_radii() -> PackedInt32Array:
-    var out := PackedInt32Array()
-    var strokes := _stroke_list()
-    if strokes == null:
-        return out
-    for stroke in strokes.strokes:
-        out.append(stroke.radius if stroke != null else BrushStroke.MIN_RADIUS)
-    return out
-
-
-## Whether each stroke is switched on, in the same order.
-func get_enabled_flags() -> PackedByteArray:
-    var out := PackedByteArray()
-    var strokes := _stroke_list()
-    if strokes == null:
-        return out
-    for stroke in strokes.strokes:
-        out.append(1 if stroke != null and stroke.enabled else 0)
-    return out
+## The highlighted stroke, or null. The dock renders that one's own pixels as the overlay,
+## which needs its path and its brush together.
+func selected_stroke() -> BrushStroke:
+    return _selected_stroke()
 
 
 # --- The drawing session ------------------------------------------------
@@ -378,22 +378,21 @@ func _row_data(index: int, stroke: BrushStroke) -> Dictionary:
     }
 
 
-## Points the sliders at the highlighted stroke, or at the brush when nothing is selected,
-## and says which in the caption.
+## Points the brush sliders at the settings and the editor at whatever is highlighted,
+## hiding the editor when nothing is.
 func _load_editor() -> void:
-    var stroke := _selected_stroke()
     var settings := _settings()
     if settings == null:
         return
+    var stroke := _selected_stroke()
     _loading_editor = true
+    _brush_radius.value = settings.brush_radius
+    _brush_sharpness.value = settings.brush_sharpness
+    _editor.visible = stroke != null
     if stroke != null:
-        _caption.text = "Editing stroke %d" % (selected_index() + 1)
+        _editor_caption.text = "Stroke %d" % (selected_index() + 1)
         _radius.value = stroke.radius
         _sharpness.value = stroke.sharpness
-    else:
-        _caption.text = "Brush for the next stroke"
-        _radius.value = settings.brush_radius
-        _sharpness.value = settings.brush_sharpness
     _loading_editor = false
 
 
@@ -403,8 +402,8 @@ func _update_buttons() -> void:
     _draw_button.disabled = not _interactive
     # read_only rather than the editable a Range has: EditorSpinSlider does not carry that
     # property, and assigning it fails at runtime rather than at parse.
-    _radius.read_only = not _interactive
-    _sharpness.read_only = not _interactive
+    for slider: EditorSpinSlider in [_brush_radius, _brush_sharpness, _radius, _sharpness]:
+        slider.read_only = not _interactive
 
 
 ## Shows [param text] under the list, or gives the line back when it is empty.
@@ -416,29 +415,34 @@ func _set_hint(text: String) -> void:
     _hint.visible = not text.is_empty()
 
 
-func _on_slider_changed(_moved_to: float) -> void:
+## The brush above the list moved. That changes what the next stroke gets and nothing about
+## the image, so it is saved rather than re-run.
+func _on_brush_changed(_moved_to: float) -> void:
     if _loading_editor:
         return
-    var stroke := _selected_stroke()
-    if stroke != null:
-        stroke.radius = int(_radius.value)
-        stroke.sharpness = _sharpness.value
-        # One row rather than the whole list, so the label follows a dragged slider
-        # without the rows being rebuilt under the pointer.
-        _redraw_row(selected_index())
-        strokes_changed.emit()
-        # The overlay draws the selected stroke at its own width, so a radius change has
-        # to reach it even though the path did not move.
-        selection_changed.emit()
-        return
-
-    # Nothing selected: the sliders are the brush, which changes what the next stroke gets
-    # and nothing about the image. Saved rather than re-run.
     var settings := _settings()
     if settings == null:
         return
-    settings.brush_radius = int(_radius.value)
-    settings.brush_sharpness = _sharpness.value
+    settings.brush_radius = int(_brush_radius.value)
+    settings.brush_sharpness = _brush_sharpness.value
+
+
+## The highlighted stroke's own brush moved, which re-lays that path at the new setting.
+func _on_stroke_slider_changed(_moved_to: float) -> void:
+    if _loading_editor:
+        return
+    var stroke := _selected_stroke()
+    if stroke == null:
+        return
+    stroke.radius = int(_radius.value)
+    stroke.sharpness = _sharpness.value
+    # One row rather than the whole list, so the label follows a dragged slider without the
+    # rows being rebuilt under the pointer.
+    _redraw_row(selected_index())
+    strokes_changed.emit()
+    # The overlay is that stroke's own pixels at its own brush, so a radius change has to
+    # reach it even though the path did not move.
+    selection_changed.emit()
 
 
 func _on_row_selected(_index: int) -> void:
@@ -472,7 +476,11 @@ func _on_mode_changed(index: int, mode: int) -> void:
 
 
 func _on_remove_pressed() -> void:
-    var index := selected_index()
+    _remove_entry(selected_index())
+
+
+## Takes one row off the list, whether the button asked or a row's own cross did.
+func _remove_entry(index: int) -> void:
     var strokes := _stroke_list()
     if strokes == null or index < 0 or index >= strokes.size():
         return
