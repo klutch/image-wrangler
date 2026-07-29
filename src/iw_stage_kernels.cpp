@@ -99,6 +99,11 @@ void IWStageKernels::_bind_methods() {
     ClassDB::bind_static_method("IWStageKernels",
             D_METHOD("strength_overlay", "strength", "color"),
             &IWStageKernels::strength_overlay);
+    // Defined in iw_pack_kernels.cpp; bound here so every entry point is in one list.
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("find_islands", "ctx"), &IWStageKernels::find_islands);
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("cut_islands", "ctx"), &IWStageKernels::cut_islands);
 }
 
 // Rasterises this stage's shapes and folds them into whatever is already declared.

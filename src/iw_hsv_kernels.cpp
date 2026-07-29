@@ -1,5 +1,6 @@
 #include "iw_stage_kernels.h"
 
+#include "iw_islands.h"
 #include "iw_math.h"
 
 #include <vector>
@@ -7,10 +8,6 @@
 using namespace godot;
 
 namespace {
-
-// How much of a pixel has to survive for it to count as part of an object rather than
-// part of its fringe. Half, matching what RemoveLines calls the solid part of a shape.
-constexpr double SOLID_ALPHA = 0.5;
 
 // SplitMix64's finaliser: a hash rather than a stream.
 //
@@ -168,18 +165,10 @@ void IWStageKernels::adjust_hsv(const Ref<IWPipelineContext> &ctx,
 // sheet with an opaque background and one per object in the same sheet with that
 // background removed. Nothing here decides what an object is; the alpha already did.
 //
-// [b]Two passes, because thickness and extent are different questions.[/b] The first
-// labels the solid part, where alpha is at least a half, and that is what decides which
-// pixels are one object. The second grows each label outwards through anything still
-// visible, which is what brings an object's antialiased fringe along with it — a fringe
-// left behind would ring every recoloured object in the colour it used to be. The same
-// split RemoveLines makes, for the same reason. An island with no solid pixel anywhere is
-// never labelled and is left alone.
-//
-// [b]8-connected, where the floods are 4-connected.[/b] Their question is whether
-// background can leak through a diagonal hairline, and it must not. The question here is
-// whether two parts touching corner to corner are one object, and they are — splitting
-// them would hand one flower two colours.
+// What counts as one island — two passes for the solid part and its fringe, 8-connected —
+// is decided by iw::label_islands and explained there. Repack asks the same question of
+// the same code, so a sheet coloured by this stage and packed by that one cannot disagree
+// about where one object ends and the next begins.
 //
 // Returns x, y, w, h per island: the smallest rectangle containing each one, in the order
 // they were found. Alpha is never touched, and nor is any pixel outside every island. This
@@ -203,113 +192,21 @@ PackedInt32Array IWStageKernels::random_hsv_tiles(const Ref<IWPipelineContext> &
     }
     const float *alpha = visible.ptr();
 
-    std::vector<int32_t> label(static_cast<size_t>(pixel_count), -1);
-    // One queue for both passes. Every pixel enters it at most once — it is put there by
-    // whichever label claimed it, and a labelled pixel is never offered again — so it can
-    // be sized up front and used as a plain FIFO with no wraparound. The second pass
-    // rewinds over what the first left in it, which is every solid pixel in the order it
-    // was labelled, and appends the fringe to the same buffer.
-    std::vector<int32_t> queue(static_cast<size_t>(pixel_count), 0);
-    int64_t head = 0;
-    int64_t tail = 0;
-
-    std::vector<int32_t> min_x;
-    std::vector<int32_t> min_y;
-    std::vector<int32_t> max_x;
-    std::vector<int32_t> max_y;
-
-    // Marks one pixel as belonging to one island, stretches that island's rectangle round
-    // it, and queues it. A lambda rather than the macro its neighbours in this file use:
-    // both callers below hand it a variable of their own, and a macro declaring locals of
-    // its own would shadow theirs.
-    const auto claim = [&](int32_t index, int32_t island) {
-        label[index] = island;
-        const int32_t x = static_cast<int32_t>(index % width);
-        const int32_t y = static_cast<int32_t>(index / width);
-        if (x < min_x[island]) {
-            min_x[island] = x;
-        }
-        if (x > max_x[island]) {
-            max_x[island] = x;
-        }
-        if (y < min_y[island]) {
-            min_y[island] = y;
-        }
-        if (y > max_y[island]) {
-            max_y[island] = y;
-        }
-        queue[tail++] = index;
-    };
-
-    // The solid part, one island at a time. Each island's flood drains before the scan
-    // moves on, so the queue holds them in the order they were found.
-    for (int64_t i = 0; i < pixel_count; i++) {
-        if (label[i] >= 0 || iw::widen(alpha[i]) < SOLID_ALPHA) {
-            continue;
-        }
-        const int32_t here = static_cast<int32_t>(min_x.size());
-        min_x.push_back(static_cast<int32_t>(i % width));
-        max_x.push_back(min_x[here]);
-        min_y.push_back(static_cast<int32_t>(i / width));
-        max_y.push_back(min_y[here]);
-        claim(static_cast<int32_t>(i), here);
-
-        while (head < tail) {
-            const int32_t index = queue[head++];
-            const int64_t x = index % width;
-            const int64_t y = index / width;
-            const int64_t first_row = iw::maxi(y - 1, 0);
-            const int64_t last_row = iw::mini(y + 1, height - 1);
-            const int64_t first_col = iw::maxi(x - 1, 0);
-            const int64_t last_col = iw::mini(x + 1, width - 1);
-            for (int64_t row = first_row; row <= last_row; row++) {
-                for (int64_t col = first_col; col <= last_col; col++) {
-                    const int32_t n = static_cast<int32_t>(row * width + col);
-                    if (label[n] < 0 && iw::widen(alpha[n]) >= SOLID_ALPHA) {
-                        claim(n, here);
-                    }
-                }
-            }
-        }
-    }
-
-    const int64_t island_count = static_cast<int64_t>(min_x.size());
+    const iw::Islands found = iw::label_islands(alpha, width, height);
+    const int64_t island_count = found.count();
     if (island_count <= 0) {
         return bounds;
     }
-
-    // The fringe, from every island at once. Rewinding rather than reseeding: what the
-    // first pass left in the queue is exactly the set to grow from, and growing them
-    // together is what stops the island that happened to be found first claiming the
-    // whole of a fringe two objects share.
-    head = 0;
-    while (head < tail) {
-        const int32_t index = queue[head++];
-        const int32_t here = label[index];
-        const int64_t x = index % width;
-        const int64_t y = index / width;
-        const int64_t first_row = iw::maxi(y - 1, 0);
-        const int64_t last_row = iw::mini(y + 1, height - 1);
-        const int64_t first_col = iw::maxi(x - 1, 0);
-        const int64_t last_col = iw::mini(x + 1, width - 1);
-        for (int64_t row = first_row; row <= last_row; row++) {
-            for (int64_t col = first_col; col <= last_col; col++) {
-                const int32_t n = static_cast<int32_t>(row * width + col);
-                if (label[n] < 0 && iw::widen(alpha[n]) > 0.0) {
-                    claim(n, here);
-                }
-            }
-        }
-    }
+    const std::vector<int32_t> &label = found.label;
 
     bounds.resize(island_count * 4);
     {
         int32_t *out = bounds.ptrw();
         for (int64_t n = 0; n < island_count; n++) {
-            out[n * 4] = min_x[n];
-            out[n * 4 + 1] = min_y[n];
-            out[n * 4 + 2] = max_x[n] - min_x[n] + 1;
-            out[n * 4 + 3] = max_y[n] - min_y[n] + 1;
+            out[n * 4] = found.min_x[n];
+            out[n * 4 + 1] = found.min_y[n];
+            out[n * 4 + 2] = found.max_x[n] - found.min_x[n] + 1;
+            out[n * 4 + 3] = found.max_y[n] - found.min_y[n] + 1;
         }
     }
 

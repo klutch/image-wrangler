@@ -291,6 +291,25 @@ public:
     // a second walk down a path that grows with every mouse event. The two produce the
     // same picture, being the same numbers.
     static Ref<Image> strength_overlay(const Ref<Image> &strength, const Color &color);
+
+    // IWRepack: every separate object in the image, as the smallest rectangle round each.
+    //
+    // The same labelling RandomHSVTiles finds its tiles with — iw::label_islands, which
+    // both go through — so a sheet coloured by one and packed by the other cannot
+    // disagree about where one object ends and the next begins.
+    //
+    // Reads the alpha the run currently shows, so a keyed sheet gives one sprite per
+    // object and an untouched one gives a single sprite the size of the image. Returns
+    // x, y, w, h per island, in the order they were found.
+    static PackedInt32Array find_islands(const Ref<IWPipelineContext> &ctx);
+
+    // The same islands, each lifted out as an image of its own.
+    //
+    // Cut to the island rather than cropped to its rectangle: two objects that interlock
+    // have overlapping boxes, and a sprite taken as a box would carry a slice of its
+    // neighbour onto the packed sheet. Returns one RGBA8 image per island, in the same
+    // order as find_islands.
+    static TypedArray<Image> cut_islands(const Ref<IWPipelineContext> &ctx);
 };
 
 } // namespace godot
