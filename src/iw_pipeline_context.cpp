@@ -60,6 +60,10 @@ void IWPipelineContext::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_key", "key", "tolerance", "island"),
 			&IWPipelineContext::add_key);
 	ClassDB::bind_method(D_METHOD("ensure_key_dist"), &IWPipelineContext::ensure_key_dist);
+    ClassDB::bind_method(D_METHOD("refresh_key_dist", "indices"),
+            &IWPipelineContext::refresh_key_dist);
+    ClassDB::bind_method(D_METHOD("refresh_key_dist_rects", "rects"),
+            &IWPipelineContext::refresh_key_dist_rects);
 	ClassDB::bind_method(D_METHOD("grow_edge_band", "from", "band_width"),
 			&IWPipelineContext::grow_edge_band);
 	ClassDB::bind_method(D_METHOD("rebuild_nearest"), &IWPipelineContext::rebuild_nearest);
@@ -372,17 +376,101 @@ void IWPipelineContext::ensure_key_dist() {
 	key_dist.resize(pixel_count);
 	float *dist = key_dist.ptrw();
 	const uint8_t *src = data.ptr();
-	const double to_unit = 1.0 / 255.0;
 	const double key_r = iw::widen(key_color.r);
 	const double key_g = iw::widen(key_color.g);
 	const double key_b = iw::widen(key_color.b);
 	for (int64_t i = 0; i < pixel_count; i++) {
-		const int64_t offset = i * 4;
-		const double dr = iw::absf(src[offset] * to_unit - key_r);
-		const double dg = iw::absf(src[offset + 1] * to_unit - key_g);
-		const double db = iw::absf(src[offset + 2] * to_unit - key_b);
-		dist[i] = iw::narrow(iw::maxf(dr, iw::maxf(dg, db)));
+		dist[i] = _key_dist_at(src, i, key_r, key_g, key_b);
 	}
+}
+
+// One pixel of the distance map.
+//
+// Shared by the full build and the two patch-ups below, so what "distance from the key"
+// means cannot change in one of them and not the others — which would show up as a map
+// that depends on which stage last touched it.
+float IWPipelineContext::_key_dist_at(
+        const uint8_t *src, int64_t index, double key_r, double key_g, double key_b) {
+    const int64_t offset = index * 4;
+    const double to_unit = 1.0 / 255.0;
+    const double dr = iw::absf(src[offset] * to_unit - key_r);
+    const double dg = iw::absf(src[offset + 1] * to_unit - key_g);
+    const double db = iw::absf(src[offset + 2] * to_unit - key_b);
+    return iw::narrow(iw::maxf(dr, iw::maxf(dg, db)));
+}
+
+// Remeasures the named pixels, for a stage that changed colour in places it can list.
+//
+// [b]The answer is the one a full rebuild gives, not an approximation of it.[/b] A
+// pixel's distance depends on its own colour and the first key and on nothing else, so a
+// pixel whose colour did not move cannot have a distance that did. What the patch saves
+// is the pass over everything that did not change — which for a stage that filled a
+// handful of pinholes is the whole sheet bar a few dozen pixels.
+void IWPipelineContext::refresh_key_dist(const PackedInt32Array &indices) {
+    if (_key_cache.empty() || indices.is_empty()) {
+        return;
+    }
+    if (key_dist.size() != pixel_count) {
+        // Nothing to patch. This is the first build, and it is the whole map by
+        // definition.
+        key_dist = PackedFloat32Array();
+        ensure_key_dist();
+        return;
+    }
+
+    const Color key_color = _key_cache[0];
+    const double key_r = iw::widen(key_color.r);
+    const double key_g = iw::widen(key_color.g);
+    const double key_b = iw::widen(key_color.b);
+    float *dist = key_dist.ptrw();
+    const uint8_t *src = data.ptr();
+    const int32_t *index_ptr = indices.ptr();
+    for (int64_t n = 0; n < indices.size(); n++) {
+        const int32_t i = index_ptr[n];
+        if (i < 0 || i >= pixel_count) {
+            continue;
+        }
+        dist[i] = _key_dist_at(src, i, key_r, key_g, key_b);
+    }
+}
+
+// The same, for a stage whose changes are bounded by rectangles rather than listed.
+//
+// `rects` is x, y, w, h per region, which is the shape both callers already hold: the
+// rectangles HSVAdjust was given, and the island bounds RandomHSVTiles hands back. The
+// rectangles may overlap and may hang off the edge of the image; a pixel measured twice
+// gets the same answer twice, and one outside is clamped away.
+void IWPipelineContext::refresh_key_dist_rects(const PackedInt32Array &rects) {
+    if (_key_cache.empty() || rects.size() < 4) {
+        return;
+    }
+    if (key_dist.size() != pixel_count) {
+        key_dist = PackedFloat32Array();
+        ensure_key_dist();
+        return;
+    }
+
+    const Color key_color = _key_cache[0];
+    const double key_r = iw::widen(key_color.r);
+    const double key_g = iw::widen(key_color.g);
+    const double key_b = iw::widen(key_color.b);
+    float *dist = key_dist.ptrw();
+    const uint8_t *src = data.ptr();
+    const int32_t *box = rects.ptr();
+
+    const int64_t count = rects.size() / 4;
+    for (int64_t n = 0; n < count; n++) {
+        const int64_t left = iw::maxi(box[n * 4], 0);
+        const int64_t top = iw::maxi(box[n * 4 + 1], 0);
+        const int64_t right = iw::mini(box[n * 4] + box[n * 4 + 2], width);
+        const int64_t bottom = iw::mini(box[n * 4 + 1] + box[n * 4 + 3], height);
+        for (int64_t y = top; y < bottom; y++) {
+            const int64_t row = y * width;
+            for (int64_t x = left; x < right; x++) {
+                dist[row + x] = _key_dist_at(src, row + x, key_r, key_g, key_b);
+            }
+        }
+    }
 }
 
 // Grows the antialiased edge band inwards from `from`, up to band_width steps, and

@@ -177,6 +177,17 @@ public:
 	bool has_classification() const;
 	int64_t add_key(const Color &key, double tolerance, bool island);
 	void ensure_key_dist();
+    // The same map, remeasured for part of the image only.
+    //
+    // For a stage that changed colour inside a boundary it can name. key_dist depends on
+    // nothing but a pixel's own colour and the first key, so remeasuring the pixels that
+    // moved gives exactly the map a full rebuild would — at the cost of the region rather
+    // than of the sheet. See the note on the definitions.
+    //
+    // Both fall back to a full build when there is no map yet to patch, so a stage may
+    // call them without knowing whether anything above it has built one.
+    void refresh_key_dist(const PackedInt32Array &indices);
+    void refresh_key_dist_rects(const PackedInt32Array &rects);
 	PackedInt32Array grow_edge_band(const PackedInt32Array &from, int64_t band_width);
 	void rebuild_nearest();
 	void compute_coverage(const PackedInt32Array &indices);
@@ -242,6 +253,9 @@ private:
 	std::vector<int32_t> _claiming;
 
 	void rebuild_key_caches();
+    // One pixel of the distance map, shared by the full build and the two patch-ups.
+    static float _key_dist_at(
+            const uint8_t *src, int64_t index, double key_r, double key_g, double key_b);
 };
 
 } // namespace godot

@@ -115,10 +115,11 @@ func prerequisite_note(ctx: IWPipelineContext) -> String:
 
 
 ## [b]What it owes the run.[/b] The distance map is measured off the colours it has just
-## written, so it is rebuilt rather than left describing pixels that are gone — the same
-## debt [RandomHSVTiles] pays, and for the same reason. The nearest-subject map is rebuilt
-## as well, since a filled hole is subject now and anything bleeding colour into the
-## transparency around it should be free to reach for it.
+## written, so those pixels are measured again rather than left describing pixels that are
+## gone — and only those, since the fills are the whole of what moved and this stage's are
+## the smallest changes in the stack. The nearest-subject map is rebuilt in full, which it
+## has to be: a filled hole is subject now, and how far every other pixel is from the
+## nearest subject is not a question that can be answered locally.
 ##
 ## No [method IWPipelineContext.compute_coverage], for the reason given on
 ## [method RemoveLines.process_context]: every pixel whose coverage this stage changes it
@@ -137,8 +138,7 @@ func process_context(ctx: IWPipelineContext) -> void:
     if not report_progress(0.8):
         return
 
-    ctx.key_dist = PackedFloat32Array()
-    ctx.ensure_key_dist()
+    ctx.refresh_key_dist(filled)
     if ctx.has_classification():
         # The regions have the last word over anything a pass decided, so a hole the user
         # cut open on purpose is not quietly handed back as subject.

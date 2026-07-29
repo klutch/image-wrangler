@@ -104,9 +104,10 @@ func process_context(ctx: IWPipelineContext) -> void:
 
     IWStageKernels.adjust_hsv(ctx, rects, shifts)
 
-    # The distance map is measured off the colours that were just changed, so it has to
-    # be built again rather than left describing pixels that are gone. Clearing it is not
-    # enough: Refine Edges skips its filter entirely when it is empty.
-    ctx.key_dist = PackedFloat32Array()
-    ctx.ensure_key_dist()
+    # The distance map is measured off the colours that were just changed, so it has to be
+    # measured again rather than left describing pixels that are gone — but only inside the
+    # rectangles, which are the whole of what moved. A pixel's distance depends on its own
+    # colour and the first key and on nothing else, so this is the map a full rebuild would
+    # give, at the cost of the regions rather than of the sheet.
+    ctx.refresh_key_dist_rects(rects)
     report_progress(1.0)
