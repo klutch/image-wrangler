@@ -16,23 +16,83 @@ const HistoryView := preload("res://addons/image_wrangler/ui/iw_history_view.gd"
 
 ## Every [IWStackOperation] the stack can hold, in the order the dropdown offers them.
 ## Add new stack operations here.
-const OPERATION_SCRIPTS := [
-    "res://addons/image_wrangler/core/denoise.gd",
-    "res://addons/image_wrangler/core/smooth_blocks.gd",
-    "res://addons/image_wrangler/core/smooth_halos.gd",
-    "res://addons/image_wrangler/core/smooth_color.gd",
-    "res://addons/image_wrangler/core/hsv_adjust.gd",
-    "res://addons/image_wrangler/core/random_hsv_tiles.gd",
-    "res://addons/image_wrangler/core/remove_background.gd",
-    "res://addons/image_wrangler/core/remove_crevice.gd",
-    "res://addons/image_wrangler/core/refine_edges.gd",
-    "res://addons/image_wrangler/core/island_picker_op.gd",
-    "res://addons/image_wrangler/core/polygon_edit_op.gd",
-    "res://addons/image_wrangler/core/brush_edit_op.gd",
-    "res://addons/image_wrangler/core/remove_lines.gd",
-    "res://addons/image_wrangler/core/fill_pinholes.gd",
-    "res://addons/image_wrangler/core/edge_cleanup.gd",
+##
+## [b]Grouped by what the operation is for, and the groups run in the order a stack
+## usually does[/b] — repair the pixels, move the colour, take the background out, work on
+## the edge it left, correct by hand, tidy what is left. Fifteen operations in one flat
+## list is a list nobody reads to the end of; six short headings is a list you can aim at.
+##
+## Edges is the one group whose members sit at opposite ends of a real stack: Refine Edges
+## belongs directly under the keying and Edge Cleanup belongs at the very bottom. They are
+## together because the question that sends you looking for either of them is the same one,
+## and a menu is for finding things rather than for arranging them.
+##
+## Within a group the order is alphabetical, and deliberately so rather than by any notion
+## of importance: the groups already say what a thing is for, and past that the only
+## question left is "where is the one I am looking for".
+##
+## [code]icon[/code] names an entry in [code]ui/icons/[/code], which is a copy of the
+## editor's own set. See [method IWToolButton.theme_icon].
+const OPERATION_GROUPS := [
+    {
+        "name": "Repair",
+        "entries": [
+            {"script": "res://addons/image_wrangler/core/denoise.gd", "icon": &"Blend"},
+            {"script": "res://addons/image_wrangler/core/smooth_blocks.gd", "icon": &"Grid"},
+            {"script": "res://addons/image_wrangler/core/smooth_color.gd", "icon": &"Color"},
+            {"script": "res://addons/image_wrangler/core/smooth_halos.gd", "icon": &"Gradient"},
+        ],
+    },
+    {
+        "name": "Color",
+        "entries": [
+            {"script": "res://addons/image_wrangler/core/hsv_adjust.gd", "icon": &"ColorPicker"},
+            {"script": "res://addons/image_wrangler/core/random_hsv_tiles.gd", "icon": &"RandomNumberGenerator"},
+        ],
+    },
+    {
+        "name": "Background",
+        "entries": [
+            {"script": "res://addons/image_wrangler/core/remove_background.gd", "icon": &"Eraser"},
+            {"script": "res://addons/image_wrangler/core/remove_crevice.gd", "icon": &"ToolTriangle"},
+        ],
+    },
+    {
+        "name": "Edges",
+        "entries": [
+            {"script": "res://addons/image_wrangler/core/edge_cleanup.gd", "icon": &"Path2D"},
+            {"script": "res://addons/image_wrangler/core/refine_edges.gd", "icon": &"CurveEdit"},
+        ],
+    },
+    {
+        "name": "By Hand",
+        "entries": [
+            {"script": "res://addons/image_wrangler/core/brush_edit_op.gd", "icon": &"Paint"},
+            {"script": "res://addons/image_wrangler/core/island_picker_op.gd", "icon": &"ColorPick"},
+            {"script": "res://addons/image_wrangler/core/polygon_edit_op.gd", "icon": &"Polygon2D"},
+        ],
+    },
+    {
+        "name": "Cleanup",
+        "entries": [
+            {"script": "res://addons/image_wrangler/core/fill_pinholes.gd", "icon": &"Bucket"},
+            {"script": "res://addons/image_wrangler/core/remove_lines.gd", "icon": &"Line2D"},
+        ],
+    },
 ]
+
+
+## Every operation script, groups flattened away.
+##
+## For the two places that only need to know which operations exist — the registry a
+## sidecar is decoded against, and the sweep that names them — where the grouping is
+## nothing but noise.
+static func operation_scripts() -> Array:
+    var out := []
+    for group: Dictionary in OPERATION_GROUPS:
+        for entry: Dictionary in group["entries"]:
+            out.append(entry["script"])
+    return out
 
 ## What a fresh image's stack starts as.
 ##
@@ -1078,7 +1138,7 @@ func _build_operation_column() -> Control:
     _stack_view.name = "Operations"
     _stack_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _stack_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-    _stack_view.operation_scripts = OPERATION_SCRIPTS
+    _stack_view.operation_groups = OPERATION_GROUPS
     _stack_view.fold_state = _fold_state
     _stack_view.form_builder = _build_entry_form
     _stack_view.stack_changed.connect(_on_stack_changed)
@@ -1896,7 +1956,7 @@ func _schema_entry(stage_index: int, property: String) -> Dictionary:
 ## The display name for an operation id.
 func _name_for_id(id: String) -> String:
     if _operation_names.is_empty():
-        for script_path: String in OPERATION_SCRIPTS:
+        for script_path: String in operation_scripts():
             var script: Script = load(script_path)
             if script == null:
                 continue
@@ -2289,7 +2349,7 @@ func _stack_for(path: String) -> Array:
 ## Operation id to script, for the sidecar codec and the stack loader.
 func _operation_registry() -> Dictionary:
     var registry := {}
-    for script_path: String in OPERATION_SCRIPTS:
+    for script_path: String in operation_scripts():
         var script: Script = load(script_path)
         if script == null:
             continue

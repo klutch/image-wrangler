@@ -61,8 +61,12 @@ signal reset_requested
 ## clipboard and only the dock can read that.
 signal menu_requested(index: int, at: int)
 
-## Scripts the dropdown offers, in the order it offers them.
-var operation_scripts: Array = []
+## What the dropdown offers, in the order it offers them.
+##
+## One Dictionary per group of [code]{"name": String, "entries": Array}[/code], each entry
+## [code]{"script": String, "icon": StringName}[/code]. Built by the dock; see
+## [code]IWPanel.OPERATION_GROUPS[/code] for what the grouping is and why.
+var operation_groups: Array = []
 
 ## Called as [code]build(operation, container, on_changed, fold_state, key)[/code] to
 ## fill one entry's form. Supplied by the dock so this does not have to know about the
@@ -95,12 +99,20 @@ func _ready() -> void:
 
 ## The editor's icons are not there until this is in a tree, and they change with the
 ## theme, so the row is dressed again whenever that happens rather than only once.
+##
+## The dropdown's icons come out of the same theme and go stale the same way, so it is
+## rebuilt here too. Rebuilt rather than re-iconed: the rows are made from a list that has
+## not changed, so making them again is the same answer for less code than reaching into
+## each one.
 func _notification(what: int) -> void:
-    if what != NOTIFICATION_THEME_CHANGED or _tools == null:
+    if what != NOTIFICATION_THEME_CHANGED:
         return
-    for child in _tools.get_children():
-        if child is Button:
-            _dress(child)
+    if _tools != null:
+        for child in _tools.get_children():
+            if child is Button:
+                _dress(child)
+    if _selector != null:
+        _refresh_selector()
 
 
 ## One button on the tool row.
@@ -237,23 +249,43 @@ func _build() -> void:
     _refresh_selector()
 
 
-## Fills the dropdown from [member operation_scripts].
+## Fills the dropdown from [member operation_groups].
 ##
 ## Every operation stays offered however many are already in the stack, because a
 ## second one of anything is a legitimate thing to want.
+##
+## [b]A separator carries a label and takes an index of its own.[/b] That second half is
+## the trap: item 3 of the dropdown is no longer operation 3, so anything reading meaning
+## off the index would now be reading the wrong operation. Nothing here does —
+## [method _on_pick] goes through the metadata, and a separator has none — but that is
+## worth saying out loud rather than leaving as luck.
 func _refresh_selector() -> void:
     if _selector == null:
         return
     _selector.clear()
-    for path: String in operation_scripts:
-        var script: Script = load(path)
-        if script == null:
-            continue
-        var probe: IWOperation = script.new()
-        _selector.add_item(probe.get_operation_name())
-        _selector.set_item_metadata(_selector.item_count - 1, path)
-    if _selector.item_count > 0:
-        _selector.selected = 0
+    var first_operation := -1
+    for group: Dictionary in operation_groups:
+        _selector.add_separator(String(group.get("name", "")))
+        for entry: Dictionary in group.get("entries", []):
+            var path := String(entry.get("script", ""))
+            var script: Script = load(path)
+            if script == null:
+                continue
+            var probe: IWOperation = script.new()
+            var icon := ToolButton.theme_icon(_selector, entry.get("icon", &""))
+            if icon != null:
+                _selector.add_icon_item(icon, probe.get_operation_name())
+            else:
+                # Outside the editor there is no icon theme to borrow from, and a row with
+                # a name on it is still a row that works.
+                _selector.add_item(probe.get_operation_name())
+            _selector.set_item_metadata(_selector.item_count - 1, path)
+            if first_operation < 0:
+                first_operation = _selector.item_count - 1
+    # The first real row rather than index 0, which is now a heading. What is showing is
+    # only what a click would add, but a heading showing there would read as a broken list.
+    if first_operation >= 0:
+        _selector.selected = first_operation
 
 
 ## Adds the operation at [param index]. Every pick arrives here, including a pick of the

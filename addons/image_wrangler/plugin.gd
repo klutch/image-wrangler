@@ -49,7 +49,7 @@ func _enter_tree() -> void:
 ## numbers — and it is the shapes the reflective encoder can get wrong.
 func _run_self_test() -> void:
 	var passed := true
-	for path: String in PanelScript.OPERATION_SCRIPTS:
+	for path: String in PanelScript.operation_scripts():
 		var script: Script = load(path)
 		if script == null:
 			push_error("Image Wrangler self-test: could not load %s." % path)

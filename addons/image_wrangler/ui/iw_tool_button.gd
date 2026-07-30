@@ -56,11 +56,25 @@ static func apply_pick_icon(button: Button) -> void:
 ## rewritten, and then the theme is free to colour the result — including the
 ## pressed tint, so an armed button still goes blue and now that means something.
 static func apply_theme_icon(button: Button, icon_name: StringName) -> void:
-    if not button.has_theme_icon(icon_name, &"EditorIcons"):
-        return
-    var drained := drain(button.get_theme_icon(icon_name, &"EditorIcons"))
+    var drained := theme_icon(button, icon_name)
     if drained != null:
         button.icon = drained
+
+
+## The named editor icon with the colour taken out, or null when there is no such icon.
+##
+## The half of [method apply_theme_icon] that does not need a Button, for the places that
+## want the artwork rather than a dressed control — the operation dropdown wants one per
+## row. Draining matters more there than it does on a button: the icons borrowed for it
+## come from two sets, the node icons colour-coded by category and the tool icons already
+## monochrome, and a list mixing the two reads as though the colours meant something.
+##
+## [param control] is whatever is asking, and is only used to reach the theme — which is
+## why this must not be called before it is in the tree.
+static func theme_icon(control: Control, icon_name: StringName) -> Texture2D:
+    if control == null or not control.has_theme_icon(icon_name, &"EditorIcons"):
+        return null
+    return drain(control.get_theme_icon(icon_name, &"EditorIcons"))
 
 
 ## Paints [param button] with the editor accent while it is pressed.
