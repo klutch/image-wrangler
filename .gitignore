@@ -6,9 +6,13 @@ build/
 *.tmp
 .vscode/
 *.depren
-flower_sheets/
 *.dll
 *.lib
+
+# An editor dump of the engine's extension API. The build never reads this one — godot-cpp
+# uses the copy bundled in its own tree — so a dump left in the project root is just a
+# stale seven-megabyte duplicate. Anchored to the root so the bundled copy stays visible.
+/extension_api.json
 
 # GDExtension build output. The addon's own bin/ is deliberately NOT ignored — the
 # built library is committed so the addon works from a checkout — but the .dll is the
@@ -20,7 +24,17 @@ src/*.obj
 addons/image_wrangler/bin/*.exp
 addons/image_wrangler/bin/*.lib
 addons/image_wrangler/bin/*.pdb
-addons/image_wrangler/bin/~image_wrangler.windows.editor.x86_64.dll
+
+# A failed link leaves the half-written DLL behind under a name like
+# ~image_wrangler.windows.editor.x86_64.dll~RF17790f5.TMP. Matched by prefix rather than
+# by that whole name, because the hex differs every time.
+addons/image_wrangler/bin/~*
+
+# The extension itself, which the two comments above have always said is committed but
+# which the blanket *.dll above was quietly swallowing. Most people installing a Godot
+# addon have no C++ toolchain, so a checkout that needs `scons` first is a checkout that
+# does not work. Globbed on purpose: every target this is ever built for should ship.
+!addons/image_wrangler/bin/image_wrangler.*.dll
 
 # The vendored Open Image Denoise runtime, committed on purpose — see
 # thirdparty/oidn/README-vendored.md. It has to sit beside the extension, because that is
