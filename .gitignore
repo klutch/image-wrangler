@@ -1,61 +1,6 @@
-# Godot 4+ specific ignores
-.godot/
-.vs/
-/android/
-build/
-*.tmp
-.vscode/
-*.depren
-*.dll
-*.lib
-
-# An editor dump of the engine's extension API. The build never reads this one — godot-cpp
-# uses the copy bundled in its own tree — so a dump left in the project root is just a
-# stale seven-megabyte duplicate. Anchored to the root so the bundled copy stays visible.
-/extension_api.json
-
-# GDExtension build output. The addon's own bin/ is deliberately NOT ignored — the
-# built library is committed so the addon works from a checkout — but the .dll is the
-# only thing there worth keeping; the import library and the linker's leavings are not.
-addons/image_wrangler/godot-cpp/bin/
-addons/image_wrangler/godot-cpp/gen/
-.sconsign.dblite
-addons/image_wrangler/src/*.obj
-addons/image_wrangler/bin/*.exp
-addons/image_wrangler/bin/*.lib
-addons/image_wrangler/bin/*.pdb
-
-# A failed link leaves the half-written DLL behind under a name like
-# ~image_wrangler.windows.editor.x86_64.dll~RF17790f5.TMP. Matched by prefix rather than
-# by that whole name, because the hex differs every time.
-addons/image_wrangler/bin/~*
-
-# The extension itself, which the two comments above have always said is committed but
-# which the blanket *.dll above was quietly swallowing. Most people installing a Godot
-# addon have no C++ toolchain, so a checkout that needs `scons` first is a checkout that
-# does not work. Globbed on purpose: every target this is ever built for should ship.
-!addons/image_wrangler/bin/image_wrangler.*.dll
-
-# The vendored Open Image Denoise runtime, committed on purpose — see
-# thirdparty/oidn/README-vendored.md. It has to sit beside the extension, because that is
-# the only place both Godot's loader and OIDN's own module lookup will find it, which
-# puts it squarely under the blanket *.dll above.
-#
-# The import library beside it needs the same rescue from the blanket *.lib, and for a
-# blunter reason: without it the link step has no OpenImageDenoise to resolve against, so
-# a fresh clone cannot build the extension at all.
-!addons/image_wrangler/thirdparty/oidn/lib/OpenImageDenoise.lib
-#
-# Named one file at a time rather than globbed: a re-vendor that drags the CUDA or HIP
-# device module back in should be a visible decision, not a silent twenty megabytes.
-!addons/image_wrangler/bin/OpenImageDenoise.dll
-!addons/image_wrangler/bin/OpenImageDenoise_core.dll
-!addons/image_wrangler/bin/OpenImageDenoise_device_cpu.dll
-!addons/image_wrangler/bin/tbb12.dll
-!addons/image_wrangler/bin/tbbbind.dll
-!addons/image_wrangler/bin/tbbbind_2_0.dll
-!addons/image_wrangler/bin/tbbbind_2_5.dll
-
-# Raw buffer dumps from the parity harness. Regenerable, and large enough that a
-# baseline run of every case would dwarf the repo.
-addons/image_wrangler/tests/dump/
+/*
+!/addons/
+!/LICENSE
+!/.gitignore
+!/.gitattributes
+!/.gitmodules

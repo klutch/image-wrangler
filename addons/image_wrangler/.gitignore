@@ -1,0 +1,6 @@
+*.dblite
+src/*.obj
+bin/*.exp
+bin/*.lib
+bin/~*
+tests/
