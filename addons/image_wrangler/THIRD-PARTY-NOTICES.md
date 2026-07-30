@@ -43,6 +43,58 @@ Upstream notices: `thirdparty/oidn/third-party-programs-oneTBB.txt`
 
 Source: <https://github.com/uxlfoundation/oneTBB>
 
+## waifu2x-ncnn-vulkan — MIT
+
+Copyright (c) 2019 nihui.
+
+Used by the Upscale tab. One source file from it, `src/waifu2x.cpp`, is compiled into
+`image_wrangler.windows.*.dll`, along with its four GLSL compute shaders. The trained
+models in `thirdparty/waifu2x-ncnn-vulkan/models/` are read at runtime and ship as they
+came.
+
+Licence text: `thirdparty/waifu2x-ncnn-vulkan/LICENSE`
+
+Source and releases: <https://github.com/nihui/waifu2x-ncnn-vulkan>
+
+**Modified.** One bug fix is applied to `src/waifu2x.cpp`, kept as a patch alongside it at
+`thirdparty/waifu2x-tta-shader-cache.patch`: its compiled-shader cache is a function-local
+static that is not keyed on TTA mode, so switching that setting inside one process runs the
+wrong shader and crashes. Upstream picks TTA once from the command line, so it never meets
+this; a checkbox in a dock does. The patch is marked in the source with `IMAGE WRANGLER:`
+comments.
+
+Past that, `src/iw_waifu2x.cpp` calls the `Waifu2x` class and reimplements the two decisions
+its command-line front end makes — which model file a noise level and ratio resolve to, and
+how a ratio above 2 is reached. See `thirdparty/waifu2x-ncnn-vulkan/README-vendored.md`.
+
+The models are the waifu2x project's, originally by nagadomi
+(<https://github.com/nagadomi/waifu2x>), MIT.
+
+## ncnn — BSD-3-Clause
+
+Copyright (C) 2017 Tencent. All rights reserved.
+
+The neural network inference library underneath waifu2x, built from source by
+`tools/build_ncnn.py` and linked statically into `image_wrangler.windows.*.dll`. Not called
+directly by this addon.
+
+Licence text: `thirdparty/waifu2x-ncnn-vulkan/src/ncnn/LICENSE.txt`, which also lists the
+third-party components inside ncnn and their own terms.
+
+Source: <https://github.com/Tencent/ncnn>
+
+## glslang — BSD-3-Clause and others
+
+Copyright (c) 2002-2005 3Dlabs Inc. Ltd., and others.
+
+Bundled inside ncnn, which uses it to compile its shaders to SPIR-V at runtime. Linked
+statically into `image_wrangler.windows.*.dll`. Not called directly by this addon.
+
+Licence text: `thirdparty/waifu2x-ncnn-vulkan/src/ncnn/glslang/LICENSE.txt`, which covers
+several licences — the file lists which applies to what.
+
+Source: <https://github.com/KhronosGroup/glslang>
+
 ## godot-cpp — MIT
 
 Copyright (c) 2017-present Godot Engine contributors.

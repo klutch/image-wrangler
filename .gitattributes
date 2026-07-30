@@ -1,2 +1,5 @@
 * text=auto eol=lf
 addons/image_wrangler/thirdparty/oidn/** -text
+# The waifu2x models are weights. Line-ending conversion would corrupt them silently, and
+# the failure would look like the network being bad rather than the file being wrong.
+addons/image_wrangler/thirdparty/waifu2x-ncnn-vulkan/** -text

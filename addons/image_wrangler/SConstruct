@@ -15,6 +15,11 @@ error on the link step means the editor is still up — close it. The parity har
 in a separate process that exits, so it does not get in the way.
 """
 
+import os
+import re
+
+import SCons.Errors
+
 env = SConscript("godot-cpp/SConstruct")
 
 # Floating-point parity with the GDScript this replaces.
@@ -67,7 +72,126 @@ if env.get("is_msvc", False):
     # godot-cpp defaults debug_symbols=no in any case.
     env.Append(LINKFLAGS=["/IGNORE:4098", "/IGNORE:4099"])
 
+# waifu2x, for the Upscale tab.
+#
+# Vendored the same way OIDN is, and for the same reason: ncnn is a CMake project that
+# generates a dozen headers at configure time and compiles every shader it ships, and a
+# copy of all that living in this file would go stale on the next submodule bump. So it is
+# built once by tools/build_ncnn.py and what comes out lands in thirdparty/ncnn/. Unlike
+# OIDN there is no prebuilt drop to take — upstream ships source — so that script is a
+# prerequisite rather than a convenience. See thirdparty/waifu2x-ncnn-vulkan/README-
+# vendored.md.
+#
+# **Absent, the whole feature is left out and the rest of the addon builds as before.**
+# The Upscale tab tests for the class at runtime and says what to run when it is missing,
+# so a checkout that has not been through the script is a working addon with one tab
+# switched off rather than a build that fails.
+NCNN_PREFIX = "thirdparty/ncnn"
+WAIFU2X_SRC = "thirdparty/waifu2x-ncnn-vulkan/src"
+# Where the four preprocessed shaders go. Not in src/, which is globbed.
+SHADER_DIR = "thirdparty/ncnn-shaders"
+
+
+
+def ncnn_libraries():
+    """Every static library in the vendored prefix.
+
+    Matched on the extension rather than swept wholesale, because ncnn's install leaves
+    `lib/cmake/` and `lib/pkgconfig/` in there for consumers this build is not — and SCons
+    reports a directory handed to File() as a type error rather than skipping it.
+    """
+    return Glob(NCNN_PREFIX + "/lib/*.lib") + Glob(NCNN_PREFIX + "/lib/*.a")
+
+
+have_ncnn = os.path.isdir(os.path.join(NCNN_PREFIX, "include", "ncnn")) and ncnn_libraries()
+
+
+def preprocess_shader(target, source, env):
+    """Turns one .comp into the hex array waifu2x.cpp expects to #include.
+
+    A port of upstream's generate_shader_comp_header.cmake, which is only reachable from
+    their CMake build. The shaders are compiled to SPIR-V by glslang at *runtime*, so all
+    that happens here is that the GLSL text is trimmed and embedded as bytes.
+
+    The two transformations are upstream's and both matter: everything before `#version`
+    is a licence header the compiler would reject, and the leading whitespace is stripped
+    because the text is embedded in the binary and there is no reason to carry it.
+    """
+    with open(str(source[0]), "r", encoding="utf-8", newline="") as handle:
+        text = handle.read()
+
+    start = text.find("#version")
+    if start < 0:
+        raise SCons.Errors.UserError("%s has no #version line." % source[0])
+    text = text[start:]
+    text = re.sub(r"\n +", "\n", text)
+
+    data = text.encode("utf-8")
+    name = os.path.basename(str(source[0])).split(".")[0]
+    body = ",".join("0x%02x" % byte for byte in data)
+
+    with open(str(target[0]), "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("static const char %s_comp_data[] = {%s};\n" % (name, body))
+
+
 sources = Glob("src/*.cpp")
+
+if have_ncnn:
+    env.Append(BUILDERS={"PreprocessShader": Builder(action=preprocess_shader)})
+
+    shader_headers = []
+    for shader in ["waifu2x_preproc", "waifu2x_postproc",
+                   "waifu2x_preproc_tta", "waifu2x_postproc_tta"]:
+        shader_headers += env.PreprocessShader(
+            "{}/{}.comp.hex.h".format(SHADER_DIR, shader),
+            "{}/{}.comp".format(WAIFU2X_SRC, shader),
+        )
+
+    # Its own environment, because upstream's file is not written to this project's
+    # standards and there is no reason it should be. Anything added here would otherwise
+    # apply to every kernel in src/ as well.
+    waifu2x_env = env.Clone()
+    waifu2x_env.Append(CPPPATH=[
+        NCNN_PREFIX + "/include",
+        NCNN_PREFIX + "/include/ncnn",
+        WAIFU2X_SRC,
+        SHADER_DIR,
+    ])
+
+    # The object lands in src/ beside the ones the glob above produced, rather than in the
+    # waifu2x checkout — a build must not leave artefacts inside somebody else's repository,
+    # where they show up as untracked files in a tree nobody edits.
+    #
+    # Named without an extension so SCons appends the one godot-cpp set up, which already
+    # carries the platform and target — writing it out here would append it twice.
+    waifu2x_object = waifu2x_env.SharedObject(
+        "src/waifu2x", "{}/waifu2x.cpp".format(WAIFU2X_SRC)
+    )
+    Depends(waifu2x_object, shader_headers)
+    sources += waifu2x_object
+
+    # And the wrapper, which is ours but includes ncnn's headers and upstream's class, so
+    # it wants the same include path. Taken out of the glob and built here instead.
+    sources = [source for source in sources
+               if os.path.basename(str(source)) != "iw_waifu2x.cpp"]
+    sources += waifu2x_env.SharedObject("src/iw_waifu2x", "src/iw_waifu2x.cpp")
+
+    env.Append(LIBPATH=[NCNN_PREFIX + "/lib"])
+    # Named by sweeping the folder rather than by listing them. A static ncnn is not
+    # self-contained — it needs glslang and SPIRV beside it to compile the shaders it runs
+    # — and exactly which libraries those come out as is an ncnn version's business. The
+    # linker resolves across everything on one command line, so the order does not matter.
+    env.Append(LIBS=[File(lib) for lib in ncnn_libraries()])
+
+    if env.get("is_msvc", False):
+        # ncnn's Vulkan loader resolves the driver by name at runtime, which is what makes
+        # the Vulkan SDK unnecessary to build against. On Windows that means these two.
+        env.Append(LIBS=["advapi32", "user32"])
+else:
+    sources = [source for source in sources
+               if os.path.basename(str(source)) != "iw_waifu2x.cpp"]
+    print("Image Wrangler: thirdparty/ncnn is not built, so the Upscale tab is left out.")
+    print("               Run `python tools/build_ncnn.py` to build it, then build again.")
 
 library = env.SharedLibrary(
     "bin/image_wrangler{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),

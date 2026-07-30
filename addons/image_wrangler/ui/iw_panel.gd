@@ -120,6 +120,12 @@ const RENAME_SCRIPT := "res://addons/image_wrangler/core/rename.gd"
 ## sheet, so there is nowhere in a per-image stack it could sit.
 const PACKING_SCRIPT := "res://addons/image_wrangler/core/iw_packing.gd"
 
+## Upscale is the third of these, and the only one that does take an image and give one
+## back. It stays out of the stack anyway, for two reasons: it runs on what the stack
+## produced rather than alongside it, and its settings describe the batch — one ratio for
+## the whole run — where every stage's describe the image they are dialled in against.
+const UPSCALE_SCRIPT := "res://addons/image_wrangler/core/upscale.gd"
+
 ## Extensions [method Image.load_from_file] can read.
 const SUPPORTED_EXTENSIONS := ["png", "jpg", "jpeg", "bmp", "tga", "webp"]
 
@@ -199,6 +205,20 @@ const PREVIEW_DEBOUNCE := 0.15
 ## spinner would otherwise start a batch run per pixel travelled.
 const PACKING_DEBOUNCE := 0.6
 
+## How long the Upscale tab waits after a change before running the network again.
+##
+## The same as Packing's, and for the same reason — a spinner being dragged reports a change
+## per pixel travelled, and each of these costs a whole stack plus a pass of a neural
+## network. Above [constant UPSCALE_AUTO_PIXEL_LIMIT] it does not run automatically at all.
+const UPSCALE_DEBOUNCE := 0.6
+
+## Above this many pixels in the [i]result[/i], the Upscale tab stops previewing on its own.
+##
+## Judged on the output rather than the source, which is the difference that matters here: a
+## small image at 32x is an enormous one, and the cost of the run follows the pixels coming
+## out. Refresh still asks for it, which is how anything above the line gets looked at.
+const UPSCALE_AUTO_PIXEL_LIMIT := 4_194_304
+
 ## How close a zoom has to be to a ladder rung to count as that rung rather than
 ## as a value of its own. Comfortably under the smallest gap in the ladder.
 const _ZOOM_MATCH := 0.01
@@ -245,7 +265,11 @@ file untouched, so it keeps whatever format it already had."""
 ## and neither has anything to do with whichever file happens to be highlighted. That line
 ## is drawn by [method _is_image_mode] rather than by testing for one tab by name, which is
 ## what every one of these did while Rename was the only tab on the far side of it.
-enum Mode { IMAGE, HISTORY, RENAME, PACKING }
+##
+## Upscale goes last because it comes last: it is the one tab whose input is what the others
+## produced, and reading the strip left to right is then the order a batch actually goes
+## through.
+enum Mode { IMAGE, HISTORY, RENAME, PACKING, UPSCALE }
 
 var _mode := Mode.IMAGE
 
@@ -253,18 +277,28 @@ var _mode := Mode.IMAGE
 ## Whether [param mode] is one of the tabs that works on the highlighted image.
 ##
 ## Operations and History both are — they preview it, they autosave its stack, they process
-## its pixels. Rename and Packing are not, and everything that used to be spelled
+## its pixels. Rename, Packing and Upscale are not, and everything that used to be spelled
 ## [code]!= Mode.RENAME[/code] meant this rather than that: it was only ever right while
 ## Rename was the one tab on the far side of the line, and adding a second would otherwise
 ## have meant finding every site again.
+##
+## [b]Upscale sits outside it despite showing the highlighted image[/b], which is worth
+## saying because it looks like a counterexample. What this line separates is not "does a
+## picture appear" but "whose settings are these": an image mode autosaves a sidecar for the
+## file in front of it and records an undo step per edit, and a ratio held once for the batch
+## has no business doing either.
 static func _is_image_mode(mode: int) -> bool:
     return mode == Mode.IMAGE or mode == Mode.HISTORY
 
 
-## The two operations that describe the batch rather than an image, held for the session.
+## The three operations that describe the batch rather than an image, held for the session.
 ## One set of settings each, no sidecar.
 var _rename: IWOperation
 var _packing: IWOperation
+## Typed as itself rather than as the base the other two are, because the dock asks it
+## things no operation answers — what ratio is dialled in, how large that makes the result,
+## and whether the last run failed. Naming the subclass is what gets those checked.
+var _upscale: Upscale
 
 ## The sheet Packing last built, shown in the viewport while its tab is up.
 ##
@@ -277,6 +311,32 @@ var _packing_image: Image
 ## of the first, and whether one asked for itself while that was true.
 var _packing_running := false
 var _packing_pending := false
+
+## The highlighted image, run through its stack and then through waifu2x, shown in the
+## viewport while the Upscale tab is up.
+##
+## Only ever the one image, where Packing does the whole list. The tab processes the whole
+## list too — that is what Save All does — but a preview of it would be a run of the network
+## per file for a picture that can only show one of them.
+var _upscale_image: Image
+
+## Which source [member _upscale_image] was made from.
+##
+## [b]The Image object itself, which is the exact test.[/b] Selecting another file replaces
+## it and nothing else does — the same identity check a finished preview is kept or dropped
+## by. It matters because the tab can be left and come back to: without it, tabbing away,
+## clicking a different file and tabbing back would show the previous file's result until
+## the rerun landed, which is a picture presented as this file's when it is not.
+var _upscale_source: Image
+
+## Whether an upscale is running, so a change arriving mid-run cannot start a second on top
+## of the first, and whether one asked for itself while that was true.
+var _upscale_running := false
+var _upscale_pending := false
+
+## Why the upscaler could not run during a Save All, held for the report at the end of it.
+## See [method _processed_image].
+var _upscale_failure := ""
 
 ## Set between asking where to put the packed sheet and being told, so the one file dialog
 ## the dock has knows which of its two callers it is answering.
@@ -455,6 +515,11 @@ var _packing_status: Label
 ## Says what the selected packing mode does, sitting under the dropdown and above the rest
 ## of the form.
 var _packing_mode_note: Label
+var _upscale_box: VBoxContainer
+## Says how the last upscale went, or why it could not run at all.
+var _upscale_status: Label
+## Says what the selected model is for, sitting under its dropdown.
+var _upscale_model_note: Label
 ## How much of the source image is faded over the result, 0 to 100.
 var _original_fade: HSlider
 var _zoom_select: OptionButton
@@ -469,6 +534,7 @@ var _process_selected_button: Button
 var _process_all_button: Button
 var _debounce: Timer
 var _packing_debounce: Timer
+var _upscale_debounce: Timer
 var _autosave: Timer
 var _open_dialog: FileDialog
 var _output_dialog: FileDialog
@@ -519,6 +585,7 @@ func _ready() -> void:
     _build_ui()
     _build_rename()
     _build_packing()
+    _build_upscale()
     _apply_stack_for("")
     _select_mode(Mode.IMAGE)
     _refresh_file_list()
@@ -621,6 +688,12 @@ func _exit_tree() -> void:
     # Cleared so the way is open for the next run should the dock come back.
     _preview_running = false
 
+    # Hands back the Vulkan device and the several hundred megabytes of video memory the
+    # model is sitting in. Nothing else here holds anything the editor would miss, and the
+    # editor goes on running after the dock has gone.
+    if _upscale != null:
+        _upscale.close()
+
 
 ## Builds the file operation and its form. One instance for the session, since a
 ## rename scheme describes the batch rather than any one image.
@@ -679,6 +752,58 @@ func _refresh_packing_note() -> void:
     if _packing_mode_note == null or _packing == null:
         return
     _packing_mode_note.text = IWPacking.describe_mode(_packing.get_settings().mode)
+
+
+## The third of these, for the tab that runs the network.
+##
+## The model dropdown is filled from what is on disk rather than from a list in code, so the
+## form is rebuilt here on every rebuild — a model folder added while the dock was open
+## appears the next time this runs.
+func _build_upscale() -> void:
+    # Before the operation is made, so a first build and a rebuild both see the disk as it
+    # is now — the dropdown is filled from this and the default model is chosen from it.
+    Upscale.refresh_models()
+    if _upscale == null:
+        var script: GDScript = load(UPSCALE_SCRIPT)
+        if script == null:
+            push_error("Image Wrangler: could not load operation script at %s" % UPSCALE_SCRIPT)
+            return
+        _upscale = script.new()
+    SettingsBuilder.build(_upscale, _upscale_box, _on_setting_changed, _fold_state, "upscale")
+
+    # Under the model dropdown for the same reason Packing's note sits under its mode
+    # dropdown: it is about the one control above it. See _build_packing.
+    if _upscale_model_note != null:
+        if _upscale_model_note.get_parent() != null:
+            _upscale_model_note.get_parent().remove_child(_upscale_model_note)
+        _upscale_box.add_child(_upscale_model_note)
+        _upscale_box.move_child(_upscale_model_note, _upscale_note_index())
+    _refresh_upscale_note()
+
+    # Said on the way in rather than waiting for the first run to fail. A build without the
+    # native class is the ordinary state of a fresh checkout, and a form full of settings
+    # over a viewport that never fills is the worst way to find that out.
+    var blocked := _upscale_blocked()
+    if not blocked.is_empty():
+        _set_upscale_status(blocked)
+    elif not Upscale.gpu_available():
+        _set_upscale_status("No Vulkan device found, so this will run on the processor. Expect minutes rather than seconds.")
+
+
+## Where the model note belongs: directly after the row carrying the model dropdown. Found
+## rather than counted, so reordering the schema moves the note with it.
+func _upscale_note_index() -> int:
+    for child in _upscale_box.get_children():
+        if child.has_meta(SettingsBuilder.META_PROPERTY) \
+                and child.get_meta(SettingsBuilder.META_PROPERTY) == &"model_index":
+            return child.get_index() + 1
+    return 0
+
+
+func _refresh_upscale_note() -> void:
+    if _upscale_model_note == null or _upscale == null:
+        return
+    _upscale_model_note.text = _upscale.model_description()
 
 
 ## Rebuilds the dock when one of this addon's scripts has been reloaded.
@@ -780,6 +905,7 @@ func _rebuild_ui() -> void:
     _build_ui()
     _build_rename()
     _build_packing()
+    _build_upscale()
 
     _preview.markers_visible = indicators
     _indicator_toggle.set_pressed_no_signal(indicators)
@@ -829,6 +955,9 @@ func _forget_controls() -> void:
     _packing_box = null
     _packing_status = null
     _packing_mode_note = null
+    _upscale_box = null
+    _upscale_status = null
+    _upscale_model_note = null
     _original_fade = null
     _zoom_select = null
     _zoom_entry = null
@@ -842,6 +971,7 @@ func _forget_controls() -> void:
     _process_all_button = null
     _debounce = null
     _packing_debounce = null
+    _upscale_debounce = null
     _autosave = null
     _open_dialog = null
     _output_dialog = null
@@ -881,6 +1011,14 @@ func _build_ui() -> void:
     _packing_debounce.wait_time = PACKING_DEBOUNCE
     _packing_debounce.timeout.connect(_run_packing_now)
     add_child(_packing_debounce)
+
+    _upscale_debounce = Timer.new()
+    _upscale_debounce.one_shot = true
+    _upscale_debounce.wait_time = UPSCALE_DEBOUNCE
+    # Bound rather than connected bare: a timeout carries no arguments, and the run wants
+    # to know it was not asked for by Refresh.
+    _upscale_debounce.timeout.connect(_run_upscale_now.bind(false))
+    add_child(_upscale_debounce)
 
     _autosave = Timer.new()
     _autosave.one_shot = true
@@ -1011,7 +1149,7 @@ func _build_preview_column() -> Control:
     _refresh_button = Button.new()
     _refresh_button.text = "Refresh"
     _refresh_button.tooltip_text = "Re-run the operation on the selected image."
-    _refresh_button.pressed.connect(_run_preview)
+    _refresh_button.pressed.connect(_on_refresh_pressed)
     toolbar.add_child(_refresh_button)
 
     _preview = PreviewView.new()
@@ -1192,6 +1330,30 @@ func _build_operation_column() -> Control:
     _packing_status.modulate = Color(1, 1, 1, 0.6)
     packing_column.add_child(_packing_status)
 
+    var upscale_page := ScrollContainer.new()
+    upscale_page.name = "Upscale"
+    upscale_page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    _modes.add_child(upscale_page)
+
+    var upscale_column := VBoxContainer.new()
+    upscale_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    upscale_page.add_child(upscale_column)
+
+    _upscale_box = VBoxContainer.new()
+    _upscale_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    upscale_column.add_child(_upscale_box)
+
+    # Says what the model in the dropdown above it is for. Built here and moved into the
+    # form by _build_upscale, exactly as Packing's note is.
+    _upscale_model_note = Label.new()
+    _upscale_model_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    _upscale_model_note.modulate = Color(1, 1, 1, 0.6)
+
+    _upscale_status = Label.new()
+    _upscale_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    _upscale_status.modulate = Color(1, 1, 1, 0.6)
+    upscale_column.add_child(_upscale_status)
+
     _modes.set_tab_tooltip(Mode.IMAGE, "Build a stack of operations that rewrite the pixels.")
     _modes.set_tab_tooltip(Mode.HISTORY,
             "Every edit made to this image's stack this session.\nClick one to rewind to it. Held in memory only, and never saved.")
@@ -1199,6 +1361,8 @@ func _build_operation_column() -> Control:
             "Write the files out under new names, pixels untouched.\nDescribes the whole batch rather than one image, so it is not part of the stack.")
     _modes.set_tab_tooltip(Mode.PACKING,
             "Lay the objects from every open image out on one sheet.\nShown in the viewport; Save Current writes it.")
+    _modes.set_tab_tooltip(Mode.UPSCALE,
+            "Enlarge every open image with waifu2x, which invents the pixels\nrather than stretching them. Runs on what each image's stack made,\nnot on the file it came from.")
 
     column.add_child(HSeparator.new())
     column.add_child(_build_output_section())
@@ -1249,6 +1413,8 @@ func _select_mode(mode: int) -> void:
     # been asked.
     if mode == Mode.PACKING:
         _schedule_packing()
+    elif mode == Mode.UPSCALE:
+        _schedule_upscale()
     # Which of the two Save buttons has anything to do depends on the tab, so the switch
     # itself has to say so — nothing else runs on the way in.
     _update_controls()
@@ -1286,7 +1452,8 @@ func _build_output_section() -> Control:
     _process_selected_button.tooltip_text = "Process the selected image and ask where to save it.
 
 On the Packing tab it saves the packed sheet instead, which is the one
-thing there is to save there."
+thing there is to save there. On Upscale it runs the image's operations
+and then the network, which is what the tab is showing."
     _process_selected_button.pressed.connect(_on_process_selected)
     section.add_child(_process_selected_button)
 
@@ -1295,7 +1462,11 @@ thing there is to save there."
     _process_all_button.tooltip_text = "Process every image in the list and ask for a folder to put them in.
 
 Nothing to do on the Packing tab, where the whole list makes one sheet —
-use Save Current for that."
+use Save Current for that.
+
+On Upscale it runs every image through its own operations and then the
+network. That is the slow one: it holds the editor for as long as it
+takes, and it reports nothing until it is done."
     _process_all_button.pressed.connect(_on_process_all)
     section.add_child(_process_all_button)
 
@@ -1436,6 +1607,7 @@ func _add_sources(paths: PackedStringArray) -> void:
 ## Hooking the three of them separately would be three chances to add a fourth and forget.
 func _refresh_file_list() -> void:
     _schedule_packing()
+    _schedule_upscale()
     var selected := _selected_index()
     _file_list.clear()
     for path in _sources:
@@ -1523,7 +1695,11 @@ func _on_file_selected(index: int) -> void:
     # as long as this one takes — and that is exactly backwards.
     _update_preview_texture()
     _update_detail_label()
-    if _auto_preview_allowed():
+    if _mode == Mode.UPSCALE:
+        # The tab shows whichever image is highlighted, so moving the highlight is a
+        # reason to run it — the same reason changing a setting is.
+        _schedule_upscale()
+    elif _auto_preview_allowed():
         _run_preview()
     else:
         # Left to Refresh. Processing a very large image on every click through the
@@ -2247,6 +2423,11 @@ func _active_operation() -> IWOperation:
         return _rename
     if _mode == Mode.PACKING:
         return _packing
+    # The suffix and the output name come off this, and both are Upscale's own — "_x4"
+    # rather than whatever the stack under it would have called its result. The stack still
+    # runs; see [method _processed_image].
+    if _mode == Mode.UPSCALE:
+        return _upscale
     var pipeline := IWPipeline.new()
     for stage: IWStackOperation in _stack_view.stages():
         pipeline.stages.append(stage)
@@ -2930,6 +3111,8 @@ func _on_setting_changed() -> void:
         SettingsBuilder.refresh_visibility(_rename, _rename_box)
     elif _mode == Mode.PACKING:
         SettingsBuilder.refresh_visibility(_packing, _packing_box)
+    elif _mode == Mode.UPSCALE:
+        SettingsBuilder.refresh_visibility(_upscale, _upscale_box)
     else:
         for entry: Control in _stack_view.entries():
             SettingsBuilder.refresh_visibility(entry.stage, entry.settings_box())
@@ -2943,6 +3126,14 @@ func _on_setting_changed() -> void:
         # so nothing else would notice the mode had moved.
         _refresh_packing_note()
         _schedule_packing()
+        return
+    if _mode == Mode.UPSCALE:
+        _refresh_upscale_note()
+        # The one tab whose suffix follows a setting rather than naming the operation, so
+        # changing the ratio has to move it. Only while the user has not typed their own;
+        # _refresh_suffix is what decides that.
+        _refresh_suffix()
+        _schedule_upscale()
         return
     if _mode == Mode.RENAME:
         _update_detail_label()
@@ -2974,6 +3165,20 @@ func _schedule_preview() -> void:
 ## it is only the weight between them that changed.
 func _on_original_fade_changed(value: float) -> void:
     _preview.original_fade = value * 0.01
+
+
+## Refresh means "do it now" on whichever tab is up.
+##
+## Routed here rather than wired straight to the preview, because two of the tabs run
+## something that is not one — and both of them are exactly the case Refresh exists for,
+## since both stand down from running automatically once the work gets large.
+func _on_refresh_pressed() -> void:
+    if _mode == Mode.PACKING:
+        _run_packing_now()
+    elif _mode == Mode.UPSCALE:
+        _run_upscale_now(true)
+    else:
+        _run_preview()
 
 
 ## Asks for a preview, starting one now or replacing the run in flight.
@@ -3318,6 +3523,154 @@ func _set_packing_status(text: String) -> void:
         _packing_status.text = text
 
 
+# --- Upscaling -----------------------------------------------------------
+
+## Asks for a run shortly, for a change that ought to produce one.
+##
+## Debounced like Packing's and by as much, since a dropdown is a dropdown but the ratio
+## spinner is not the only thing on this form and every change costs a whole stack plus a
+## pass of a neural network.
+## Why the Upscale tab cannot do anything, or empty when it can.
+##
+## Two unrelated reasons, answered together because every caller wants both: the native
+## class may not be in this build at all, and the settings dialled in may be a combination
+## that has no model behind it.
+func _upscale_blocked() -> String:
+    var missing: String = Upscale.unavailable_note()
+    if not missing.is_empty():
+        return missing
+    return _upscale.combination_note() if _upscale != null else ""
+
+
+func _schedule_upscale() -> void:
+    # Null while the dock is being built, and _refresh_file_list runs during that.
+    if _mode != Mode.UPSCALE or _shutting_down or _upscale_debounce == null:
+        return
+    _upscale_debounce.start()
+
+
+## Whether a run is small enough to start on its own.
+##
+## Judged on the size coming out rather than the size going in, which is the whole
+## difference here: a 512-square sprite is nothing, and the same sprite at 32x is a quarter
+## of a billion pixels and several minutes.
+func _upscale_auto_allowed() -> bool:
+    if _source_image == null or _upscale == null:
+        return false
+    var out: Vector2i = _upscale.output_size(_source_image.get_size())
+    return out.x * out.y <= UPSCALE_AUTO_PIXEL_LIMIT
+
+
+## Runs the highlighted image, or says why it could not.
+##
+## [param forced] is Refresh, which is what asks for a run the size test above declined.
+## Queued rather than refused when one is already going, for the reason Packing is: a
+## dropped request would leave the picture describing settings no longer on screen.
+func _run_upscale_now(forced := false) -> void:
+    if _mode != Mode.UPSCALE or _shutting_down or _upscale == null:
+        return
+
+    var blocked := _upscale_blocked()
+    if not blocked.is_empty():
+        _upscale_image = null
+        _upscale_source = null
+        _update_preview_texture()
+        _set_upscale_status(blocked)
+        # The Save buttons go with it, since what they would run is what cannot run.
+        _update_controls()
+        return
+    if _upscale_running:
+        _upscale_pending = true
+        return
+    if _source_image == null:
+        _upscale_image = null
+        _upscale_source = null
+        _update_preview_texture()
+        _set_upscale_status("Nothing to upscale: pick an image from the list.")
+        return
+    if not forced and not _upscale_auto_allowed():
+        var out: Vector2i = _upscale.output_size(_source_image.get_size())
+        _upscale_image = null
+        _upscale_source = null
+        _update_preview_texture()
+        _set_upscale_status("%d x %d is a lot to make for a preview. Press Refresh to run it."
+                % [out.x, out.y])
+        return
+
+    _upscale_running = true
+    _update_controls()
+    _preview.set_busy(true)
+    await _run_upscale()
+    if _shutting_down:
+        return
+    _upscale_running = false
+    _preview.set_busy(false)
+    _update_controls()
+
+    if _upscale_pending:
+        _upscale_pending = false
+        _schedule_upscale()
+
+
+## The run: the highlighted image's stack, then the network.
+##
+## [b]The stack first, and that order is the point of the tab.[/b] A background keyed out at
+## the size the file arrived at is keyed against edges the camera or the brush actually put
+## there. Keyed after upscaling, it is keyed against edges the network invented — and the
+## network is very good at inventing a confident edge in the wrong place.
+func _run_upscale() -> void:
+    var path := _current_path()
+    var source := _source_image
+
+    _set_upscale_status("Running %s through its operations..." % path.get_file())
+    _preview.set_progress(0.0)
+    var pipeline := _pipeline_for(path)
+    var staged: Image = await pipeline.process_image_stepped(source, get_tree().process_frame)
+    if _shutting_down:
+        return
+    if staged == null:
+        staged = source
+
+    var out: Vector2i = _upscale.output_size(staged.get_size())
+    _set_upscale_status("Upscaling to %d x %d. This does not report progress." % [out.x, out.y])
+    _preview.set_progress(0.5)
+    # [b]One frame, deliberately.[/b] The line above is painted by the main thread, and the
+    # call below occupies the main thread for as long as the network takes — so without this
+    # the message would arrive at the same moment as the answer it was there to explain.
+    await get_tree().process_frame
+    if _shutting_down:
+        return
+
+    var started := Time.get_ticks_msec()
+    var result: Image = _upscale.process_image(staged)
+    if _shutting_down:
+        return
+
+    var failure: String = _upscale.last_error
+    if not failure.is_empty():
+        _upscale_image = null
+        _upscale_source = null
+        _update_preview_texture()
+        _set_upscale_status(failure)
+        _set_status(failure)
+        return
+
+    _upscale_image = result
+    _upscale_source = source
+    _update_preview_texture()
+    _preview.fit_to_view()
+    var elapsed := Time.get_ticks_msec() - started
+    _set_upscale_status("%s at %dx: %d x %d in %d ms." % [
+        path.get_file(), _upscale.scale_ratio(), result.get_width(), result.get_height(), elapsed,
+    ])
+    _set_status("Upscaled %s in %d ms." % [path.get_file(), elapsed])
+
+
+func _set_upscale_status(text: String) -> void:
+    if _upscale_status != null:
+        _upscale_status.text = text
+
+
 func _snapshot_operation() -> IWOperation:
     return _snapshot_pipeline(_stack_view.stages())
 
@@ -3354,6 +3707,13 @@ func _update_preview_texture() -> void:
     # whether or not a file happens to be highlighted.
     if _mode == Mode.PACKING:
         _preview.set_image(_packing_image)
+        _preview.set_original(null)
+        return
+    # Upscale shows what it made, and no original underneath: the result is a different
+    # size from the source, so there is nothing for the fade slider to lay one over the
+    # other — it would be comparing two pictures that do not line up.
+    if _mode == Mode.UPSCALE:
+        _preview.set_image(_upscale_image if _upscale_source == _source_image else null)
         _preview.set_original(null)
         return
     if _source_image == null:
@@ -3479,13 +3839,20 @@ func _update_controls() -> void:
     # writes the sheet and Save All has nothing to mean. Disabled rather than hidden: a
     # button that comes and goes with a tab reads as a bug in the layout, where a dead one
     # reads as "not from here".
-    var packs := _mode == Mode.PACKING
-    if packs:
+    if _mode == Mode.PACKING:
         _process_selected_button.disabled = _packing_image == null
         _process_all_button.disabled = true
-    else:
-        _process_selected_button.disabled = _source_image == null
-        _process_all_button.disabled = not has_any
+        return
+    # Upscale is the other way round: every image comes out as its own file, so both
+    # buttons mean what they mean everywhere else. They only stand down when nothing they
+    # could do would work — the class missing from the build, or a ratio and a model that
+    # cannot go together. Neither is something clicking would fix.
+    if _mode == Mode.UPSCALE and not _upscale_blocked().is_empty():
+        _process_selected_button.disabled = true
+        _process_all_button.disabled = true
+        return
+    _process_selected_button.disabled = _source_image == null
+    _process_all_button.disabled = not has_any
 
 
 
@@ -3832,6 +4199,38 @@ func _removes_sources() -> bool:
     return _mode == Mode.RENAME and _rename != null and _rename.removes_sources()
 
 
+## The finished pixels for one source: its own stack, and then whatever the tab adds on top.
+##
+## [b]A fresh pipeline per job, built from that image's own saved stack.[/b] Nothing the
+## dock is showing is touched, which is what lets the form go on being edited during a run
+## and what stops one image's settings leaking into the next.
+##
+## Returns null when the upscaler could not run, with the reason left in
+## [member _upscale_failure] — one line for the whole run rather than one per file, since a
+## missing model or a GPU out of memory fails every image for the same reason and twenty
+## copies of it is not twenty pieces of information.
+func _processed_image(source_path: String, image: Image) -> Image:
+    var stages := []
+    for record: Dictionary in _stack_for(source_path):
+        var stage: IWStackOperation = record["operation"]
+        stage.set_settings(record["settings"])
+        stage.enabled = bool(record["enabled"])
+        stages.append(stage)
+    var result := _snapshot_pipeline(stages).process_image(image)
+
+    if _mode != Mode.UPSCALE or _upscale == null:
+        return result
+
+    # The stack's result, not the file's pixels. See [method _run_upscale] for why that
+    # order is the whole point of the tab.
+    var upscaled: Image = _upscale.process_image(result)
+    var failure: String = _upscale.last_error
+    if not failure.is_empty():
+        _upscale_failure = failure
+        return null
+    return upscaled
+
+
 ## Runs the stack over every queued source and writes the results.
 func _write_pending_outputs() -> void:
     var jobs := _pending_outputs
@@ -3846,8 +4245,12 @@ func _write_pending_outputs() -> void:
 
     # Rename copies the file byte for byte rather than decoding and re-encoding it, so
     # a format this addon cannot write is not turned into a PNG wearing the wrong
-    # extension.
-    var rewrites_pixels := _is_image_mode(_mode)
+    # extension. Asked of the operation rather than of the mode, which is the same
+    # question one step nearer the answer — and the only form of it that stayed right
+    # when Upscale arrived on the far side of [method _is_image_mode] while still
+    # rewriting every pixel it touches.
+    var active := _active_operation()
+    var rewrites_pixels := active != null and active.transforms_pixels()
     # Worked out once for the whole run rather than per file, since it depends on which
     # sources the run leaves alone.
     var held_sidecars := _sidecars_held_outside(jobs)
@@ -3884,18 +4287,10 @@ func _write_pending_outputs() -> void:
         if image == null:
             failures.append(source_path.get_file())
             continue
-        # A fresh pipeline per job, built from that image's own saved stack. Nothing
-        # the dock is showing is touched, which is what lets the form go on being
-        # edited during a run and what stops one image's settings leaking into the
-        # next — the old arrangement swapped them on the live operation and put them
-        # back afterwards.
-        var stages := []
-        for record: Dictionary in _stack_for(source_path):
-            var stage: IWStackOperation = record["operation"]
-            stage.set_settings(record["settings"])
-            stage.enabled = bool(record["enabled"])
-            stages.append(stage)
-        var result := _snapshot_pipeline(stages).process_image(image)
+        var result := _processed_image(source_path, image)
+        if result == null:
+            failures.append(source_path.get_file())
+            continue
         if result.save_png(destination) != OK:
             failures.append(source_path.get_file())
             continue
@@ -3905,6 +4300,9 @@ func _write_pending_outputs() -> void:
     if not failures.is_empty():
         report = "Wrote %d file(s), %d failed: %s" % [written, failures.size(), ", ".join(failures)]
         push_error("Image Wrangler: failed to process %s" % ", ".join(failures))
+    if not _upscale_failure.is_empty():
+        report += " %s" % _upscale_failure
+        _upscale_failure = ""
     # Appended rather than replacing the line: the image is what the run was for,
     # and a sidecar left behind must not read as a failed rename.
     if not sidecar_failures.is_empty():

@@ -1,0 +1,67 @@
+diff --git a/src/waifu2x.cpp b/src/waifu2x.cpp
+index fa1b0d7..0345b7f 100644
+--- a/src/waifu2x.cpp
++++ b/src/waifu2x.cpp
+@@ -87,41 +87,52 @@ int Waifu2x::load(const std::string& parampath, const std::string& modelpath)
+ #endif
+ 
+         {
+-            static std::vector<uint32_t> spirv;
++            // IMAGE WRANGLER: one cache per TTA mode, where upstream has one in total.
++            //
++            // The cache is a function-local static, so it outlives the Waifu2x that filled
++            // it. Upstream picks TTA once from the command line and runs one process, so a
++            // single slot is always the right one. Toggled in a user interface it is not:
++            // the second load reuses the first mode's shader, and since the TTA module
++            // declares ten bindings against the plain one's three, ncnn reports
++            // "binding_count not match" and the process then dies in the descriptor set.
++            static std::vector<uint32_t> spirv[2];
+             static ncnn::Mutex lock;
++            std::vector<uint32_t>& cached = spirv[tta_mode ? 1 : 0];
+             {
+                 ncnn::MutexLockGuard guard(lock);
+-                if (spirv.empty())
++                if (cached.empty())
+                 {
+                     if (tta_mode)
+-                        compile_spirv_module(waifu2x_preproc_tta_comp_data, sizeof(waifu2x_preproc_tta_comp_data), net.opt, spirv);
++                        compile_spirv_module(waifu2x_preproc_tta_comp_data, sizeof(waifu2x_preproc_tta_comp_data), net.opt, cached);
+                     else
+-                        compile_spirv_module(waifu2x_preproc_comp_data, sizeof(waifu2x_preproc_comp_data), net.opt, spirv);
++                        compile_spirv_module(waifu2x_preproc_comp_data, sizeof(waifu2x_preproc_comp_data), net.opt, cached);
+                 }
+             }
+ 
+             waifu2x_preproc = new ncnn::Pipeline(vkdev);
+             waifu2x_preproc->set_optimal_local_size_xyz(8, 8, 3);
+-            waifu2x_preproc->create(spirv.data(), spirv.size() * 4, specializations);
++            waifu2x_preproc->create(cached.data(), cached.size() * 4, specializations);
+         }
+ 
+         {
+-            static std::vector<uint32_t> spirv;
++            // IMAGE WRANGLER: one cache per TTA mode. See the note on the block above.
++            static std::vector<uint32_t> spirv[2];
+             static ncnn::Mutex lock;
++            std::vector<uint32_t>& cached = spirv[tta_mode ? 1 : 0];
+             {
+                 ncnn::MutexLockGuard guard(lock);
+-                if (spirv.empty())
++                if (cached.empty())
+                 {
+                     if (tta_mode)
+-                        compile_spirv_module(waifu2x_postproc_tta_comp_data, sizeof(waifu2x_postproc_tta_comp_data), net.opt, spirv);
++                        compile_spirv_module(waifu2x_postproc_tta_comp_data, sizeof(waifu2x_postproc_tta_comp_data), net.opt, cached);
+                     else
+-                        compile_spirv_module(waifu2x_postproc_comp_data, sizeof(waifu2x_postproc_comp_data), net.opt, spirv);
++                        compile_spirv_module(waifu2x_postproc_comp_data, sizeof(waifu2x_postproc_comp_data), net.opt, cached);
+                 }
+             }
+ 
+             waifu2x_postproc = new ncnn::Pipeline(vkdev);
+             waifu2x_postproc->set_optimal_local_size_xyz(8, 8, 3);
+-            waifu2x_postproc->create(spirv.data(), spirv.size() * 4, specializations);
++            waifu2x_postproc->create(cached.data(), cached.size() * 4, specializations);
+         }
+     }
+ 

@@ -4,3 +4,10 @@ bin/*.exp
 bin/*.lib
 bin/~*
 tests/
+
+# What tools/build_ncnn.py makes. Hundreds of megabytes of static library, and every byte
+# of it derivable from the waifu2x checkout beside it — the built DLL in bin/ is what gets
+# committed, exactly as it is for Open Image Denoise.
+thirdparty/ncnn/
+thirdparty/ncnn-build/
+thirdparty/ncnn-shaders/
