@@ -21,4 +21,4 @@
 # that re-vendoring is a clean diff against the new version rather than a whole-tree EOL
 # churn laid on top of the real change. Without this, `* text=auto` above would rewrite
 # its headers and licence files on checkout.
-thirdparty/oidn/** -text
+addons/image_wrangler/thirdparty/oidn/** -text

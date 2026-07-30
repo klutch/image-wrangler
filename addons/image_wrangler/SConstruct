@@ -1,11 +1,14 @@
 #!/usr/bin/env python
 """Builds the Image Wrangler GDExtension.
 
+Run from this directory, addons/image_wrangler/, which is the addon's own root — the
+project above it holds nothing but a skeleton Godot project:
+
     scons target=editor              # what the editor and the parity harness load
     scons target=template_release    # what an exported project would load
 
-The library lands in addons/image_wrangler/bin/ and is committed, so the addon works
-from a checkout without anyone having to build it.
+The library lands in bin/ and is committed, so the addon works from a checkout without
+anyone having to build it.
 
 Godot holds the DLL open while it is running. A build that fails with a permission
 error on the link step means the editor is still up — close it. The parity harness runs
@@ -37,7 +40,7 @@ env.Append(CPPPATH=["src/"])
 # Vendored and committed under thirdparty/, and deliberately not under src/ — the glob
 # below is flat and would sweep any source there into the build under this project's own
 # flags. Only headers and an import library are needed here; the runtime DLLs are
-# committed straight into addons/image_wrangler/bin/ beside the extension, which is where
+# committed straight into bin/ beside the extension, which is where
 # both Godot's loader and OIDN's own module lookup expect them. See
 # thirdparty/oidn/README-vendored.md.
 env.Append(CPPPATH=["thirdparty/oidn/include"])
@@ -67,7 +70,7 @@ if env.get("is_msvc", False):
 sources = Glob("src/*.cpp")
 
 library = env.SharedLibrary(
-    "addons/image_wrangler/bin/image_wrangler{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
+    "bin/image_wrangler{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
     source=sources,
 )
 

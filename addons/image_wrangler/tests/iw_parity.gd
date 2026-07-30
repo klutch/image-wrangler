@@ -21,15 +21,15 @@ extends SceneTree
 ##
 ## Run it:
 ## [codeblock]
-## godot --headless --path <project> --script res://tests/iw_parity.gd -- --record
-## godot --headless --path <project> --script res://tests/iw_parity.gd
+## godot --headless --path <project> --script res://addons/image_wrangler/tests/iw_parity.gd -- --record
+## godot --headless --path <project> --script res://addons/image_wrangler/tests/iw_parity.gd
 ## [/codeblock]
 
-const Fixtures := preload("res://tests/iw_fixtures.gd")
+const Fixtures := preload("res://addons/image_wrangler/tests/iw_fixtures.gd")
 const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
 
-const GOLDEN_PATH := "res://tests/golden/baseline.json"
-const DUMP_DIR := "res://tests/dump"
+const GOLDEN_PATH := "res://addons/image_wrangler/tests/golden/baseline.json"
+const DUMP_DIR := "res://addons/image_wrangler/tests/dump"
 
 ## Every per-pixel buffer on the context, hashed after each stage.
 ##

@@ -12,7 +12,7 @@ extends SceneTree
 ##
 ## Run it:
 ## [codeblock]
-## godot --headless --path . --script res://tests/iw_smooth_color.gd
+## godot --headless --path ../.. --script res://addons/image_wrangler/tests/iw_smooth_color.gd
 ## [/codeblock]
 
 const OP_SMOOTH_COLOR := "res://addons/image_wrangler/core/smooth_color.gd"

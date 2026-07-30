@@ -12,7 +12,7 @@ extends SceneTree
 ##
 ## Run it:
 ## [codeblock]
-## godot --headless --path . --script res://tests/iw_smooth_blocks.gd
+## godot --headless --path ../.. --script res://addons/image_wrangler/tests/iw_smooth_blocks.gd
 ## [/codeblock]
 
 const OP_SMOOTH_BLOCKS := "res://addons/image_wrangler/core/smooth_blocks.gd"

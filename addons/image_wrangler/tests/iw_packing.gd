@@ -11,7 +11,7 @@ extends SceneTree
 ##
 ## Run it:
 ## [codeblock]
-## godot --headless --path . --script res://tests/iw_packing.gd
+## godot --headless --path ../.. --script res://addons/image_wrangler/tests/iw_packing.gd
 ## [/codeblock]
 
 const OP_PACKING := "res://addons/image_wrangler/core/iw_packing.gd"

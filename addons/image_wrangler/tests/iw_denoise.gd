@@ -21,7 +21,7 @@ extends SceneTree
 ##
 ## Run it:
 ## [codeblock]
-## godot --headless --path . --script res://tests/iw_denoise.gd
+## godot --headless --path ../.. --script res://addons/image_wrangler/tests/iw_denoise.gd
 ## [/codeblock]
 ##
 ## [b]It exits reporting two leaked instances and one resource still in use, and that is

@@ -16,7 +16,7 @@ extends SceneTree
 ##
 ## Run it:
 ## [codeblock]
-## godot --headless --path . --script res://tests/iw_key_dist.gd
+## godot --headless --path ../.. --script res://addons/image_wrangler/tests/iw_key_dist.gd
 ## [/codeblock]
 
 const OP_REMOVE_BACKGROUND := "res://addons/image_wrangler/core/remove_background.gd"

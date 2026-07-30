@@ -14,7 +14,7 @@ extends SceneTree
 ##
 ## Run it:
 ## [codeblock]
-## godot --headless --path . --script res://tests/iw_brush_edit.gd
+## godot --headless --path ../.. --script res://addons/image_wrangler/tests/iw_brush_edit.gd
 ## [/codeblock]
 ##
 ## Every stage here is reached through [method load] rather than by its

@@ -10,7 +10,7 @@ extends SceneTree
 ##
 ## Run it:
 ## [codeblock]
-## godot --headless --path . --script res://tests/iw_entry_list.gd
+## godot --headless --path ../.. --script res://addons/image_wrangler/tests/iw_entry_list.gd
 ## [/codeblock]
 
 const EntryList := preload("res://addons/image_wrangler/ui/iw_entry_list.gd")

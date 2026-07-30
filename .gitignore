@@ -17,10 +17,10 @@ build/
 # GDExtension build output. The addon's own bin/ is deliberately NOT ignored — the
 # built library is committed so the addon works from a checkout — but the .dll is the
 # only thing there worth keeping; the import library and the linker's leavings are not.
-godot-cpp/bin/
-godot-cpp/gen/
+addons/image_wrangler/godot-cpp/bin/
+addons/image_wrangler/godot-cpp/gen/
 .sconsign.dblite
-src/*.obj
+addons/image_wrangler/src/*.obj
 addons/image_wrangler/bin/*.exp
 addons/image_wrangler/bin/*.lib
 addons/image_wrangler/bin/*.pdb
@@ -41,6 +41,11 @@ addons/image_wrangler/bin/~*
 # the only place both Godot's loader and OIDN's own module lookup will find it, which
 # puts it squarely under the blanket *.dll above.
 #
+# The import library beside it needs the same rescue from the blanket *.lib, and for a
+# blunter reason: without it the link step has no OpenImageDenoise to resolve against, so
+# a fresh clone cannot build the extension at all.
+!addons/image_wrangler/thirdparty/oidn/lib/OpenImageDenoise.lib
+#
 # Named one file at a time rather than globbed: a re-vendor that drags the CUDA or HIP
 # device module back in should be a visible decision, not a silent twenty megabytes.
 !addons/image_wrangler/bin/OpenImageDenoise.dll
@@ -53,4 +58,4 @@ addons/image_wrangler/bin/~*
 
 # Raw buffer dumps from the parity harness. Regenerable, and large enough that a
 # baseline run of every case would dwarf the repo.
-tests/dump/
+addons/image_wrangler/tests/dump/

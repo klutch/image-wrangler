@@ -16,7 +16,7 @@ extends SceneTree
 ##
 ## Run it:
 ## [codeblock]
-## godot --headless --path . --script res://tests/iw_remove_lines.gd
+## godot --headless --path ../.. --script res://addons/image_wrangler/tests/iw_remove_lines.gd
 ## [/codeblock]
 ##
 ## Unlike [code]tests/iw_denoise.gd[/code] it exits clean, with no leaked instances
