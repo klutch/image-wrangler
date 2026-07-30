@@ -47,6 +47,16 @@ public:
 	// `high` and above on solid, in place.
 	static void clip_alpha(const Ref<IWPipelineContext> &ctx, double low, double high);
 
+    // Upscale's Sharpen. Tightens the antialiased ramp round an object without moving the
+    // edge that ramp describes. Returns a new RGBA8 image; `image` itself for an `amount`
+    // of zero, which is the identity.
+    //
+    // The one kernel here that is handed an Image rather than a context, because the thing
+    // it works on is a finished picture: what comes back off the network is pixels, not a
+    // run in progress. See the note on the implementation for why the maths is a per-pixel
+    // remap and not a filter.
+    static Ref<Image> sharpen_alpha(const Ref<Image> &image, double amount);
+
 	// RefineEdges._guided_refine: the He/Sun/Tang guided filter, with the
 	// distance-from-key map as the guide. Returns the refined alpha rather than writing
 	// it, because the caller decides whether the filter ran at all.

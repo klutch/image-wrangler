@@ -329,6 +329,17 @@ var _upscale_image: Image
 ## the rerun landed, which is a picture presented as this file's when it is not.
 var _upscale_source: Image
 
+## The network's answer before Sharpen was applied to it, and what it was made from.
+##
+## [b]Kept so that moving the Sharpen slider does not run the network again.[/b] Sharpen is
+## a remap of the finished picture and changes nothing the network did, so re-running it
+## would spend seconds arriving at pixels already on hand. [member _upscale_raw_key] is
+## [method Upscale.network_signature] — every setting that does not survive the slider —
+## and the source is compared by identity, exactly as [member _upscale_source] is.
+var _upscale_raw: Image
+var _upscale_raw_source: Image
+var _upscale_raw_key := ""
+
 ## Whether an upscale is running, so a change arriving mid-run cannot start a second on top
 ## of the first, and whether one asked for itself while that was true.
 var _upscale_running := false
@@ -1414,6 +1425,10 @@ func _select_mode(mode: int) -> void:
     if mode == Mode.PACKING:
         _schedule_packing()
     elif mode == Mode.UPSCALE:
+        # The kept network answer was made from the stack as it stood, and the stack can
+        # only have been edited while another tab was up — so arriving here is exactly when
+        # it stops being trustworthy.
+        _upscale_raw = null
         _schedule_upscale()
     # Which of the two Save buttons has anything to do depends on the tab, so the switch
     # itself has to say so — nothing else runs on the way in.
@@ -3621,6 +3636,18 @@ func _run_upscale_now(forced := false) -> void:
 func _run_upscale() -> void:
     var path := _current_path()
     var source := _source_image
+    var signature: String = _upscale.network_signature()
+
+    # Nothing the network cares about has moved, so what it said last time still stands and
+    # only the Sharpen remap has to run again. That is a pass over the alpha against a
+    # lookup table, which is why the slider can be dragged at all.
+    if _upscale_raw != null and _upscale_raw_source == source and _upscale_raw_key == signature:
+        _upscale_image = _upscale.sharpen_image(_upscale_raw)
+        _upscale_source = source
+        _update_preview_texture()
+        _set_upscale_status("Sharpen %.2f, on the picture already made — the network did not run again."
+                % _upscale.settings.sharpen)
+        return
 
     _set_upscale_status("Running %s through its operations..." % path.get_file())
     _preview.set_progress(0.0)
@@ -3642,12 +3669,16 @@ func _run_upscale() -> void:
         return
 
     var started := Time.get_ticks_msec()
-    var result: Image = _upscale.process_image(staged)
+    # The network's answer on its own, so it can be kept and re-sharpened. Sharpen is
+    # applied below rather than by process_image, which does both in one call for everything
+    # that is not this preview.
+    var result: Image = _upscale.upscale_only(staged)
     if _shutting_down:
         return
 
     var failure: String = _upscale.last_error
     if not failure.is_empty():
+        _upscale_raw = null
         _upscale_image = null
         _upscale_source = null
         _update_preview_texture()
@@ -3655,6 +3686,10 @@ func _run_upscale() -> void:
         _set_status(failure)
         return
 
+    _upscale_raw = result
+    _upscale_raw_source = source
+    _upscale_raw_key = signature
+    result = _upscale.sharpen_image(result)
     _upscale_image = result
     _upscale_source = source
     _update_preview_texture()

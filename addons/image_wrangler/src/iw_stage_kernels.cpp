@@ -4,6 +4,7 @@
 #include "iw_pixel_math.h"
 
 #include <algorithm>
+#include <cstring>
 #include <vector>
 
 using namespace godot;
@@ -28,6 +29,8 @@ void IWStageKernels::_bind_methods() {
 			&IWStageKernels::rasterise_regions);
 	ClassDB::bind_static_method("IWStageKernels",
 			D_METHOD("clip_alpha", "ctx", "low", "high"), &IWStageKernels::clip_alpha);
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("sharpen_alpha", "image", "amount"), &IWStageKernels::sharpen_alpha);
 	ClassDB::bind_static_method("IWStageKernels",
 			D_METHOD("guided_refine", "coverage", "guide", "width", "height", "radius"),
 			&IWStageKernels::guided_refine);
@@ -218,6 +221,75 @@ void IWStageKernels::clip_alpha(const Ref<IWPipelineContext> &ctx, double low, d
 	for (int64_t i = 0; i < count; i++) {
 		out[i] = iw::narrow(iw::clampf((iw::widen(out[i]) - low) / span, 0.0, 1.0));
 	}
+}
+
+// Tightens the antialiased alpha ramp round an object, without moving the edge.
+//
+// [b]A contrast stretch of the alpha about half coverage, and of nothing else.[/b] The
+// partial values between clear and solid *are* the antialiasing, so narrowing the band they
+// occupy is the whole of the job — there is no neighbour to consult and nothing spatial to
+// do, which is what separates this from a sharpen filter in the usual sense. Those work on
+// colour and invent contrast; this one only decides how quickly the existing edge stops
+// being there.
+//
+// [b]Pivoting on half is what keeps the silhouette still.[/b] The contour dividing "more
+// than half covered" from "less" is the only one a stretch about that point cannot move, so
+// an object neither swells nor shrinks as the slider is pushed — which it would under a
+// threshold set anywhere else, and the swelling would be the first thing anyone noticed.
+//
+// At 0 nothing changes. At 1 the ramp collapses to a hard cut at half coverage: an edge
+// with no antialiasing left in it, which is occasionally exactly what a sprite wants.
+//
+// Fully clear and fully solid pixels come out as they went in at every setting. That falls
+// out of the maths rather than being special-cased — a stretch about the middle can only
+// push the two ends further past the ends, where they clamp.
+Ref<Image> IWStageKernels::sharpen_alpha(const Ref<Image> &image, double amount) {
+    ERR_FAIL_COND_V(image.is_null(), Ref<Image>());
+    const double strength = iw::clampf(amount, 0.0, 1.0);
+    if (strength <= 0.0 || image->is_empty()) {
+        return image;
+    }
+
+    const int width = image->get_width();
+    const int height = image->get_height();
+
+    PackedByteArray pixels = image->get_data();
+    if (image->get_format() != Image::FORMAT_RGBA8) {
+        Ref<Image> converted = Image::create_from_data(
+                width, height, false, image->get_format(), pixels);
+        converted->convert(Image::FORMAT_RGBA8);
+        pixels = converted->get_data();
+    }
+
+    // [b]A table of 256, because alpha is a byte.[/b] There are only 256 questions this can
+    // be asked, so every pixel would otherwise pay again for the same divide and the same
+    // rounding. On a sheet upscaled to sixteen million pixels that is the difference between
+    // a slider that follows the mouse and one that does not.
+    uint8_t curve[256];
+    const bool collapses = strength >= 1.0;
+    const double gain = collapses ? 1.0 : 1.0 / (1.0 - strength);
+    for (int i = 0; i < 256; i++) {
+        const double coverage = i / 255.0;
+        const double stretched = collapses
+                ? (coverage >= 0.5 ? 1.0 : 0.0)
+                : iw::clampf((coverage - 0.5) * gain + 0.5, 0.0, 1.0);
+        curve[i] = static_cast<uint8_t>(iw::roundi(stretched * 255.0));
+    }
+
+    const int64_t count = static_cast<int64_t>(width) * height;
+    PackedByteArray out;
+    out.resize(count * 4);
+    const uint8_t *src = pixels.ptr();
+    uint8_t *dst = out.ptrw();
+    // The colour is carried over untouched and only the alpha is rewritten, so the whole
+    // buffer goes across in one move rather than a channel at a time.
+    memcpy(dst, src, static_cast<size_t>(count) * 4);
+    for (int64_t i = 0; i < count; i++) {
+        const int64_t at = i * 4 + 3;
+        dst[at] = curve[src[at]];
+    }
+
+    return Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, out);
 }
 
 // The guided filter, guided by the distance-from-key map.

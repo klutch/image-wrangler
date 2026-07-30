@@ -170,6 +170,15 @@ func get_settings_schema() -> Array[Dictionary]:
             "tooltip": "How hard to clean the image up on the way through.\n\nOff is a different model rather than a strength of zero: it enlarges and\nleaves whatever grain it found. Reach for the stronger settings on JPEGs,\nwhere the noise is compression rather than grain, and go easy on drawn art —\nthe same pass that clears mosquito noise also flattens deliberate texture.",
         },
         {
+            "property": &"sharpen",
+            "label": "Sharpen",
+            "type": SettingType.FLOAT,
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.01,
+            "tooltip": "Tightens the antialiasing round the edge of the object, which is\nwherever the transparency is partial.\n\nThe network carries transparency across on a plain resize rather than\nthrough itself, so what comes out is a soft ramp. At 1 that ramp is gone\nand the edge is a hard cut. The object stays exactly the same size at\nevery setting.\n\nCosts nothing to change: it is applied to the finished picture, so moving\nthis does not run the network again.",
+        },
+        {
             "property": &"tta",
             "label": "TTA Mode",
             "type": SettingType.BOOL,
@@ -339,6 +348,27 @@ func output_size(source: Vector2i) -> Vector2i:
 
 # --- Running ------------------------------------------------------------
 
+## Everything that decides what network gets built, as one comparable string.
+##
+## [b]Sharpen is deliberately not in it.[/b] That is the whole point of the distinction: the
+## four settings here are baked into a loaded model and a compiled pipeline, and changing any
+## of them means opening a new upscaler. Sharpen is applied to the picture afterwards, so
+## the dock can keep the network's answer and re-sharpen it — which is what lets a slider
+## with a neural network behind it still follow the mouse.
+func network_signature() -> String:
+    return "%s|%d|%d|%s" % [model_name(), noise_level(), scale_ratio(), settings.tta]
+
+
+## Applies the Sharpen setting to [param image] and gives back the result.
+##
+## Separate from [method process_image] so the dock can re-run this on its own, against the
+## picture the network already produced. Returns [param image] itself at a setting of zero,
+## which is the identity and not worth a copy of a sixteen-megapixel sheet to express.
+func sharpen_image(image: Image) -> Image:
+    if image == null or settings.sharpen <= 0.0:
+        return image
+    return IWStageKernels.sharpen_alpha(image, settings.sharpen)
+
 ## Opens the upscaler, or reuses the one already open.
 ##
 ## [b]Reopened only when something it was opened for has changed.[/b] The model, the
@@ -355,7 +385,7 @@ func _ensure_open() -> bool:
         last_error = "No models found in %s." % MODELS_ROOT
         return false
 
-    var wanted := "%s|%d|%d|%s" % [model, noise_level(), scale_ratio(), settings.tta]
+    var wanted := network_signature()
     if _upscaler != null and _open_for == wanted:
         return true
 
@@ -389,7 +419,11 @@ func close() -> void:
     _open_for = ""
 
 
-## Enlarges [param source] and gives back the result.
+## The network's answer for [param source], before Sharpen is applied to it.
+##
+## Split out from [method process_image] so the dock can hold on to it: this is the
+## expensive half and the only half that Sharpen does not affect. See
+## [method network_signature].
 ##
 ## Returns [param source] itself when it could not run, with [member last_error] saying why.
 ## Handing back the image untouched is what lets a batch carry on past one failure, and the
@@ -398,7 +432,7 @@ func close() -> void:
 ## [b]Not interruptible.[/b] waifu2x tiles the image internally and reports nothing on the
 ## way through, so there is no checkpoint to stop at — a run is one call, and the smallest
 ## unit the dock can cancel between is a whole image.
-func process_image(source: Image) -> Image:
+func upscale_only(source: Image) -> Image:
     last_error = ""
     if source == null or source.is_empty():
         return source
@@ -410,3 +444,15 @@ func process_image(source: Image) -> Image:
         last_error = String(_upscaler.call(&"get_last_error"))
         return source
     return result
+
+
+## Enlarges [param source], sharpens the edge, and gives back the result.
+##
+## The two steps in the order they have to go in — Sharpen works on the ramp the resize
+## left, so there has to be one first. A run that failed is handed straight back rather than
+## sharpened, since what it is holding is the source image and not an answer.
+func process_image(source: Image) -> Image:
+    var result := upscale_only(source)
+    if not last_error.is_empty():
+        return result
+    return sharpen_image(result)

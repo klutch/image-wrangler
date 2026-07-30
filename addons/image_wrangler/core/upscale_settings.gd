@@ -8,10 +8,11 @@ extends Resource
 ## [PackingSettings]: a scale ratio describes what you want out of the batch rather than
 ## anything about one image. [method IWOperation.settings_are_per_image] is what says so.
 ##
-## All four are indices into the tables in [Upscale] rather than the values themselves. The
-## dock's form builder writes an index for a dropdown, and the numbers behind three of these
-## are not a range anything could slide along — the scales double and the denoise levels
-## start at minus one.
+## Three of these are indices into the tables in [Upscale] rather than the values
+## themselves. The dock's form builder writes an index for a dropdown, and the numbers
+## behind them are not a range anything could slide along — the scales double and the
+## denoise levels start at minus one. [member sharpen] is the exception and is the value
+## itself, because it is the one setting here that really is a dial.
 
 ## Which denoise strength to run, as an index into [constant Upscale.NOISE_LABELS].
 ##
@@ -31,6 +32,16 @@ extends Resource
 ## is nothing for a name to stay stable across. [method Upscale.model_name] pulls it back
 ## into range for a folder that has been added or removed while the dock was open.
 @export var model_index: int = 0
+
+## How hard to tighten the antialiasing round the object, 0 to 1.
+##
+## Zero by default, which changes nothing. The network carries transparency across on a
+## bicubic resize rather than through itself, and what that leaves is a soft ramp — right
+## for some art and too woolly for a sprite meant to read crisply against a background.
+##
+## At 1 the ramp is gone entirely and the edge is a hard cut. The object does not change
+## size at any setting; see [method IWStageKernels.sharpen_alpha].
+@export var sharpen: float = 0.0
 
 ## Runs the image eight ways — every rotation and flip — and averages the results.
 ##

@@ -102,7 +102,7 @@ you want, and they run as one pass — so a stage never sees a half-finished ima
 
 ## 📦 Batch tools
 
-These two describe the **whole batch** rather than any one image, so they sit in their own
+These three describe the **whole batch** rather than any one image, so they sit in their own
 tabs beside the stack.
 
 ### 🏷️ Rename
@@ -122,6 +122,27 @@ Lifts every separate object out of **every open image** and lays them all onto o
 | 🟪 **Original Order** | Rows again, but in the order sprites were found. The only mode where the output order means something. |
 
 The sheet can hold a size you've decided on, or double until everything fits.
+
+### 🔍 Upscale
+
+Enlarges **every open image** with [waifu2x](https://github.com/nihui/waifu2x-ncnn-vulkan),
+which invents the pixels rather than stretching them. Runs on the GPU through Vulkan.
+
+It works on what each image's **stack** produced, not on the file it came from — so a
+background you keyed out is cut against edges the source actually had, rather than against
+edges the network guessed at.
+
+| Setting | What it does |
+|:--|:--|
+| 🧠 **Model** | Which trained network. Two are for drawn art, one is for photographs; the line under the dropdown says which is which. |
+| 📐 **Scale** | 1x to 32x. The network doubles, so anything past 2x is that pass run again on its own output. |
+| 🧹 **Denoise** | Off, or four strengths. Off is a different model, not a strength of zero. |
+| ✂️ **Sharpen** | Tightens the antialiasing round the object, where the transparency is partial. At 1 the edge is a hard cut. The object never changes size. |
+| 🔄 **TTA Mode** | Runs each image eight ways and averages them. Eight times the work for a difference you have to look for. |
+
+Alpha survives: it rides across on a bicubic resize beside the network, so a keyed sprite
+comes out keyed. **Sharpen** is what tidies the ramp that leaves behind, and costs nothing to
+adjust — it works on the finished picture, so moving it doesn't run the network again.
 
 ---
 
@@ -153,6 +174,21 @@ The sheet can hold a size you've decided on, or double until everything fits.
 - **Windows x86_64** — that's what the prebuilt binaries in `addons/image_wrangler/bin/` are for.
   Other platforms need a build from source (`scons` in the addon folder, with the `godot-cpp`
   submodule checked out).
+- **A Vulkan driver**, for the Upscale tab only. Without one it falls back to the processor
+  and takes roughly a hundred times as long; the tab says so when it does. Nothing else here
+  needs a GPU.
+
+Building the extension yourself needs one extra step before `scons`, because waifu2x ships as
+source rather than as binaries:
+
+```
+cd addons/image_wrangler
+python tools/build_ncnn.py     # once, needs CMake
+scons target=editor
+```
+
+Skip it and everything still builds — the Upscale tab is simply left out and says what to run.
+See [`thirdparty/waifu2x-ncnn-vulkan/README-vendored.md`](addons/image_wrangler/thirdparty/waifu2x-ncnn-vulkan/README-vendored.md).
 
 ---
 
@@ -160,6 +196,6 @@ The sheet can hold a size you've decided on, or double until everything fits.
 
 MIT — see [`addons/image_wrangler/LICENSE`](addons/image_wrangler/LICENSE).
 
-Third-party components (Intel Open Image Denoise, oneTBB, godot-cpp, and the editor icon set)
-carry their own licenses, listed in
+Third-party components (Intel Open Image Denoise, oneTBB, waifu2x-ncnn-vulkan, ncnn, glslang,
+godot-cpp, and the editor icon set) carry their own licenses, listed in
 [`addons/image_wrangler/THIRD-PARTY-NOTICES.md`](addons/image_wrangler/THIRD-PARTY-NOTICES.md).
