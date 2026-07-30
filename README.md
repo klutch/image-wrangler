@@ -10,8 +10,7 @@
 
 > ### 🤖 A note before anything else
 > **Claude was used extensively to build this addon.** The code, the comments and this
-> README were written with heavy help from Anthropic's Claude. If that matters to you,
-> now you know before you scroll any further.
+> README were written with heavy help from Anthropic's Claude.
 
 ---
 
