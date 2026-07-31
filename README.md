@@ -180,7 +180,8 @@ adjust — it works on the finished picture, so moving it doesn't run the networ
   needs a GPU.
 
 Building the extension yourself needs one extra step before `scons`, because the inference
-library both upscalers run on ships as source rather than as binaries:
+library both upscalers run on ships as source rather than as binaries. That source is
+committed here, so a plain clone already has it — nothing to fetch:
 
 ```
 cd addons/image_wrangler

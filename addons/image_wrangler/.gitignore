@@ -5,9 +5,14 @@ bin/*.lib
 bin/~*
 tests/
 
+# Bytecode, left behind whenever Python reads tools/build_ncnn.py — running it, or merely
+# importing it to check something. One of these was committed by accident once.
+__pycache__/
+*.pyc
+
 # What tools/build_ncnn.py makes. Hundreds of megabytes of static library, and every byte
-# of it derivable from the waifu2x checkout beside it — the built DLL in bin/ is what gets
-# committed, exactly as it is for Open Image Denoise.
+# of it derivable from the vendored ncnn source beside it — the built DLL in bin/ is what
+# gets committed, exactly as it is for Open Image Denoise.
 thirdparty/ncnn/
 thirdparty/ncnn-build/
 thirdparty/ncnn-shaders/

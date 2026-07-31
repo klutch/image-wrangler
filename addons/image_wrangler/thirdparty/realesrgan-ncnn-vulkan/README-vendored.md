@@ -99,16 +99,14 @@ switches most of them off. Four that waifu2x does not use had to be turned on:
 | `prelu` | `realesr-animevideov3`, as its activation |
 | `concat` | the two `x4plus` models, for their dense blocks |
 
-That edits the waifu2x tree, so it is kept as `../waifu2x-realesrgan-layers.patch` beside
-the TTA one and reapplied the same way:
+That edits the waifu2x tree, so it is recorded as `../waifu2x-realesrgan-layers.patch`
+beside the TTA one. **Both are already applied** — that tree is committed to this repository
+rather than checked out, so nothing needs reapplying and the patches are kept only as a
+record of what diverges from upstream. See `../waifu2x-ncnn-vulkan/README-vendored.md`.
 
-```
-git -C thirdparty/waifu2x-ncnn-vulkan apply ../waifu2x-realesrgan-layers.patch
-```
-
-`tools/build_ncnn.py` reads that file for its `option()` lines, so turning a layer on there
-is the whole of it — but **ncnn has to be rebuilt afterwards**, and a layer left out does
-not fail the build. It fails at model load, inside ncnn, with a message about an unknown
+`tools/build_ncnn.py` reads `deps_ncnn.cmake` for its `option()` lines, so turning a layer on
+there is the whole of it — but **ncnn has to be rebuilt afterwards**, and a layer left out
+does not fail the build. It fails at model load, inside ncnn, with a message about an unknown
 layer type.
 
 ## No separate build step

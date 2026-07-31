@@ -7,7 +7,7 @@ Run once, from the addon root (addons/image_wrangler/):
 
 It puts headers in thirdparty/ncnn/include/ and every static library the build produced
 in thirdparty/ncnn/lib/. SConstruct picks both up from there and knows nothing about
-CMake. Rerun it after updating the waifu2x submodule; nothing else needs it.
+CMake. Rerun it after the vendored ncnn source changes; nothing else needs it.
 
 Needs CMake 3.10 or newer and a C++ compiler on PATH. It does **not** need the Vulkan
 SDK: ncnn is configured with NCNN_SIMPLEVK, which means it carries its own Vulkan
@@ -18,7 +18,7 @@ more, and the shader work on top of that is not free either.
 
 Why a separate build at all: ncnn is a CMake project that generates a dozen headers at
 configure time and compiles every GLSL shader it ships. Porting that into SConstruct
-would mean owning a copy of it that goes stale on the next submodule bump. So it is built
+would mean owning a copy of it that goes stale the next time ncnn is updated. So it is built
 the way upstream builds it, once, and what comes out is vendored exactly as Intel's
 prebuilt Open Image Denoise drop is — see thirdparty/oidn/README-vendored.md for the
 pattern this follows.
@@ -51,7 +51,8 @@ def options_from_deps_cmake():
     inside ncnn, with a message about a layer type it has never heard of.
     """
     if not os.path.isfile(DEPS_NCNN):
-        raise SystemExit("Could not find %s. Is the submodule checked out?" % DEPS_NCNN)
+        raise SystemExit("Could not find %s. It is committed to this repository, so a "
+                "missing file means the checkout is incomplete." % DEPS_NCNN)
 
     with open(DEPS_NCNN, "r", encoding="utf-8") as handle:
         text = handle.read()
@@ -178,8 +179,9 @@ def main():
 
     if not os.path.isfile(os.path.join(NCNN_SOURCE, "CMakeLists.txt")):
         raise SystemExit(
-                "ncnn is not checked out at %s.\n"
-                "Run: git submodule update --init --recursive" % NCNN_SOURCE)
+                "No ncnn source at %s.\n"
+                "It is committed to this repository rather than fetched, so this means the\n"
+                "checkout is incomplete." % NCNN_SOURCE)
 
     if shutil.which("cmake") is None:
         raise SystemExit("CMake is not on PATH. Install it from https://cmake.org/download/")

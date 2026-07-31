@@ -1,9 +1,7 @@
-The trained models in `waifu2x-ncnn-vulkan/models/` come from the waifu2x project
+The trained models in this folder come from the waifu2x project
 (<https://github.com/nagadomi/waifu2x>) and ship under its licence, below. They are not
-covered by `waifu2x-ncnn-vulkan/LICENSE`, which is the ncnn port's and a different author's.
-
-This text sits beside that folder rather than inside it for the same reason the two patches
-do: the folder is a checkout of upstream, so a file added to it would not be kept.
+covered by the licence in the parent folder, which is the ncnn port's and a different
+author's.
 
 The MIT License
 

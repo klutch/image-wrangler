@@ -76,7 +76,7 @@ if env.get("is_msvc", False):
 #
 # Vendored the same way OIDN is, and for the same reason: ncnn is a CMake project that
 # generates a dozen headers at configure time and compiles every shader it ships, and a
-# copy of all that living in this file would go stale on the next submodule bump. So it is
+# copy of all that living in this file would go stale the next time ncnn is updated. So it is
 # built once by tools/build_ncnn.py and what comes out lands in thirdparty/ncnn/. Unlike
 # OIDN there is no prebuilt drop to take — upstream ships source — so that script is a
 # prerequisite rather than a convenience. See thirdparty/waifu2x-ncnn-vulkan/README-

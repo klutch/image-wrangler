@@ -55,8 +55,9 @@ Licence text: `thirdparty/waifu2x-ncnn-vulkan/LICENSE`
 
 Source and releases: <https://github.com/nihui/waifu2x-ncnn-vulkan>
 
-**Modified, twice.** Both changes are kept as patches alongside the tree and marked in the
-source with `IMAGE WRANGLER:` comments.
+**Modified, twice.** Both changes are already applied to the source here and marked in it
+with `IMAGE WRANGLER:` comments; the patches alongside the tree are a record of what
+diverges from upstream, not a step to run.
 
 `thirdparty/waifu2x-tta-shader-cache.patch` fixes a bug in `src/waifu2x.cpp`: its
 compiled-shader cache is a function-local static that is not keyed on TTA mode, so switching
@@ -77,13 +78,9 @@ Copyright (C) 2015 nagadomi.
 
 The models in `thirdparty/waifu2x-ncnn-vulkan/models/` are read at runtime and ship as they
 came. They are the waifu2x project's rather than the ncnn port's, and a different author's —
-so they have their own text.
+so they have their own text, beside them:
 
-That text sits *beside* the folder rather than inside it, because the folder is a checkout of
-upstream and a file added to it would not be kept. The two patches next to it are there for
-the same reason.
-
-Licence text: `thirdparty/waifu2x-models-LICENSE`
+Licence text: `thirdparty/waifu2x-ncnn-vulkan/models/LICENSE`
 
 Source: <https://github.com/nagadomi/waifu2x>
 
