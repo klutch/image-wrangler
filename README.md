@@ -198,7 +198,7 @@ and [`thirdparty/realesrgan-ncnn-vulkan/README-vendored.md`](addons/image_wrangl
 
 MIT — see [`addons/image_wrangler/LICENSE`](addons/image_wrangler/LICENSE).
 
-Third-party components (Intel Open Image Denoise, oneTBB, waifu2x-ncnn-vulkan,
-Real-ESRGAN-ncnn-vulkan, ncnn, glslang, godot-cpp, and the editor icon set) carry their own
-licenses, listed in
+Third-party components (Intel Open Image Denoise, oneTBB, waifu2x-ncnn-vulkan and
+Real-ESRGAN-ncnn-vulkan with their trained models, ncnn, glslang, godot-cpp, and the editor
+icon set) carry their own licenses, listed in
 [`addons/image_wrangler/THIRD-PARTY-NOTICES.md`](addons/image_wrangler/THIRD-PARTY-NOTICES.md).

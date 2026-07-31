@@ -2,7 +2,8 @@
 
 Upstream from <https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan>. MIT — see `LICENSE`.
 The trained models are the Real-ESRGAN project's
-(<https://github.com/xinntao/Real-ESRGAN>), BSD-3-Clause.
+(<https://github.com/xinntao/Real-ESRGAN>) and are BSD-3-Clause, not MIT — their own text
+sits beside them in `models/LICENSE`.
 
 Used by the Upscale tab as the second choice of engine, beside waifu2x. `src/iw_realesrgan.cpp`
 is the only code that touches it.

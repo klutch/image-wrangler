@@ -49,8 +49,7 @@ Copyright (c) 2019 nihui.
 
 One of the two engines the Upscale tab offers. One source file from it, `src/waifu2x.cpp`,
 is compiled into `image_wrangler.windows.*.dll`, along with its four GLSL compute shaders.
-The trained models in `thirdparty/waifu2x-ncnn-vulkan/models/` are read at runtime and ship
-as they came.
+The models it reads are a separate matter and have their own entry below.
 
 Licence text: `thirdparty/waifu2x-ncnn-vulkan/LICENSE`
 
@@ -72,8 +71,21 @@ Past that, `src/iw_waifu2x.cpp` calls the `Waifu2x` class and reimplements the t
 its command-line front end makes — which model file a noise level and ratio resolve to, and
 how a ratio above 2 is reached. See `thirdparty/waifu2x-ncnn-vulkan/README-vendored.md`.
 
-The models are the waifu2x project's, originally by nagadomi
-(<https://github.com/nagadomi/waifu2x>), MIT.
+## waifu2x trained models — MIT
+
+Copyright (C) 2015 nagadomi.
+
+The models in `thirdparty/waifu2x-ncnn-vulkan/models/` are read at runtime and ship as they
+came. They are the waifu2x project's rather than the ncnn port's, and a different author's —
+so they have their own text.
+
+That text sits *beside* the folder rather than inside it, because the folder is a checkout of
+upstream and a file added to it would not be kept. The two patches next to it are there for
+the same reason.
+
+Licence text: `thirdparty/waifu2x-models-LICENSE`
+
+Source: <https://github.com/nagadomi/waifu2x>
 
 ## Real-ESRGAN-ncnn-vulkan — MIT
 
@@ -94,9 +106,17 @@ was added, which upstream has none of. Every change is marked in the source with
 `IMAGE WRANGLER:` comments and listed in
 `thirdparty/realesrgan-ncnn-vulkan/README-vendored.md`.
 
-The trained models in `thirdparty/realesrgan-ncnn-vulkan/models/` are read at runtime and
-ship as they came. They are the Real-ESRGAN project's
-(<https://github.com/xinntao/Real-ESRGAN>), BSD-3-Clause, copyright (c) 2021 Xintao Wang.
+## Real-ESRGAN trained models — BSD-3-Clause
+
+Copyright (c) 2021, Xintao Wang. All rights reserved.
+
+The models in `thirdparty/realesrgan-ncnn-vulkan/models/` are read at runtime and ship as
+they came. They are the Real-ESRGAN project's rather than the ncnn wrapper's, and carry a
+different licence to it — so they have their own text, beside them:
+
+Licence text: `thirdparty/realesrgan-ncnn-vulkan/models/LICENSE`
+
+Source: <https://github.com/xinntao/Real-ESRGAN>
 
 ## ncnn — BSD-3-Clause
 
