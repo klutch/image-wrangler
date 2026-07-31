@@ -15,8 +15,8 @@
 // list through it, and closes it — which is also why `close` exists rather than being left
 // to the destructor.
 //
-// The Vulkan instance underneath is process-wide and outlives any one of these; see
-// `shutdown`.
+// The Vulkan instance underneath is process-wide, shared with [IWRealESRGAN], and outlives
+// any one of these; see `iw_ncnn_instance.h`.
 
 #include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -84,18 +84,7 @@ public:
     // Why the last call failed, or empty when it did not.
     String get_last_error() const;
 
-    // Tears down the process-wide Vulkan instance. Called once, from the extension's
-    // terminator.
-    //
-    // Stands down while any upscaler is still open: ncnn's teardown frees the device
-    // every live `Waifu2x` still holds a pointer into. Leaking it instead costs nothing —
-    // the process is on its way out, and the driver reclaims it.
-    static void shutdown();
-
 private:
-    // Brings the Vulkan instance up on first use, and remembers whether it came.
-    static bool ensure_gpu_instance();
-
     // Whether [param scale] is one of the ratios waifu2x accepts.
     static bool is_supported_scale(int64_t scale);
 

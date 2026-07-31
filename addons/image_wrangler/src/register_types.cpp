@@ -5,7 +5,15 @@
 #include "iw_pipeline_context.h"
 #include "iw_pixel_math.h"
 #include "iw_stage_kernels.h"
+
+// The two upscalers are left out of a build that has not had ncnn made for it, which is the
+// ordinary state of a fresh checkout — see tools/build_ncnn.py. SConstruct defines this
+// when it has one to link against, and the Upscale tab tests for the classes at runtime.
+#ifdef IW_HAVE_NCNN
+#include "iw_ncnn_instance.h"
+#include "iw_realesrgan.h"
 #include "iw_waifu2x.h"
+#endif
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/defs.hpp>
@@ -25,16 +33,22 @@ void initialize_image_wrangler(ModuleInitializationLevel p_level) {
     GDREGISTER_CLASS(IWCompose);
     GDREGISTER_CLASS(IWPipelineContext);
     GDREGISTER_CLASS(IWStageKernels);
+#ifdef IW_HAVE_NCNN
     GDREGISTER_CLASS(IWWaifu2x);
+    GDREGISTER_CLASS(IWRealESRGAN);
+#endif
 }
 
 void uninitialize_image_wrangler(ModuleInitializationLevel p_level) {
     if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
         return;
     }
-    // The one class here holding something process-wide. Everything else is either a
-    // static kernel or a Resource the engine is already taking apart.
-    IWWaifu2x::shutdown();
+#ifdef IW_HAVE_NCNN
+    // The one thing here that is process-wide: the Vulkan instance both upscalers run on.
+    // Everything else is either a static kernel or a Resource the engine is already taking
+    // apart.
+    iw_ncnn::shutdown();
+#endif
 }
 
 extern "C" {

@@ -1,5 +1,7 @@
 #include "iw_waifu2x.h"
 
+#include "iw_ncnn_instance.h"
+
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/variant/variant.hpp>
 
@@ -34,16 +36,6 @@ struct TileLadder {
 
 constexpr TileLadder CUNET_TILES[] = {{2600, 400}, {740, 200}, {250, 100}, {0, 32}};
 constexpr TileLadder UPCONV_TILES[] = {{1900, 400}, {550, 200}, {190, 100}, {0, 32}};
-
-// Whether the Vulkan instance has been asked for, and whether it came.
-//
-// Process-wide because ncnn's is: create_gpu_instance enumerates the physical devices once
-// and every VulkanDevice handed out afterwards points into that enumeration.
-bool s_instance_tried = false;
-bool s_instance_ok = false;
-
-// How many upscalers are open. The instance must outlive every one of them.
-int s_open_count = 0;
 
 // Whether [param model_dir] ends in [param name], which is how upstream tells its three
 // model directories apart.
@@ -99,30 +91,8 @@ IWWaifu2x::~IWWaifu2x() {
     close();
 }
 
-bool IWWaifu2x::ensure_gpu_instance() {
-    if (s_instance_tried) {
-        return s_instance_ok;
-    }
-    s_instance_tried = true;
-    // Zero is ncnn's success. A machine with no Vulkan driver reports the failure on
-    // stderr itself, which is why nothing is pushed here — the caller turns this into a
-    // line on the dock instead.
-    s_instance_ok = ncnn::create_gpu_instance() == 0 && ncnn::get_gpu_count() > 0;
-    return s_instance_ok;
-}
-
-void IWWaifu2x::shutdown() {
-    // See the header: freeing the instance out from under a live device is a crash, and
-    // the process is ending anyway.
-    if (s_instance_ok && s_open_count == 0) {
-        ncnn::destroy_gpu_instance();
-        s_instance_ok = false;
-        s_instance_tried = false;
-    }
-}
-
 bool IWWaifu2x::has_gpu() const {
-    return ensure_gpu_instance();
+    return iw_ncnn::ensure_instance();
 }
 
 bool IWWaifu2x::is_supported_scale(int64_t scale) {
@@ -148,7 +118,7 @@ int IWWaifu2x::prepadding_for(const String &model_dir, int64_t noise, int64_t sc
 }
 
 int IWWaifu2x::tile_size_for(const String &model_dir) {
-    if (!s_instance_ok) {
+    if (!iw_ncnn::ensure_instance()) {
         // The CPU path has no video memory to budget against, and upstream fixes it here.
         return 400;
     }
@@ -202,7 +172,7 @@ Error IWWaifu2x::open(const String &model_dir, int64_t noise, int64_t scale, boo
         return ERR_FILE_NOT_FOUND;
     }
 
-    const bool on_gpu = ensure_gpu_instance();
+    const bool on_gpu = iw_ncnn::ensure_instance();
     const int gpu_id = on_gpu ? ncnn::get_default_gpu_index() : -1;
 
     // Constructed only now, and only because everything above passed. Upstream's
@@ -229,7 +199,7 @@ Error IWWaifu2x::open(const String &model_dir, int64_t noise, int64_t scale, boo
 #endif
 
     scale_factor = static_cast<int>(scale);
-    s_open_count += 1;
+    iw_ncnn::retain();
     return OK;
 }
 
@@ -239,7 +209,7 @@ void IWWaifu2x::close() {
     }
     delete worker;
     worker = nullptr;
-    s_open_count -= 1;
+    iw_ncnn::release();
 }
 
 bool IWWaifu2x::is_open() const {

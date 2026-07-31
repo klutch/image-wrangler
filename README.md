@@ -125,8 +125,8 @@ The sheet can hold a size you've decided on, or double until everything fits.
 
 ### 🔍 Upscale
 
-Enlarges **every open image** with [waifu2x](https://github.com/nihui/waifu2x-ncnn-vulkan),
-which invents the pixels rather than stretching them. Runs on the GPU through Vulkan.
+Enlarges **every open image** with a trained network, which invents the pixels rather than
+stretching them. Runs on the GPU through Vulkan.
 
 It works on what each image's **stack** produced, not on the file it came from — so a
 background you keyed out is cut against edges the source actually had, rather than against
@@ -134,9 +134,10 @@ edges the network guessed at.
 
 | Setting | What it does |
 |:--|:--|
-| 🧠 **Model** | Which trained network. Two are for drawn art, one is for photographs; the line under the dropdown says which is which. |
-| 📐 **Scale** | 1x to 32x. The network doubles, so anything past 2x is that pass run again on its own output. |
-| 🧹 **Denoise** | Off, or four strengths. Off is a different model, not a strength of zero. |
+| ⚙️ **Engine** | [waifu2x](https://github.com/nihui/waifu2x-ncnn-vulkan) or [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan). waifu2x doubles and can denoise; Real-ESRGAN goes 2x–4x in one pass, invents more detail, and has no denoising. The settings below change with it. |
+| 🧠 **Model** | Which trained network, from the engine's own set. Most are for drawn art, one of each is for photographs; the line under the dropdown says which is which. |
+| 📐 **Scale** | 1x to 32x on waifu2x, which doubles — anything past 2x is that pass run again on its own output. On Real-ESRGAN, whichever ratios the model ships: 2x, 3x and 4x for `realesr-animevideov3`, and 4x only for the two `x4plus` models. |
+| 🧹 **Denoise** | waifu2x only. Off, or four strengths. Off is a different model, not a strength of zero. |
 | ✂️ **Sharpen** | Tightens the antialiasing round the object, where the transparency is partial. At 1 the edge is a hard cut. The object never changes size. |
 | 🔄 **TTA Mode** | Runs each image eight ways and averages them. Eight times the work for a difference you have to look for. |
 
@@ -178,8 +179,8 @@ adjust — it works on the finished picture, so moving it doesn't run the networ
   and takes roughly a hundred times as long; the tab says so when it does. Nothing else here
   needs a GPU.
 
-Building the extension yourself needs one extra step before `scons`, because waifu2x ships as
-source rather than as binaries:
+Building the extension yourself needs one extra step before `scons`, because the inference
+library both upscalers run on ships as source rather than as binaries:
 
 ```
 cd addons/image_wrangler
@@ -188,7 +189,8 @@ scons target=editor
 ```
 
 Skip it and everything still builds — the Upscale tab is simply left out and says what to run.
-See [`thirdparty/waifu2x-ncnn-vulkan/README-vendored.md`](addons/image_wrangler/thirdparty/waifu2x-ncnn-vulkan/README-vendored.md).
+See [`thirdparty/waifu2x-ncnn-vulkan/README-vendored.md`](addons/image_wrangler/thirdparty/waifu2x-ncnn-vulkan/README-vendored.md)
+and [`thirdparty/realesrgan-ncnn-vulkan/README-vendored.md`](addons/image_wrangler/thirdparty/realesrgan-ncnn-vulkan/README-vendored.md).
 
 ---
 
@@ -196,6 +198,7 @@ See [`thirdparty/waifu2x-ncnn-vulkan/README-vendored.md`](addons/image_wrangler/
 
 MIT — see [`addons/image_wrangler/LICENSE`](addons/image_wrangler/LICENSE).
 
-Third-party components (Intel Open Image Denoise, oneTBB, waifu2x-ncnn-vulkan, ncnn, glslang,
-godot-cpp, and the editor icon set) carry their own licenses, listed in
+Third-party components (Intel Open Image Denoise, oneTBB, waifu2x-ncnn-vulkan,
+Real-ESRGAN-ncnn-vulkan, ncnn, glslang, godot-cpp, and the editor icon set) carry their own
+licenses, listed in
 [`addons/image_wrangler/THIRD-PARTY-NOTICES.md`](addons/image_wrangler/THIRD-PARTY-NOTICES.md).

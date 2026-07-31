@@ -72,7 +72,7 @@ if env.get("is_msvc", False):
     # godot-cpp defaults debug_symbols=no in any case.
     env.Append(LINKFLAGS=["/IGNORE:4098", "/IGNORE:4099"])
 
-# waifu2x, for the Upscale tab.
+# waifu2x and Real-ESRGAN, for the Upscale tab.
 #
 # Vendored the same way OIDN is, and for the same reason: ncnn is a CMake project that
 # generates a dozen headers at configure time and compiles every shader it ships, and a
@@ -82,14 +82,23 @@ if env.get("is_msvc", False):
 # prerequisite rather than a convenience. See thirdparty/waifu2x-ncnn-vulkan/README-
 # vendored.md.
 #
+# One ncnn serves both networks; only the two small network classes and their shaders are
+# per-project. See thirdparty/realesrgan-ncnn-vulkan/README-vendored.md.
+#
 # **Absent, the whole feature is left out and the rest of the addon builds as before.**
-# The Upscale tab tests for the class at runtime and says what to run when it is missing,
-# so a checkout that has not been through the script is a working addon with one tab
-# switched off rather than a build that fails.
+# The Upscale tab tests for the classes at runtime and says what to run when they are
+# missing, so a checkout that has not been through the script is a working addon with one
+# tab switched off rather than a build that fails.
 NCNN_PREFIX = "thirdparty/ncnn"
 WAIFU2X_SRC = "thirdparty/waifu2x-ncnn-vulkan/src"
-# Where the four preprocessed shaders go. Not in src/, which is globbed.
+REALESRGAN_SRC = "thirdparty/realesrgan-ncnn-vulkan/src"
+# Where the preprocessed shaders go. Not in src/, which is globbed.
 SHADER_DIR = "thirdparty/ncnn-shaders"
+
+# The wrappers, which are ours but include ncnn's headers and so cannot be built under the
+# flags the rest of src/ uses. Taken out of the glob either way — when ncnn is missing they
+# are dropped, and when it is there they are built in their own environment below.
+NCNN_WRAPPERS = ["iw_ncnn_instance.cpp", "iw_waifu2x.cpp", "iw_realesrgan.cpp"]
 
 
 
@@ -140,41 +149,52 @@ if have_ncnn:
     env.Append(BUILDERS={"PreprocessShader": Builder(action=preprocess_shader)})
 
     shader_headers = []
-    for shader in ["waifu2x_preproc", "waifu2x_postproc",
-                   "waifu2x_preproc_tta", "waifu2x_postproc_tta"]:
-        shader_headers += env.PreprocessShader(
-            "{}/{}.comp.hex.h".format(SHADER_DIR, shader),
-            "{}/{}.comp".format(WAIFU2X_SRC, shader),
-        )
+    for source_dir, shaders in [
+        (WAIFU2X_SRC, ["waifu2x_preproc", "waifu2x_postproc",
+                       "waifu2x_preproc_tta", "waifu2x_postproc_tta"]),
+        (REALESRGAN_SRC, ["realesrgan_preproc", "realesrgan_postproc",
+                          "realesrgan_preproc_tta", "realesrgan_postproc_tta"]),
+    ]:
+        for shader in shaders:
+            shader_headers += env.PreprocessShader(
+                "{}/{}.comp.hex.h".format(SHADER_DIR, shader),
+                "{}/{}.comp".format(source_dir, shader),
+            )
 
-    # Its own environment, because upstream's file is not written to this project's
-    # standards and there is no reason it should be. Anything added here would otherwise
+    # Its own environment, because upstream's files are not written to this project's
+    # standards and there is no reason they should be. Anything added here would otherwise
     # apply to every kernel in src/ as well.
-    waifu2x_env = env.Clone()
-    waifu2x_env.Append(CPPPATH=[
+    ncnn_env = env.Clone()
+    ncnn_env.Append(CPPPATH=[
         NCNN_PREFIX + "/include",
         NCNN_PREFIX + "/include/ncnn",
         WAIFU2X_SRC,
+        REALESRGAN_SRC,
         SHADER_DIR,
     ])
+    # What register_types.cpp tests to decide whether the two classes exist to register.
+    # On the whole environment rather than this one, since that file is in the plain glob.
+    env.Append(CPPDEFINES=["IW_HAVE_NCNN"])
 
-    # The object lands in src/ beside the ones the glob above produced, rather than in the
-    # waifu2x checkout — a build must not leave artefacts inside somebody else's repository,
-    # where they show up as untracked files in a tree nobody edits.
+    # The objects land in src/ beside the ones the glob above produced, rather than in the
+    # vendored checkouts — a build must not leave artefacts inside somebody else's
+    # repository, where they show up as untracked files in a tree nobody edits.
     #
     # Named without an extension so SCons appends the one godot-cpp set up, which already
     # carries the platform and target — writing it out here would append it twice.
-    waifu2x_object = waifu2x_env.SharedObject(
-        "src/waifu2x", "{}/waifu2x.cpp".format(WAIFU2X_SRC)
-    )
-    Depends(waifu2x_object, shader_headers)
-    sources += waifu2x_object
+    for name, path in [("waifu2x", "{}/waifu2x.cpp".format(WAIFU2X_SRC)),
+                       ("realesrgan", "{}/realesrgan.cpp".format(REALESRGAN_SRC))]:
+        network_object = ncnn_env.SharedObject("src/" + name, path)
+        Depends(network_object, shader_headers)
+        sources += network_object
 
-    # And the wrapper, which is ours but includes ncnn's headers and upstream's class, so
-    # it wants the same include path. Taken out of the glob and built here instead.
+    # And the wrappers, which are ours but include ncnn's headers and the classes above, so
+    # they want the same include path. Taken out of the glob and built here instead.
     sources = [source for source in sources
-               if os.path.basename(str(source)) != "iw_waifu2x.cpp"]
-    sources += waifu2x_env.SharedObject("src/iw_waifu2x", "src/iw_waifu2x.cpp")
+               if os.path.basename(str(source)) not in NCNN_WRAPPERS]
+    for wrapper in NCNN_WRAPPERS:
+        stem = os.path.splitext(wrapper)[0]
+        sources += ncnn_env.SharedObject("src/" + stem, "src/" + wrapper)
 
     env.Append(LIBPATH=[NCNN_PREFIX + "/lib"])
     # Named by sweeping the folder rather than by listing them. A static ncnn is not
@@ -189,7 +209,7 @@ if have_ncnn:
         env.Append(LIBS=["advapi32", "user32"])
 else:
     sources = [source for source in sources
-               if os.path.basename(str(source)) != "iw_waifu2x.cpp"]
+               if os.path.basename(str(source)) not in NCNN_WRAPPERS]
     print("Image Wrangler: thirdparty/ncnn is not built, so the Upscale tab is left out.")
     print("               Run `python tools/build_ncnn.py` to build it, then build again.")
 

@@ -780,6 +780,10 @@ func _build_upscale() -> void:
             push_error("Image Wrangler: could not load operation script at %s" % UPSCALE_SCRIPT)
             return
         _upscale = script.new()
+    # Before the form is built, so the Model and Scale dropdowns are filled from the engine
+    # the settings actually name. See Upscale.sync_engine.
+    _upscale.sync_engine()
+    _upscale_form_key = _upscale_form_signature()
     SettingsBuilder.build(_upscale, _upscale_box, _on_setting_changed, _fold_state, "upscale")
 
     # Under the model dropdown for the same reason Packing's note sits under its mode
@@ -799,6 +803,23 @@ func _build_upscale() -> void:
         _set_upscale_status(blocked)
     elif not Upscale.gpu_available():
         _set_upscale_status("No Vulkan device found, so this will run on the processor. Expect minutes rather than seconds.")
+
+
+## What the Upscale form was built for, so a settings change that changes the form itself is
+## noticed. See [method _upscale_form_signature].
+var _upscale_form_key := ""
+
+
+## The two settings that decide what the Upscale form looks like rather than what it does.
+##
+## [b]Both change the options in a dropdown, which nothing else would follow.[/b] The engine
+## swaps the model list for another one and takes the Denoise row away; the model decides
+## which ratios Real-ESRGAN can offer, since each of its folders ships the networks it
+## ships. Every other setting only changes a value, and the form can carry on as it is.
+func _upscale_form_signature() -> String:
+    if _upscale == null:
+        return ""
+    return "%d|%s" % [_upscale.engine(), _upscale.model_name()]
 
 
 ## Where the model note belongs: directly after the row carrying the model dropdown. Found
@@ -3143,6 +3164,12 @@ func _on_setting_changed() -> void:
         _schedule_packing()
         return
     if _mode == Mode.UPSCALE:
+        # A setting can be the one that changes what the form itself holds, and rebuilding
+        # is the only way to follow that. Deferred because we are inside the signal of a
+        # control the rebuild is about to free.
+        if _upscale_form_signature() != _upscale_form_key:
+            _upscale_form_key = _upscale_form_signature()
+            _build_upscale.call_deferred()
         _refresh_upscale_note()
         # The one tab whose suffix follows a setting rather than naming the operation, so
         # changing the ratio has to move it. Only while the user has not typed their own;

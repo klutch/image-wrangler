@@ -1,0 +1,47 @@
+diff --git a/src/deps_ncnn.cmake b/src/deps_ncnn.cmake
+index 7fd691d..645da93 100644
+--- a/src/deps_ncnn.cmake
++++ b/src/deps_ncnn.cmake
+@@ -72,7 +72,9 @@ if(NOT USE_SYSTEM_NCNN)
+     option(WITH_LAYER_batchnorm "" OFF)
+     option(WITH_LAYER_bias "" OFF)
+     option(WITH_LAYER_bnll "" OFF)
+-    option(WITH_LAYER_concat "" OFF)
++    # IMAGE WRANGLER: on for Real-ESRGAN, which realesrgan-x4plus builds its dense blocks
++    # out of. waifu2x does not use it.
++    option(WITH_LAYER_concat "" ON)
+     option(WITH_LAYER_convolution "" ON)
+     option(WITH_LAYER_crop "" ON)
+     option(WITH_LAYER_deconvolution "" ON)
+@@ -90,7 +92,8 @@ if(NOT USE_SYSTEM_NCNN)
+     option(WITH_LAYER_mvn "" OFF)
+     option(WITH_LAYER_pooling "" ON)
+     option(WITH_LAYER_power "" OFF)
+-    option(WITH_LAYER_prelu "" OFF)
++    # IMAGE WRANGLER: on for Real-ESRGAN, which realesr-animevideov3 uses as its activation.
++    option(WITH_LAYER_prelu "" ON)
+     option(WITH_LAYER_proposal "" OFF)
+     option(WITH_LAYER_reduction "" OFF)
+     option(WITH_LAYER_relu "" ON)
+@@ -107,7 +110,9 @@ if(NOT USE_SYSTEM_NCNN)
+     option(WITH_LAYER_tile "" OFF)
+     option(WITH_LAYER_rnn "" OFF)
+     option(WITH_LAYER_lstm "" OFF)
+-    option(WITH_LAYER_binaryop "" OFF)
++    # IMAGE WRANGLER: on for Real-ESRGAN. All three of its models add the bicubic-resized
++    # input back onto the network's output with one of these.
++    option(WITH_LAYER_binaryop "" ON)
+     option(WITH_LAYER_unaryop "" OFF)
+     option(WITH_LAYER_convolutiondepthwise "" OFF)
+     option(WITH_LAYER_padding "" ON)
+@@ -136,7 +141,9 @@ if(NOT USE_SYSTEM_NCNN)
+     option(WITH_LAYER_selu "" OFF)
+     option(WITH_LAYER_hardswish "" OFF)
+     option(WITH_LAYER_noop "" OFF)
+-    option(WITH_LAYER_pixelshuffle "" OFF)
++    # IMAGE WRANGLER: on for Real-ESRGAN. realesr-animevideov3 enlarges with one of these
++    # rather than with a deconvolution.
++    option(WITH_LAYER_pixelshuffle "" ON)
+     option(WITH_LAYER_deepcopy "" OFF)
+     option(WITH_LAYER_mish "" OFF)
+     option(WITH_LAYER_statisticspooling "" OFF)
