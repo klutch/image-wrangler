@@ -31,147 +31,154 @@ var settings: RenameSettings
 
 
 func _init() -> void:
-	settings = RenameSettings.new()
+    settings = RenameSettings.new()
 
 
 func get_operation_name() -> String:
-	return "Rename"
+    return "Rename"
 
 
 func get_operation_id() -> StringName:
-	return &"rename"
+    return &"rename"
 
 
 func get_output_suffix() -> String:
-	return ""
+    return ""
 
 
 func settings_are_per_image() -> bool:
-	return false
+    return false
 
 
 func transforms_pixels() -> bool:
-	return false
+    return false
 
 
 func removes_sources() -> bool:
-	return settings.remove_old_files
+    return settings.remove_old_files
 
 
 func get_settings() -> Resource:
-	return settings
+    return settings
 
 
 func set_settings(new_settings: Resource) -> void:
-	var typed := new_settings as RenameSettings
-	if typed == null:
-		push_error("Image Wrangler: Rename was handed settings of the wrong type.")
-		return
-	settings = typed
+    var typed := new_settings as RenameSettings
+    if typed == null:
+        push_error("Image Wrangler: Rename was handed settings of the wrong type.")
+        return
+    settings = typed
 
 
 func make_settings() -> Resource:
-	return RenameSettings.new()
+    return RenameSettings.new()
 
 
 func get_settings_schema() -> Array[Dictionary]:
-	return [
-		{
-			"property": &"base_name",
-			"label": "Base Name",
-			"group": "Name",
-			"type": SettingType.STRING,
-			"tooltip": "Replaces every file's name. Leave it empty and each file keeps its own,\nwhich is what makes Find and numbering useful across a mixed batch.",
-		},
-		{
-			"property": &"find",
-			"label": "Find",
-			"group": "Name",
-			"type": SettingType.STRING,
-			"tooltip": "Text to look for in the name. Empty switches the replacement off, so an\nempty Replace With cannot quietly strip something.",
-		},
-		{
-			"property": &"replace_with",
-			"label": "Replace With",
-			"group": "Name",
-			"type": SettingType.STRING,
-			"tooltip": "What Find becomes. Empty deletes the matched text.",
-		},
-		{
-			"property": &"prefix",
-			"label": "Prefix",
-			"group": "Name",
-			"type": SettingType.STRING,
-			"tooltip": "Goes in front of the finished name, ahead of any number.",
-		},
-		{
-			"property": &"start_at",
-			"label": "Start At",
-			"group": "Numbering",
-			"type": SettingType.INT,
-			"min": 0,
-			"max": 100000,
-			"step": 1,
-			"tooltip": "Counter value for the first file in the list.",
-		},
-		{
-			"property": &"step",
-			"label": "Step",
-			"group": "Numbering",
-			"type": SettingType.INT,
-			"min": 1,
-			"max": 1000,
-			"step": 1,
-			"tooltip": "How much the counter moves per file.",
-		},
-		{
-			"property": &"digits",
-			"label": "Digits",
-			"group": "Numbering",
-			"type": SettingType.INT,
-			"min": 1,
-			"max": 8,
-			"step": 1,
-			"tooltip": "Zero-pads the counter to at least this many digits, so the names sort\ncorrectly in a file browser.",
-		},
-		{
-			"property": &"separator",
-			"label": "Separator",
-			"group": "Numbering",
-			"type": SettingType.STRING,
-			"tooltip": "Text between the name and the counter.",
-		},
-		{
-			"property": &"number_at",
-			"label": "Number At",
-			"group": "Numbering",
-			"type": SettingType.ENUM,
-			"options": ["End", "Start"],
-			"tooltip": "Which end of the name the counter goes on.",
-		},
-		{
-			"property": &"letter_case",
-			"label": "Letter Case",
-			"group": "Format",
-			"type": SettingType.ENUM,
-			"options": ["Unchanged", "lowercase", "UPPERCASE", "Title Case"],
-			"tooltip": "Applied to the whole finished name, never to the extension.",
-		},
-		{
-			"property": &"lowercase_extension",
-			"label": "Lowercase Extension",
-			"group": "Format",
-			"type": SettingType.BOOL,
-			"tooltip": "So a folder of mixed .PNG and .png files comes out consistent.",
-		},
-		{
-			"property": &"remove_old_files",
-			"label": "Remove Old Files",
-			"group": "Format",
-			"type": SettingType.BOOL,
-			"tooltip": "Delete each source once its copy has been written.\nYou are asked first, every copy is checked against its source by checksum,\nand nothing is deleted unless all of them match. The originals go to the\nsystem trash, not straight out.\n\nA matching _wrangler.json sidecar counts as part of the image: it is copied to\nthe new name and removed under the same checks.",
-		},
-	]
+    return [
+        {
+            "property": &"base_name",
+            "label": "Base Name",
+            "group": "Name",
+            "type": SettingType.STRING,
+            "tooltip": "Replaces every file's name. Leave it empty and each file keeps its own,\nwhich is what makes Find and numbering useful across a mixed batch.",
+        },
+        {
+            "property": &"find",
+            "label": "Find",
+            "group": "Name",
+            "type": SettingType.STRING,
+            "tooltip": "Text to look for in the name. Empty switches the replacement off, so an\nempty Replace With cannot quietly strip something.",
+        },
+        {
+            "property": &"replace_with",
+            "label": "Replace With",
+            "group": "Name",
+            "type": SettingType.STRING,
+            "tooltip": "What Find becomes. Empty deletes the matched text.",
+        },
+        {
+            "property": &"prefix",
+            "label": "Prefix",
+            "group": "Name",
+            "type": SettingType.STRING,
+            "tooltip": "Goes in front of the finished name, ahead of any number.",
+        },
+        {
+            "property": &"number_enabled",
+            "label": "Enable",
+            "group": "Numbering",
+            "type": SettingType.BOOL,
+            "tooltip": "Puts a counter into the finished name.\n\nOff, no number is added and the Separator goes with it — the rest of this\ngroup then does nothing.\n\nTake care with a Base Name. While a counter was compulsory it was what kept\nthe names apart; without one, a fixed base name gives every file in the\nbatch the same name and they land on top of each other.",
+        },
+        {
+            "property": &"start_at",
+            "label": "Start At",
+            "group": "Numbering",
+            "type": SettingType.INT,
+            "min": 0,
+            "max": 100000,
+            "step": 1,
+            "tooltip": "Counter value for the first file in the list.",
+        },
+        {
+            "property": &"step",
+            "label": "Step",
+            "group": "Numbering",
+            "type": SettingType.INT,
+            "min": 1,
+            "max": 1000,
+            "step": 1,
+            "tooltip": "How much the counter moves per file.",
+        },
+        {
+            "property": &"digits",
+            "label": "Digits",
+            "group": "Numbering",
+            "type": SettingType.INT,
+            "min": 1,
+            "max": 8,
+            "step": 1,
+            "tooltip": "Zero-pads the counter to at least this many digits, so the names sort\ncorrectly in a file browser.",
+        },
+        {
+            "property": &"separator",
+            "label": "Separator",
+            "group": "Numbering",
+            "type": SettingType.STRING,
+            "tooltip": "Text between the name and the counter.",
+        },
+        {
+            "property": &"number_at",
+            "label": "Number At",
+            "group": "Numbering",
+            "type": SettingType.ENUM,
+            "options": ["End", "Start"],
+            "tooltip": "Which end of the name the counter goes on.",
+        },
+        {
+            "property": &"letter_case",
+            "label": "Letter Case",
+            "group": "Format",
+            "type": SettingType.ENUM,
+            "options": ["Unchanged", "lowercase", "UPPERCASE", "Title Case"],
+            "tooltip": "Applied to the whole finished name, never to the extension.",
+        },
+        {
+            "property": &"lowercase_extension",
+            "label": "Lowercase Extension",
+            "group": "Format",
+            "type": SettingType.BOOL,
+            "tooltip": "So a folder of mixed .PNG and .png files comes out consistent.",
+        },
+        {
+            "property": &"remove_old_files",
+            "label": "Remove Old Files",
+            "group": "Format",
+            "type": SettingType.BOOL,
+            "tooltip": "Delete each source once its copy has been written.\nYou are asked first, every copy is checked against its source by checksum,\nand nothing is deleted unless all of them match. The originals go to the\nsystem trash, not straight out.\n\nA matching _wrangler.json sidecar counts as part of the image: it is copied to\nthe new name and removed under the same checks.",
+        },
+    ]
 
 
 ## The new name for one source.
@@ -182,53 +189,57 @@ func get_settings_schema() -> Array[Dictionary]:
 ##     base name (or the file's own)
 ##       -> find/replace
 ##       -> prefix, and the dock's Output suffix
-##       -> number, at whichever end
+##       -> number, at whichever end, when numbering is on
 ##       -> letter case
 ##       -> extension
 ## [/codeblock]
 func get_output_name(source_path: String, suffix: String, index: int) -> String:
-	var name := settings.base_name if not settings.base_name.is_empty() else source_path.get_file().get_basename()
+    var name := settings.base_name if not settings.base_name.is_empty() else source_path.get_file().get_basename()
 
-	# Guarded on find rather than on the pair, so clearing only Replace With is a
-	# deliberate deletion and clearing Find is an off switch.
-	if not settings.find.is_empty():
-		name = name.replace(settings.find, settings.replace_with)
+    # Guarded on find rather than on the pair, so clearing only Replace With is a
+    # deliberate deletion and clearing Find is an off switch.
+    if not settings.find.is_empty():
+        name = name.replace(settings.find, settings.replace_with)
 
-	name = settings.prefix + name + suffix
+    name = settings.prefix + name + suffix
 
-	# Always numbered: the counter is what makes a batch rename a batch rename.
-	# Its value comes from the file's position in the list, so a single run and
-	# a whole run agree on what any one file is called.
-	var counter := settings.start_at + index * settings.step
-	var digits := maxi(settings.digits, 1)
-	var number := str(absi(counter)).pad_zeros(digits)
-	if counter < 0:
-		number = "-" + number
-	if settings.number_at == RenameSettings.NumberAt.START:
-		name = number + settings.separator + name
-	else:
-		name = name + settings.separator + number
+    # The counter, when there is to be one. Its value comes from the file's position in
+    # the list, so a single run and a whole run agree on what any one file is called.
+    #
+    # [b]Switched off, the separator goes with it.[/b] It is the join between the name and
+    # the number rather than a suffix of its own, and a name left ending in an underscore
+    # with nothing after it is not what switching the numbering off was asking for.
+    if settings.number_enabled:
+        var counter := settings.start_at + index * settings.step
+        var digits := maxi(settings.digits, 1)
+        var number := str(absi(counter)).pad_zeros(digits)
+        if counter < 0:
+            number = "-" + number
+        if settings.number_at == RenameSettings.NumberAt.START:
+            name = number + settings.separator + name
+        else:
+            name = name + settings.separator + number
 
-	match settings.letter_case:
-		RenameSettings.LetterCase.LOWER:
-			name = name.to_lower()
-		RenameSettings.LetterCase.UPPER:
-			name = name.to_upper()
-		RenameSettings.LetterCase.TITLE:
-			name = name.capitalize()
+    match settings.letter_case:
+        RenameSettings.LetterCase.LOWER:
+            name = name.to_lower()
+        RenameSettings.LetterCase.UPPER:
+            name = name.to_upper()
+        RenameSettings.LetterCase.TITLE:
+            name = name.capitalize()
 
-	var extension := source_path.get_extension()
-	if settings.lowercase_extension:
-		extension = extension.to_lower()
-	if extension.is_empty():
-		return name
-	return name + "." + extension
+    var extension := source_path.get_extension()
+    if settings.lowercase_extension:
+        extension = extension.to_lower()
+    if extension.is_empty():
+        return name
+    return name + "." + extension
 
 
 ## Renaming has nothing to show in the preview — the pixels are unchanged — so
 ## the new name goes to the status bar instead.
 func describe_output(source_path: String, suffix: String, index: int) -> String:
-	var result := get_output_name(source_path, suffix, index)
-	if result == source_path.get_file():
-		return "%s — unchanged" % source_path.get_file()
-	return "%s → %s" % [source_path.get_file(), result]
+    var result := get_output_name(source_path, suffix, index)
+    if result == source_path.get_file():
+        return "%s — unchanged" % source_path.get_file()
+    return "%s → %s" % [source_path.get_file(), result]

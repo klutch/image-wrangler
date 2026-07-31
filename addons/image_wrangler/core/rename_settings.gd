@@ -30,6 +30,19 @@ enum LetterCase { UNCHANGED, LOWER, UPPER, TITLE }
 ## Goes in front of the finished name, ahead of any number.
 @export var prefix: String = ""
 
+## Whether a counter goes into the finished name at all.
+##
+## On by default, because a counter is usually the whole point of a batch rename — and
+## because it is the only thing here that guarantees the names come out different from one
+## another. Off, every other setting in this group does nothing, and so does
+## [member separator], which is the join between the name and a number that is no longer
+## there.
+##
+## [b]Worth care with a [member base_name].[/b] The two together were always safe while a
+## counter was compulsory; without one, a fixed base name gives every file in the batch the
+## same finished name and the writes land on top of each other.
+@export var number_enabled: bool = true
+
 ## Counter value for the first file in the list.
 @export var start_at: int = 1
 
@@ -37,7 +50,8 @@ enum LetterCase { UNCHANGED, LOWER, UPPER, TITLE }
 @export var step: int = 1
 
 ## Zero-pads the counter to at least this many digits, so names sort correctly in
-## a file browser. Every file is numbered by its position in the list.
+## a file browser. Every file is numbered by its position in the list, when
+## [member number_enabled] says there is to be a number.
 @export var digits: int = 3
 
 ## Which end of the name the counter goes on. See [enum NumberAt].
