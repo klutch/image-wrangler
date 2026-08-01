@@ -100,6 +100,25 @@ const MARKER_WIDTH := 1.5
 const MARKER_DASH := 5.0
 const MARKER_FILL_ALPHA := 0.14
 
+## How far round the colour wheel each tile patch steps from the one before it.
+##
+## The golden ratio's fractional part, which is what makes a walk round a circle never
+## repeat and never bunch up: any run of consecutive steps lands spread out rather than
+## clustered. A colour per tile drawn from a plain random number would do neither, and the
+## one thing these patches have to do is differ from the tile next to them — two neighbours
+## that happened to roll the same hue would read as one tile, which is the only mistake this
+## overlay can make.
+const TILE_HUE_STEP := 0.6180339887
+
+## Saturation and value every tile patch is drawn at.
+##
+## Fixed rather than rolled with the hue. Letting all three vary gives colours that differ
+## in ways the eye reads as lighting rather than as identity — a dark one looks like shadow
+## on its neighbour instead of a separate tile — where one band of brightness makes every
+## patch obviously its own thing.
+const TILE_SATURATION := 0.65
+const TILE_VALUE := 0.80
+
 ## Half-width of a polygon's draggable corner handle, in screen pixels, and how
 ## near the pointer has to be to grab one. Generous on purpose: at low zoom a
 ## whole image pixel is a fraction of a screen pixel and an exact hit would be
@@ -358,6 +377,13 @@ var _marker_enabled := PackedByteArray()
 var _marker_flooded := PackedByteArray()
 var _selected_marker := -1
 
+## Where each packed tile sits on the sheet, in image coordinates, and the colour its
+## patch is drawn in.
+##
+## Empty everywhere but the Packing tab. See [method set_tile_bounds].
+var _tiles: Array[Rect2i] = []
+var _tile_colors := PackedColorArray()
+
 ## The sweep in progress: where the button went down, and where the pointer is now.
 ## An anchor of (-1, -1) means there is no sweep.
 var _region_anchor := Vector2i(-1, -1)
@@ -544,6 +570,37 @@ func set_markers(
     _marker_enabled = enabled.duplicate()
     _marker_flooded = flooded.duplicate()
     _selected_marker = selected
+    _canvas.queue_redraw()
+
+
+## Lays a solid patch of colour under each of [param tiles], in image coordinates.
+##
+## What the Packing tab uses to say where one sprite ends and the next begins. A packed
+## sheet is the one picture here whose content cannot be read off itself: the sprites were
+## cut on their alpha, so the transparent margin around each one is invisible against the
+## transparent gap between them, and two sprites touching look like one. A patch under each
+## tile turns the margin into that tile's colour and makes both edges obvious.
+##
+## [b]Under the image rather than over it.[/b] Over would hide the sprites, which are the
+## thing being judged. Underneath, the sprite's own pixels sit on their patch and only the
+## empty parts of its rectangle take the colour — so nothing is obscured and the boundary
+## is still drawn in full.
+##
+## Pass an empty Array to clear them. Shown only while indicators are on; see
+## [member markers_visible].
+func set_tile_bounds(tiles: Array) -> void:
+    # Copied rather than aliased, for the reason the markers are: the caller's array
+    # belongs to the packing run and can change underneath us without a redraw being asked
+    # for.
+    _tiles.assign(tiles)
+    # Assigned once here rather than rolled per redraw. A tile whose colour changed every
+    # time the view was panned would be worse than no colour at all — the eye tracks these
+    # by hue, and a hue that moves is not a boundary, it is a flicker.
+    _tile_colors = PackedColorArray()
+    _tile_colors.resize(_tiles.size())
+    for i in _tiles.size():
+        _tile_colors[i] = Color.from_hsv(fmod(float(i) * TILE_HUE_STEP, 1.0),
+                TILE_SATURATION, TILE_VALUE)
     _canvas.queue_redraw()
 
 
@@ -1269,6 +1326,9 @@ func _draw_canvas() -> void:
     # ends. See the note on the property.
     if magenta_background:
         _canvas.draw_rect(frame, TRANSPARENCY_COLOR, true)
+    # Between the backdrop and the image, so each sprite lands on its own patch. See
+    # set_tile_bounds for why they go under rather than over.
+    _draw_tiles()
     if _patch_texture != null:
         _draw_image_around(_patch_region)
         _canvas.draw_texture_rect(_patch_texture, _image_rect(_patch_region), false)
@@ -1350,6 +1410,24 @@ func _draw_markers() -> void:
             # A swept rectangle is still worth outlining before a run: the user drew it,
             # and it is the one pick whose own extent is a thing they chose.
             _draw_region_marker(region, color, selected, on)
+
+
+## A solid patch of colour under every packed tile.
+##
+## Behind the indicator switch like every other overlay: it is drawn on top of the answer
+## rather than being part of it, and seeing the sheet as it will actually be is one switch
+## away. Nothing here is drawn on any tab but Packing, since nothing else sets any tiles.
+func _draw_tiles() -> void:
+    if not markers_visible or _tiles.is_empty():
+        return
+    var frame := Rect2i(Vector2i.ZERO, _image_size)
+    for i in _tiles.size():
+        var tile := _tiles[i]
+        # A sprite that did not get placed is a rectangle of no area, and one from an
+        # earlier sheet may not fit this one.
+        if tile.size.x <= 0 or tile.size.y <= 0 or not frame.intersects(tile):
+            continue
+        _canvas.draw_rect(_image_rect(tile), _tile_colors[i], true)
 
 
 ## A picked rectangle: outlined rather than filled, because what is underneath it is

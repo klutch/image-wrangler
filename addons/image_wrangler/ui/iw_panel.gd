@@ -155,6 +155,11 @@ get their shape dashed in the same way. Both sit right on top of the
 edges you are trying to judge, so turning them off is how you see the
 result on its own.
 
+On the Packing tab it lays a coloured patch under each sprite instead,
+so you can see where one ends and the next begins — a packed sheet
+cannot be read off itself, since the gap between two sprites looks the
+same as the transparent margin around either of them.
+
 It changes nothing about what is processed — only what is drawn over
 the preview."""
 
@@ -3819,7 +3824,14 @@ func _update_preview_texture() -> void:
     if _mode == Mode.PACKING:
         _preview.set_image(_packing_image)
         _preview.set_original(null)
+        # The rectangles the sheet was painted from, so the preview can say where one
+        # sprite ends and the next begins — which is the one thing a packed sheet cannot be
+        # read off itself.
+        _preview.set_tile_bounds(_packing_rects if _packing_image != null else [])
         return
+    # Every other tab clears them, since a sheet's tiles mean nothing on another image and
+    # the preview is the same control throughout.
+    _preview.set_tile_bounds([])
     # Upscale shows what it made, and no original underneath: the result is a different
     # size from the source, so there is nothing for the fade slider to lay one over the
     # other — it would be comparing two pictures that do not line up.
