@@ -4077,8 +4077,52 @@ func _refresh_green_toggle() -> void:
 func _build_normal_form(layer: IWNormalLayer, box: VBoxContainer, entry: Control,
         uid: int) -> void:
     layer.is_first = _normal_stack.stages().find(layer) == 0
-    SettingsBuilder.build(layer, box, func() -> void: entry.setting_changed.emit(entry),
-            _fold_state, "normal%d" % uid)
+    var announce := func() -> void: entry.setting_changed.emit(entry)
+    SettingsBuilder.build(layer, box, announce, _fold_state, "normal%d" % uid)
+    _bind_model_folders(box, announce)
+
+
+## Points every model folder control the form built at the preview's overlay.
+##
+## Done here rather than in the settings builder for the reason the pick controls are bound
+## here: a download reports a spinner and two bars, and the preview is the only thing that
+## draws those.
+func _bind_model_folders(node: Node, announce: Callable) -> void:
+    for child in node.get_children():
+        if child.has_method(&"bind_download"):
+            child.bind_download(_on_download_begin, _on_download_step, _on_download_done)
+            child.folder_changed.connect(announce)
+            continue
+        _bind_model_folders(child, announce)
+
+
+func _on_download_begin(title: String) -> void:
+    if _preview != null:
+        _preview.set_busy(true)
+    _set_packing_status("%s..." % title)
+
+
+## One step of a download, as a share of the whole job and a share of the part it is in.
+##
+## Two bars rather than one, the same way a run of the stack reports: the overall one says
+## how far off the end is, and the one under it says how the part named beside it is going.
+func _on_download_step(overall: float, fraction: float, label: String) -> void:
+    if _preview == null:
+        return
+    _preview.set_progress(overall)
+    _preview.set_stage_progress(fraction, label)
+
+
+func _on_download_done(message: String, ok: bool) -> void:
+    if _preview != null:
+        _preview.set_busy(false)
+    _set_packing_status(message)
+    if not ok:
+        return
+    # A model that has just arrived is a reason to work the map out again, which nothing
+    # else would notice — the setting did not move, what is behind it did.
+    _packing_normal_key = ""
+    _schedule_packing_normals()
 
 
 ## Points [IWPacking] at whatever the stack now holds.

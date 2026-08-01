@@ -46,6 +46,9 @@ enum SettingType {
     ## A list of whole objects the user picks off the preview. The property must hold
     ## an Array of [TilePick].
     EXCLUDE_TILES,
+    ## A folder holding a neural model: a path to type or browse for, a line saying what is
+    ## missing from it, and a button that fetches one. The property must hold a [String].
+    MODEL_FOLDER,
 }
 
 

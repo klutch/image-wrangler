@@ -68,10 +68,26 @@ static func is_offered() -> bool:
     return ClassDB.class_exists(&"IWNormalNet")
 
 
+## The model folder as something that can be opened, whatever was typed into it.
+##
+## Empty falls back to [method NormalNeuralSettings.default_model_dir] rather than to nothing:
+## a settings file written before this setting had a default carries an empty one, and the
+## folder it meant is the one the model goes in.
+##
+## [b]Globalised on the way out rather than on the way in.[/b] The network reads the two files
+## through the C runtime rather than through Godot, so it cannot be handed a
+## [code]res://[/code] path at all. An absolute one comes back unchanged.
+func resolved_model_dir() -> String:
+    var dir := settings.model_dir.strip_edges()
+    if dir.is_empty():
+        return NormalNeuralSettings.default_model_dir()
+    return ProjectSettings.globalize_path(dir)
+
+
 ## Whether the layer has everything it needs to actually run.
 func has_model() -> bool:
     var net := _net()
-    return net != null and net.has_model(settings.model_dir)
+    return net != null and net.has_model(resolved_model_dir())
 
 
 ## The wrapper, made once and held. Null in a build without ncnn.
@@ -93,10 +109,11 @@ func generate(sheet: Image, rects: PackedInt32Array) -> Image:
         last_error = "This build has no network to run. See tools/build_ncnn.py."
         return null
 
-    if not net.is_open() or _open_model_dir != settings.model_dir:
+    var dir := resolved_model_dir()
+    if not net.is_open() or _open_model_dir != dir:
         net.close()
-        _open_model_dir = settings.model_dir
-        if net.open(settings.model_dir) != OK:
+        _open_model_dir = dir
+        if net.open(dir) != OK:
             last_error = net.get_last_error()
             return null
 
@@ -111,7 +128,10 @@ func own_schema() -> Array[Dictionary]:
         {
             "property": &"model_dir",
             "label": "Model Folder",
-            "type": SettingType.STRING,
-            "tooltip": "The folder holding the converted model, as a path.\n\nNo model ships with this addon. Convert one to ncnn's format yourself and put\nthe .param and .bin in a folder, then paste the path here — any pair will do,\nsince nothing here knows what your model is called.\n\nUntil then this layer is offered but makes nothing, and says why.",
+            "type": SettingType.MODEL_FOLDER,
+            # What the control falls back to, and writes in, when the setting is empty. See
+            # NormalNeuralSettings.model_dir.
+            "default": NormalNeuralSettings.default_model_dir(),
+            "tooltip": "The folder holding the converted model.\n\nNo model ships with this addon. Download Latest Model fetches one into this\nfolder; otherwise convert one to ncnn's format yourself and point this at the\nfolder holding it — any .param with a .bin of the same name beside it will do,\nsince nothing here knows what your model is called.\n\nUntil then this layer is offered but makes nothing, and says why.",
         },
     ]

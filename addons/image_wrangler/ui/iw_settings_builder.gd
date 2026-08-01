@@ -13,6 +13,7 @@ const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd"
 const HSVList := preload("res://addons/image_wrangler/ui/iw_hsv_list.gd")
 const BrushList := preload("res://addons/image_wrangler/ui/iw_brush_list.gd")
 const ExcludeTilesList := preload("res://addons/image_wrangler/ui/iw_exclude_tiles.gd")
+const ModelFolder := preload("res://addons/image_wrangler/ui/iw_model_folder.gd")
 
 ## Left indent applied to the contents of a named group.
 const GROUP_INDENT := 8
@@ -110,6 +111,8 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
                 control = _build_readout(operation, label, setting)
             IWOperation.SettingType.EXCLUDE_TILES:
                 control = _build_exclude_tiles(operation, property)
+            IWOperation.SettingType.MODEL_FOLDER:
+                control = _build_model_folder(operation, property, setting)
             _:
                 control = _build_number(operation, property, label, setting, false, on_changed)
 
@@ -258,6 +261,19 @@ static func _build_exclude_tiles(operation: IWOperation, property: StringName) -
     list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     list.setup(operation, property)
     return list
+
+
+## The folder a neural model lives in, with what is wrong with it and a way to fill it.
+##
+## Left unwired like the pick controls, and for the same reason: the download reports to the
+## preview's overlay, and only the dock can reach that. See
+## [code]IWModelFolder.bind_download[/code].
+static func _build_model_folder(operation: IWOperation, property: StringName,
+        setting: Dictionary) -> Control:
+    var field := ModelFolder.new()
+    field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    field.setup(operation, property, String(setting.get("default", "")))
+    return field
 
 
 ## A line the settings work out, shown rather than edited.
@@ -483,4 +499,6 @@ static func _refresh_into(settings: Resource, node: Node) -> void:
                 (child as PolygonList).refresh()
             elif child is BrushList:
                 (child as BrushList).refresh()
+            elif child is ModelFolder:
+                (child as ModelFolder).refresh()
         _refresh_into(settings, child)
