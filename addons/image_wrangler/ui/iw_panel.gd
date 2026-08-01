@@ -1344,7 +1344,7 @@ func _build_operation_column() -> Control:
     rename_page.add_child(_rename_box)
 
     var packing_page := ScrollContainer.new()
-    packing_page.name = "Packing"
+    packing_page.name = "Export"
     packing_page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
     _modes.add_child(packing_page)
 

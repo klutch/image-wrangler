@@ -37,6 +37,12 @@ extends Resource
 ## it — so having it and not needing it is the cheaper mistake of the two.
 @export var create_lookup_table: bool = true
 
+## Which normal map is generated alongside the sheet. See [enum IWPacking.NormalMode].
+##
+## Disabled by default, and the only choice so far. It writes a file beside the sheet
+## rather than changing it, the way [member create_lookup_table] does.
+@export var normals: int = 0
+
 
 ## A copy that belongs to no image.
 ##

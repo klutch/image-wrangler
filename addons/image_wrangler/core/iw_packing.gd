@@ -78,6 +78,18 @@ const MODE_DESCRIPTIONS := [
     "Fills rows without sorting, so the sprites stay in the order they were found — image by image, and within an image top to bottom. Packs worst, and is the only mode where the order out means something.",
 ]
 
+## How a normal map is worked out for the sheet, if at all.
+enum NormalMode {
+    ## No normal map is written.
+    DISABLED,
+}
+
+## Dropdown labels, in enum order.
+const NORMAL_LABELS := ["Disabled"]
+
+## What goes on the end of the normal map's name, extension included.
+const NORMAL_SUFFIX := "_normal.png"
+
 ## Widest and shortest sheet that can be asked for.
 ##
 ## The ceiling is what a texture is allowed to be almost everywhere, and the floor is one
@@ -106,7 +118,7 @@ func _init() -> void:
 
 
 func get_operation_name() -> String:
-    return "Packing"
+    return "Export"
 
 
 func get_operation_id() -> StringName:
@@ -150,7 +162,7 @@ func get_settings_schema() -> Array[Dictionary]:
     return [
         {
             "property": &"mode",
-            "label": "Mode",
+            "label": "Packing Mode",
             "type": SettingType.ENUM,
             "options": MODE_LABELS,
             "tooltip": "How the sprites are arranged on the sheet.\n\nShelf sorts them tallest first and fills rows, which packs well and is the\nusual choice. Grid gives every sprite an identical cell sized to the largest,\nwhich wastes room but puts frames on a fixed stride. Tight drops each one into\nthe lowest gap that will take it and packs best of all. Original Order fills\nrows without sorting, so the sprites stay in the order they were found.",
@@ -184,6 +196,13 @@ func get_settings_schema() -> Array[Dictionary]:
             "label": "Create Lookup Table",
             "type": SettingType.BOOL,
             "tooltip": "Writes a second file beside the sheet holding where every sprite landed on\nit, named the same with %s on the end.\n\nIt is a %d-wide texture with one pixel per sprite, in the order the sprites\nwere found. That pixel's red, green, blue and alpha are the sprite's left,\ntop, width and height on the sheet, in pixels — so a shader handed a sprite\nnumber can read its rectangle in one fetch.\n\nSprite n is at x = n %% %d, y = n / %d. The file is only written when the\nsheet is saved." % [LUT_SUFFIX, LUT_WIDTH, LUT_WIDTH, LUT_WIDTH],
+        },
+        {
+            "property": &"normals",
+            "label": "Normals",
+            "type": SettingType.ENUM,
+            "options": NORMAL_LABELS,
+            "tooltip": "How a normal map is worked out for the packed sheet.\n\nDisabled writes nothing. Any other mode writes the map as a second file\nbeside the sheet, named the same with %s on the end, and only when the\nsheet is saved.\n\nDisabled is the only choice so far." % NORMAL_SUFFIX,
         },
     ]
 
