@@ -12,6 +12,11 @@ using namespace godot;
 
 namespace {
 
+// How far past its visible pixels a tile reaches, in pixels. Covers the keyed-out halo
+// round a sprite, which is invisible when the tiles are labelled but can be lifted back
+// into view by a stage below.
+constexpr int64_t TILE_MARGIN = 1;
+
 // Clears every pixel in `doomed` and retires whatever the stages above declared for it.
 //
 // The second half is the ordering rule: a declaration is a record of what some stage
@@ -124,24 +129,6 @@ iw::Islands label_visible(const float *alpha, int64_t width, int64_t height) {
     }
 
     return found;
-}
-
-// Every island's rectangle, flattened to x, y, w, h apiece.
-PackedInt32Array bounds_of(const iw::Islands &found) {
-    PackedInt32Array bounds;
-    const int64_t count = found.count();
-    if (count <= 0) {
-        return bounds;
-    }
-    bounds.resize(count * 4);
-    int32_t *out = bounds.ptrw();
-    for (int64_t n = 0; n < count; n++) {
-        out[n * 4] = found.min_x[n];
-        out[n * 4 + 1] = found.min_y[n];
-        out[n * 4 + 2] = found.max_x[n] - found.min_x[n] + 1;
-        out[n * 4 + 3] = found.max_y[n] - found.min_y[n] + 1;
-    }
-    return bounds;
 }
 
 // The pixels belonging to any island `doomed` marks.
@@ -264,7 +251,32 @@ Dictionary IWStageKernels::exclude_tiles(
     const int64_t height = ctx->height;
     const iw::Islands found = iw::label_islands(visible.ptr(), width, height);
     const int64_t count = found.count();
-    out["bounds"] = bounds_of(found);
+
+    // A tile is its rectangle grown by TILE_MARGIN. Keying above this leaves a halo of
+    // zero-coverage pixels round a sprite, invisible here and so no part of the tile, but
+    // a stage below that rebuilds coverage lifts them back into view as a faint rim.
+    // Their alpha is still in the source, so the margin is what reaches them.
+    std::vector<int32_t> min_x(static_cast<size_t>(count));
+    std::vector<int32_t> min_y(static_cast<size_t>(count));
+    std::vector<int32_t> max_x(static_cast<size_t>(count));
+    std::vector<int32_t> max_y(static_cast<size_t>(count));
+    for (int64_t n = 0; n < count; n++) {
+        min_x[n] = static_cast<int32_t>(iw::maxi(found.min_x[n] - TILE_MARGIN, 0));
+        min_y[n] = static_cast<int32_t>(iw::maxi(found.min_y[n] - TILE_MARGIN, 0));
+        max_x[n] = static_cast<int32_t>(iw::mini(found.max_x[n] + TILE_MARGIN, width - 1));
+        max_y[n] = static_cast<int32_t>(iw::mini(found.max_y[n] + TILE_MARGIN, height - 1));
+    }
+
+    PackedInt32Array bounds;
+    bounds.resize(count * 4);
+    int32_t *bounds_ptr = bounds.ptrw();
+    for (int64_t n = 0; n < count; n++) {
+        bounds_ptr[n * 4] = min_x[n];
+        bounds_ptr[n * 4 + 1] = min_y[n];
+        bounds_ptr[n * 4 + 2] = max_x[n] - min_x[n] + 1;
+        bounds_ptr[n * 4 + 3] = max_y[n] - min_y[n] + 1;
+    }
+    out["bounds"] = bounds;
 
     // Which tile each pick landed on. Out-of-range points, and points on nothing, resolve
     // to -1 and are reported as such rather than dropped — the row is still the user's and
@@ -322,9 +334,9 @@ Dictionary IWStageKernels::exclude_tiles(
         if (doomed[static_cast<size_t>(n)] == 0) {
             continue;
         }
-        for (int64_t y = found.min_y[n]; y <= found.max_y[n]; y++) {
+        for (int64_t y = min_y[n]; y <= max_y[n]; y++) {
             const int64_t row = y * width;
-            for (int64_t x = found.min_x[n]; x <= found.max_x[n]; x++) {
+            for (int64_t x = min_x[n]; x <= max_x[n]; x++) {
                 taken[static_cast<size_t>(row + x)] = 1;
             }
         }
@@ -345,22 +357,22 @@ Dictionary IWStageKernels::exclude_tiles(
     // Cropped to what was taken rather than kept at the size of the image: a sheet of
     // forty tiles with one held back would otherwise carry a full-size picture that is
     // transparent almost everywhere.
-    int64_t min_x = width;
-    int64_t min_y = height;
-    int64_t max_x = -1;
-    int64_t max_y = -1;
+    int64_t hidden_min_x = width;
+    int64_t hidden_min_y = height;
+    int64_t hidden_max_x = -1;
+    int64_t hidden_max_y = -1;
     for (int64_t n = 0; n < count; n++) {
         if (doomed[static_cast<size_t>(n)] == 0) {
             continue;
         }
-        min_x = iw::mini(min_x, found.min_x[n]);
-        min_y = iw::mini(min_y, found.min_y[n]);
-        max_x = iw::maxi(max_x, found.max_x[n]);
-        max_y = iw::maxi(max_y, found.max_y[n]);
+        hidden_min_x = iw::mini(hidden_min_x, static_cast<int64_t>(min_x[n]));
+        hidden_min_y = iw::mini(hidden_min_y, static_cast<int64_t>(min_y[n]));
+        hidden_max_x = iw::maxi(hidden_max_x, static_cast<int64_t>(max_x[n]));
+        hidden_max_y = iw::maxi(hidden_max_y, static_cast<int64_t>(max_y[n]));
     }
-    if (max_x >= min_x && max_y >= min_y) {
-        const int64_t hidden_width = max_x - min_x + 1;
-        const int64_t hidden_height = max_y - min_y + 1;
+    if (hidden_max_x >= hidden_min_x && hidden_max_y >= hidden_min_y) {
+        const int64_t hidden_width = hidden_max_x - hidden_min_x + 1;
+        const int64_t hidden_height = hidden_max_y - hidden_min_y + 1;
         PackedByteArray pixels;
         pixels.resize(hidden_width * hidden_height * 4);
         uint8_t *dst = pixels.ptrw();
@@ -369,7 +381,7 @@ Dictionary IWStageKernels::exclude_tiles(
         const float *alpha = visible.ptr();
         for (int64_t y = 0; y < hidden_height; y++) {
             for (int64_t x = 0; x < hidden_width; x++) {
-                const int64_t from = (y + min_y) * width + (x + min_x);
+                const int64_t from = (y + hidden_min_y) * width + (x + hidden_min_x);
                 if (taken[static_cast<size_t>(from)] == 0) {
                     continue;
                 }
@@ -383,7 +395,7 @@ Dictionary IWStageKernels::exclude_tiles(
         }
         out["hidden"] = Image::create_from_data(
                 hidden_width, hidden_height, false, Image::FORMAT_RGBA8, pixels);
-        out["hidden_rect"] = Rect2i(min_x, min_y, hidden_width, hidden_height);
+        out["hidden_rect"] = Rect2i(hidden_min_x, hidden_min_y, hidden_width, hidden_height);
     }
 
     PackedInt32Array going;
@@ -393,5 +405,15 @@ Dictionary IWStageKernels::exclude_tiles(
         }
     }
     erase_pixels(ctx, going);
+
+    // The source alpha goes too, not just the coverage. A stage below that rebuilds
+    // coverage wholesale — guided_refine, restore_edges — would otherwise grow the tile
+    // back out of the alpha still sitting here. Colour is left alone for un-blending.
+    uint8_t *pixels = ctx->data.ptrw();
+    for (int64_t i = 0; i < pixel_count; i++) {
+        if (taken[static_cast<size_t>(i)] != 0) {
+            pixels[i * 4 + 3] = 0;
+        }
+    }
     return out;
 }
