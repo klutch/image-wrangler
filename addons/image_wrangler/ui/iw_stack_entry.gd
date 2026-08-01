@@ -40,6 +40,10 @@ signal fold_changed(entry: Control)
 ## same rule a drop uses, so a paste lands where the pointer said rather than at the end.
 signal menu_requested(entry: Control, above: bool)
 
+## What a reorder's drag payload calls itself, so the editor's other drags are told apart
+## from this one.
+const DRAG_TYPE := "iw_stack_entry"
+
 ## Indent of the settings form under its header, matching what a folded group used.
 const INDENT := 8
 
@@ -84,6 +88,13 @@ var stage: IWStackItem
 ## operation id nor the position in the stack identifies a row: the id is shared and
 ## the position is exactly what a reorder changes.
 var uid := 0
+
+## Which stack view this card belongs to, as that view's instance id.
+##
+## Written by the view before [method setup]. The dock holds two stacks and both hand out
+## the same kind of payload, so without this a card could be dragged from one into the other
+## — and every view would answer every card's drag by scrolling itself.
+var stack_id := 0
 
 var _handle: Label
 var _header: HBoxContainer
@@ -409,14 +420,18 @@ func _begin_drag() -> Variant:
     preview.text = stage.get_operation_name()
     preview.add_theme_constant_override("outline_size", 2)
     set_drag_preview(preview)
-    return {"type": "iw_stack_entry", "uid": uid}
+    return {"type": DRAG_TYPE, "uid": uid, "stack": stack_id}
 
 
 func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
     if not (data is Dictionary):
         return false
     var payload: Dictionary = data
-    if String(payload.get("type", "")) != "iw_stack_entry":
+    if String(payload.get("type", "")) != DRAG_TYPE:
+        return false
+    # A card from the other stack is not a reorder of this one, and the operations and the
+    # normal map generators are not interchangeable anyway.
+    if int(payload.get("stack", 0)) != stack_id:
         return false
     if int(payload.get("uid", -1)) == uid:
         return false

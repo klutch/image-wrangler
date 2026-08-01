@@ -4072,14 +4072,40 @@ func _refresh_green_toggle() -> void:
 ##
 ## [b][member IWNormalLayer.is_first] is written here rather than by the stack view.[/b] A
 ## layer knows nothing about where in the stack it sits, and the schema it hands back depends
-## on that: the one at the top has nothing above it to combine with, so it is asked for its
-## own settings alone.
+## on that: the first one switched on has nothing above it to combine with, so it is asked
+## for its own settings alone.
 func _build_normal_form(layer: IWNormalLayer, box: VBoxContainer, entry: Control,
         uid: int) -> void:
-    layer.is_first = _normal_stack.stages().find(layer) == 0
+    layer.is_first = _normal_is_first(layer)
     var announce := func() -> void: entry.setting_changed.emit(entry)
     SettingsBuilder.build(layer, box, announce, _fold_state, "normal%d" % uid)
     _bind_model_folders(box, announce)
+
+
+## Whether nothing above [param layer] that is switched on would give it something to
+## combine with.
+##
+## A switched-off layer makes no map at all, so it is stepped over here the same way
+## [method IWPacking.build_normal_map] steps over it — which is what moves the base, and the
+## combine rows with it, down to the first card that is ticked.
+func _normal_is_first(layer: IWNormalLayer) -> bool:
+    for other: IWNormalLayer in _normal_stack.stages():
+        if other == layer:
+            return true
+        if other.enabled:
+            return false
+    return true
+
+
+## Whether any card is carrying the combine rows against what the stack now says.
+##
+## [member IWNormalLayer.is_first] holds what that card's form was built with, so comparing
+## it against the answer now is the whole test.
+func _normal_forms_stale() -> bool:
+    for layer: IWNormalLayer in _normal_stack.stages():
+        if layer.is_first != _normal_is_first(layer):
+            return true
+    return false
 
 
 ## Points every model folder control the form built at the preview's overlay.
@@ -4138,12 +4164,15 @@ func _sync_normal_layers() -> void:
 
 ## A generator was added, removed, reordered or ticked.
 ##
-## Nothing is rebuilt here. Every path that changes the order rebuilds before it announces,
-## and [method _build_normal_form] reads which card is first off the stack as it stands at
-## that moment — so the combine rows have already moved to the right card by the time this
-## runs. Ticking one changes no order at all.
+## Every path that changes the order rebuilds before it announces, so the combine rows have
+## already moved to the right card by the time this runs. Ticking one is the exception: it
+## changes no order, but switching the top card off hands the base to the one under it, so
+## the cards are rebuilt when they no longer agree with the stack. Deferred because we are
+## inside the tick's own signal, and the rebuild frees the box that raised it.
 func _on_normal_stack_changed() -> void:
     _sync_normal_layers()
+    if _normal_forms_stale():
+        _normal_stack.rebuild.call_deferred()
     if _refreshing:
         return
     _schedule_export_save()

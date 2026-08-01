@@ -108,6 +108,9 @@ const TOOL_MIN_SIZE := 24
 const AUTO_SCROLL_EDGE := 16.0
 const AUTO_SCROLL_SPEED := 480.0
 
+## What a card's drag payload calls itself. Held on the card, which is what produces it.
+const DRAG_TYPE := StackEntry.DRAG_TYPE
+
 ## The live stack, in order.
 var _entries: Array = []
 var _selector: OptionButton
@@ -143,14 +146,12 @@ func _ready() -> void:
 ## not changed, so making them again is the same answer for less code than reaching into
 ## each one.
 func _notification(what: int) -> void:
-    # A drag anywhere in the editor raises these, so only ours starts the list moving —
-    # a file dragged in from the FileSystem dock is not a reorder, and scrolling the
-    # stack under it would be a mystery.
+    # A drag anywhere in the editor raises these, so only one of this view's own cards
+    # starts the list moving — a file dragged in from the FileSystem dock is not a reorder,
+    # and neither is a card being dragged in the other stack.
     if what == NOTIFICATION_DRAG_BEGIN:
         _scroll_carry = 0.0
-        var payload: Variant = get_viewport().gui_get_drag_data()
-        set_process(payload is Dictionary
-                and String((payload as Dictionary).get("type", "")) == "iw_stack_entry")
+        set_process(_dragging_ours())
         return
     # Always arrives, including when a drag is abandoned, so this cannot be left running.
     if what == NOTIFICATION_DRAG_END:
@@ -171,7 +172,13 @@ func _notification(what: int) -> void:
 ## On only between the two drag notifications above, and it allocates nothing — a stack
 ## being dragged is the one moment the dock is doing per-frame work.
 func _process(delta: float) -> void:
-    if _scroll == null:
+    # [b]Asked every frame rather than trusted from the notification.[/b] The pair of
+    # notifications is the only thing that used to decide this, and any way of missing the
+    # closing one — a rebuild mid-drag, a tool script reloaded under the dock, a second view
+    # answering a drag that was never its own — left the list running under a pointer that
+    # was not dragging anything. Reading the live drag is one call and cannot be out of date.
+    if _scroll == null or not is_visible_in_tree() or not _dragging_ours():
+        set_process(false)
         return
     var at := _scroll.get_local_mouse_position()
     # Sideways out of the column is not a request to scroll it.
@@ -193,6 +200,22 @@ func _process(delta: float) -> void:
         return
     _scroll_carry -= float(whole)
     _scroll.scroll_vertical += whole
+
+
+## Whether the drag in flight is one of this view's own cards.
+##
+## [b]Which view matters, not just which kind.[/b] Both stacks in the dock hand out the same
+## kind of payload, so a card dragged in one of them would otherwise scroll the other — and
+## the other is on a tab that is not even on screen.
+func _dragging_ours() -> bool:
+    if not is_inside_tree():
+        return false
+    var payload: Variant = get_viewport().gui_get_drag_data()
+    if not (payload is Dictionary):
+        return false
+    var carried: Dictionary = payload
+    return String(carried.get("type", "")) == DRAG_TYPE \
+            and int(carried.get("stack", 0)) == get_instance_id()
 
 
 ## How fast the list runs, given how far past the edge the pointer has reached.
@@ -497,6 +520,8 @@ func rebuild() -> void:
     for record: Dictionary in _entries:
         var entry: Control = StackEntry.new()
         _list.add_child(entry)
+        # Before setup, since the card carries it into every drag payload it hands out.
+        entry.stack_id = get_instance_id()
         entry.setup(record["stage"], record["uid"], (record["stage"] as IWStackItem).folded)
         entry.remove_requested.connect(_on_remove)
         entry.reorder_requested.connect(_on_reorder)

@@ -5,10 +5,10 @@ extends IWStackItem
 ## One pass of the Export tab's normal map generator.
 ##
 ## A layer is handed the finished sheet and where every sprite landed on it, and hands back
-## a normal map the same size. The layer above it made one too; [member
+## a normal map the same size. The layers above it made one too; [member
 ## NormalLayerSettings.combine_mode] and [member NormalLayerSettings.combine_strength] say
-## how the two are joined. The layer at the top of the stack has nothing to join, so those
-## two settings are left off its card entirely — see [member is_first].
+## how the two are joined. The first layer switched on has nothing to join, so those two
+## settings are left off its card entirely — see [member is_first].
 ##
 ## [b]Every layer generates with green pointing up.[/b] Green Points Down is applied once to
 ## the finished stack rather than by each layer, so combining never has to reason about
@@ -46,7 +46,11 @@ enum NormalCurve {
 ## Dropdown labels, in enum order.
 const NORMAL_CURVE_LABELS := ["Round", "Soft", "Straight", "Hollow"]
 
-## Whether this layer is at the top of the stack, and so has nothing to combine with.
+## Whether nothing switched on sits above this layer, so it has nothing to combine with.
+##
+## A switched-off layer contributes nothing, so it does not count as being above anything:
+## ticking the top card off hands the base to the one under it, and the combine rows move
+## with it.
 ##
 ## Written by the dock before the card's form is built, because a layer knows nothing about
 ## where in the stack it sits. Read by [method get_settings_schema] alone.
