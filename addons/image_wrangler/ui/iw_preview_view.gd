@@ -88,6 +88,12 @@ const MARKER_ALPHA := 0.6
 const MARKER_SELECTED_ALPHA := 1.0
 const MARKER_DISABLED_ALPHA := 0.27
 
+## How much of a held-back tile is laid back over the result.
+##
+## Faint enough that nothing here can be mistaken for part of the picture, and strong
+## enough to say which tile it was rather than merely that something is missing.
+const GHOST_ALPHA := 0.2
+
 ## The rectangle being dragged out this instant.
 ##
 ## One fixed colour rather than the tint of whatever operation is picking. It is the
@@ -391,6 +397,11 @@ var _marker_flooded := PackedByteArray()
 ## A colour per marker: the tint of the operation the marker belongs to. Short or empty
 ## where an operation gave none, which falls back to white.
 var _marker_tints := PackedColorArray()
+
+## Pictures of what an operation held back, laid faintly over the result, and where each
+## one sits on the image.
+var _ghosts: Array[Texture2D] = []
+var _ghost_regions: Array[Rect2i] = []
 var _selected_marker := -1
 
 ## Where each packed tile sits on the sheet, in image coordinates, and the colour its
@@ -594,6 +605,24 @@ func set_markers(
     _marker_tints = tints.duplicate()
     _selected_marker = selected
     _canvas.queue_redraw()
+
+
+## Shows what operations have held back, faintly, over the result.
+##
+## [param images] and [param regions] run alongside each other, one pair per operation with
+## something to show. Pass empty arrays to clear them.
+func set_ghosts(images: Array, regions: Array) -> void:
+    _ghosts.clear()
+    _ghost_regions.clear()
+    for i in mini(images.size(), regions.size()):
+        var image: Image = images[i]
+        var region: Rect2i = regions[i]
+        if image == null or image.is_empty() or region.size.x <= 0 or region.size.y <= 0:
+            continue
+        _ghosts.append(ImageTexture.create_from_image(image))
+        _ghost_regions.append(region)
+    if _canvas != null:
+        _canvas.queue_redraw()
 
 
 ## The colour one mark is drawn in.
@@ -1388,6 +1417,8 @@ func _draw_canvas() -> void:
     # without covering the outermost row of pixels it is there to bound — which at a zoom
     # of 1 is the difference between marking that row and hiding it.
     _canvas.draw_rect(frame.grow(BORDER_WIDTH * 0.5), BORDER_COLOR, false, BORDER_WIDTH)
+    # Under the marks, so an outline round a held-back tile still reads over its ghost.
+    _draw_ghosts()
     _draw_markers()
     _draw_polygons()
     _draw_brush()
@@ -1430,6 +1461,19 @@ func _draw_image_around(hole: Rect2i) -> void:
         if band.size.x <= 0 or band.size.y <= 0:
             continue
         _canvas.draw_texture_rect_region(_texture, _image_rect(band), band)
+
+
+## What operations have held back, laid faintly back over the result.
+##
+## An indicator rather than part of the picture, so it follows the same switch every other
+## mark does and never reaches what gets written out.
+func _draw_ghosts() -> void:
+    if not markers_visible:
+        return
+    for i in _ghosts.size():
+        _canvas.draw_texture_rect(
+                _ghosts[i], _image_rect(_ghost_regions[i]), false,
+                Color(1, 1, 1, GHOST_ALPHA))
 
 
 ## [b]A single picked pixel draws nothing at all until a run has reported.[/b] It used to

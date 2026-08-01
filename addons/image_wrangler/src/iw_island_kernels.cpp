@@ -3,6 +3,9 @@
 #include "iw_islands.h"
 #include "iw_math.h"
 
+#include <godot_cpp/classes/image.hpp>
+
+#include <cstring>
 #include <vector>
 
 using namespace godot;
@@ -229,7 +232,8 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
 //
 // `points` is x,y interleaved, one pair per pick. `mode` is 0 to remove what was picked
 // and 1 to remove everything else. Returns the rectangle of every tile found under
-// "bounds", and under "picked" which tile each point landed on, or -1.
+// "bounds", and under "picked" which tile each point landed on, or -1. "hidden" and
+// "hidden_rect" carry a picture of what was taken, for the preview to ghost back in.
 Dictionary IWStageKernels::select_tiles(
         const Ref<IWPipelineContext> &ctx, const PackedInt32Array &points, int64_t mode) {
     Dictionary out;
@@ -291,8 +295,59 @@ Dictionary IWStageKernels::select_tiles(
         doomed[static_cast<size_t>(n)] = go ? 1 : 0;
         any = any || go;
     }
-    if (any) {
-        erase_pixels(ctx, pixels_of(found, doomed));
+    if (!any) {
+        return out;
     }
+
+    // A picture of what is about to go, taken before it goes. The preview lays this back
+    // over the result faintly, so a tile held back is still visible as the thing it was
+    // rather than as an empty rectangle.
+    //
+    // Cropped to what was taken rather than kept at the size of the image: a sheet of
+    // forty tiles with one held back would otherwise carry a full-size picture that is
+    // transparent almost everywhere.
+    int64_t min_x = width;
+    int64_t min_y = height;
+    int64_t max_x = -1;
+    int64_t max_y = -1;
+    for (int64_t n = 0; n < count; n++) {
+        if (doomed[static_cast<size_t>(n)] == 0) {
+            continue;
+        }
+        min_x = iw::mini(min_x, found.min_x[n]);
+        min_y = iw::mini(min_y, found.min_y[n]);
+        max_x = iw::maxi(max_x, found.max_x[n]);
+        max_y = iw::maxi(max_y, found.max_y[n]);
+    }
+    if (max_x >= min_x && max_y >= min_y) {
+        const int64_t hidden_width = max_x - min_x + 1;
+        const int64_t hidden_height = max_y - min_y + 1;
+        PackedByteArray pixels;
+        pixels.resize(hidden_width * hidden_height * 4);
+        uint8_t *dst = pixels.ptrw();
+        memset(dst, 0, static_cast<size_t>(pixels.size()));
+        const uint8_t *src = ctx->data.ptr();
+        const float *alpha = visible.ptr();
+        for (int64_t y = 0; y < hidden_height; y++) {
+            for (int64_t x = 0; x < hidden_width; x++) {
+                const int64_t from = (y + min_y) * width + (x + min_x);
+                const int32_t island = found.label[static_cast<size_t>(from)];
+                if (island < 0 || doomed[static_cast<size_t>(island)] == 0) {
+                    continue;
+                }
+                const int64_t to = (y * hidden_width + x) * 4;
+                dst[to] = src[from * 4];
+                dst[to + 1] = src[from * 4 + 1];
+                dst[to + 2] = src[from * 4 + 2];
+                dst[to + 3] = static_cast<uint8_t>(
+                        iw::roundi(iw::clampf(iw::widen(alpha[from]), 0.0, 1.0) * 255.0));
+            }
+        }
+        out["hidden"] = Image::create_from_data(
+                hidden_width, hidden_height, false, Image::FORMAT_RGBA8, pixels);
+        out["hidden_rect"] = Rect2i(min_x, min_y, hidden_width, hidden_height);
+    }
+
+    erase_pixels(ctx, pixels_of(found, doomed));
     return out;
 }

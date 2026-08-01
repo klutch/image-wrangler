@@ -18,6 +18,14 @@ extends Resource
 ## which is what keeps a removed tile reachable.
 var found_bounds: Array[Rect2i] = []
 
+## A picture of the tiles the last run held back, and where on the image it sits.
+##
+## [b]Deliberately not exported[/b], for the same reason [member found_bounds] is not: an
+## observation about one run. The preview lays it faintly back over the result, so a tile
+## held back reads as the thing it was rather than as an empty rectangle.
+var hidden_image: Image
+var hidden_rect := Rect2i()
+
 
 ## Whether the tile numbered [param tile] survives this operation.
 ##

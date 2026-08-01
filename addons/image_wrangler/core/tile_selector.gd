@@ -138,6 +138,8 @@ func absorb_run_report(from: IWStackOperation) -> void:
     if source == null or source.settings == null or settings == null:
         return
     settings.found_bounds = source.settings.found_bounds.duplicate()
+    settings.hidden_image = source.settings.hidden_image
+    settings.hidden_rect = source.settings.hidden_rect
     var mine := settings.picks
     var theirs := source.settings.picks
     if mine.size() != theirs.size():
@@ -180,6 +182,8 @@ func process_context(ctx: IWPipelineContext) -> void:
 
 ## Unpacks what the kernel found onto the settings, so the dock can outline it.
 func _absorb(report: Dictionary) -> void:
+    settings.hidden_image = report.get("hidden")
+    settings.hidden_rect = report.get("hidden_rect", Rect2i())
     var bounds: PackedInt32Array = report.get("bounds", PackedInt32Array())
     settings.found_bounds = []
     @warning_ignore("integer_division")

@@ -1732,6 +1732,7 @@ func _blank_preview() -> void:
     _preview.set_tile_bounds([])
     _preview.set_markers([] as Array[Rect2i], -1)
     _preview.set_polygons([], -1, -1)
+    _preview.set_ghosts([], [])
     _push_brush_overlay(null)
 
 
@@ -3161,6 +3162,11 @@ func _update_overlays() -> void:
     # each lighting up a row would be two answers to a question that has one.
     var brush_stroke: BrushStroke = null
 
+    # Pictures of what an operation held back rather than removed outright, so a tile a
+    # Tile Selector is keeping off the sheet still reads as the thing it was.
+    var ghosts := []
+    var ghost_regions := []
+
     if _is_image_mode(_mode):
         # Walked entry by entry rather than straight down _pick_controls, which is the
         # same order — both are built by going through the entries in turn — but this way
@@ -3242,8 +3248,23 @@ func _update_overlays() -> void:
                 island_flooded.append(1)
                 island_tints.append(stage.get_tint())
 
+        # Only from a stage that actually ran, since what it held back is only true of the
+        # result the switched-on stack produced.
+        for entry: Control in _stack_view.entries():
+            var stage: IWStackOperation = entry.stage
+            if stage == null or not stage.enabled or (only != null and stage != only):
+                continue
+            if not (stage is TileSelector):
+                continue
+            var settings: TileSelectorSettings = stage.get_settings()
+            if settings == null or settings.hidden_image == null:
+                continue
+            ghosts.append(settings.hidden_image)
+            ghost_regions.append(settings.hidden_rect)
+
     _preview.set_markers(islands, selected_island, island_flags, island_flooded, island_tints)
     _preview.set_polygons(regions, selected_region, draft_region, region_flags, region_tints)
+    _preview.set_ghosts(ghosts, ghost_regions)
     _push_brush_overlay(brush_stroke)
 
 
