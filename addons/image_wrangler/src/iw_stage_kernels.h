@@ -410,6 +410,26 @@ public:
             int64_t mode,
             double opacity);
 
+    // Spreads the normals found just inside each sprite's outline out to the rim itself.
+    //
+    // The outermost pixels of a sprite are where every generator is least sure: a shape
+    // kernel has almost no room left to roll off in, a brightness one is reading colours
+    // half-covered by antialiasing, and a network is guessing at an edge. The result is a
+    // rim of noise around art that is otherwise clean. This replaces those pixels with the
+    // nearest one that is properly inside, so the rim carries the shape found a little way
+    // in rather than whatever the outline produced.
+    //
+    // `inner_reach` is how deep the rim is taken to be, in pixels, and so how far in the
+    // replacements are read from. Same rectangles and the same guarantee as the generators.
+    //
+    // [b]Alpha is never touched.[/b] The silhouette is what it was — only which way those
+    // pixels face changes. A sprite with nothing deeper than `inner_reach` anywhere in it
+    // has nothing to spread from and is left exactly as it arrived.
+    static Ref<Image> normal_clean_edges(
+            const Ref<Image> &map,
+            const PackedInt32Array &rects,
+            int64_t inner_reach);
+
     // A copy of `map` with green pointing the other way, which is the one thing two engines
     // never agree on. Red, blue and alpha are untouched.
     //

@@ -37,6 +37,21 @@ extends Resource
 ## it — so having it and not needing it is the cheaper mistake of the two.
 @export var create_lookup_table: bool = true
 
+## Whether the rim of each sprite takes the shape found just inside it.
+##
+## On by default. The outermost pixels are where every generator is least sure — there is no
+## room left to roll off in, the colours are half-covered by antialiasing, and a network is
+## guessing — so a rim of noise around otherwise clean art is the usual result rather than
+## the unusual one. Applied once to the finished stack, like [member normal_green_down].
+@export var normal_clean_edges: bool = true
+
+## How deep the rim is taken to be, in pixels, and so how far in the replacements come from.
+##
+## One is the single outermost ring of pixels, which is enough for most art. Larger numbers
+## reach past a thicker band of antialiasing, at the cost of flattening detail that genuinely
+## belongs near the outline.
+@export var normal_inner_reach: int = 1
+
 ## Whether green is written the way DirectX reads it rather than the way Godot does.
 ##
 ## Off is right for Godot. The one thing about a normal map that no two engines agree on,

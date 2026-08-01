@@ -209,6 +209,13 @@ const PACKING_DEBOUNCE := 0.6
 ## follow the mouse instead of catching up after it stops.
 const NORMAL_DEBOUNCE := 0.2
 
+## How deep Clean Edges may be asked to reach, in pixels.
+##
+## One is the outermost ring and does for most art. Ten is well past any band of antialiasing
+## and into flattening detail that belongs there, which is where a dial should stop.
+const NORMAL_REACH_MIN := 1
+const NORMAL_REACH_MAX := 10
+
 ## How long the Upscale tab waits after a change before running the network again.
 ##
 ## The same as Packing's, and for the same reason — a spinner being dragged reports a change
@@ -569,6 +576,10 @@ var _normal_stack: Control
 var _packing_green_toggle: CheckBox
 ## Swaps the preview between the sheet and the normal map made from it.
 var _packing_normal_toggle: CheckBox
+## Evens the rim of each sprite out, and how deep it reaches to do it. Hand-built beside the
+## two above, and shown only once there is a stack for them to be about.
+var _packing_clean_toggle: CheckBox
+var _packing_reach_slider: EditorSpinSlider
 var _upscale_box: VBoxContainer
 ## Says how the last upscale went, or why it could not run at all.
 var _upscale_status: Label
@@ -1092,6 +1103,8 @@ func _forget_controls() -> void:
     _normal_stack = null
     _packing_green_toggle = null
     _packing_normal_toggle = null
+    _packing_clean_toggle = null
+    _packing_reach_slider = null
     _upscale_box = null
     _upscale_status = null
     _upscale_model_note = null
@@ -1532,6 +1545,26 @@ func _build_operation_column() -> Control:
     _packing_normal_toggle.tooltip_text = "Shows the normal map in place of the sheet, so it can be tuned before it is\nwritten.\n\nThe fade slider brings the sheet back over it. The two line up pixel for pixel,\nwhich is the only way to tell whether the rounding is following the art."
     _packing_normal_toggle.toggled.connect(_on_show_normals_toggled)
     extras.add_child(_packing_normal_toggle)
+
+    _packing_clean_toggle = CheckBox.new()
+    _packing_clean_toggle.text = "Clean Edges"
+    _packing_clean_toggle.tooltip_text = "Gives each sprite's outermost pixels the shape found just inside them.\n\nThe rim is where every generator is least sure — there is no room left to roll\noff in, the colours are half-covered by antialiasing, and a network is guessing\n— so it is usually the noisiest part of the map. This spreads what is behind it\noutwards instead.\n\nThe silhouette does not move: only which way those pixels face changes."
+    _packing_clean_toggle.toggled.connect(_on_clean_edges_toggled)
+    extras.add_child(_packing_clean_toggle)
+
+    # An EditorSpinSlider rather than a plain one, so it reads as the rest of the form does.
+    # Built by hand for the reason the two toggles above it are: this sits outside
+    # _packing_box, which the settings builder empties on every rebuild.
+    _packing_reach_slider = EditorSpinSlider.new()
+    _packing_reach_slider.label = "Inner Reach"
+    _packing_reach_slider.min_value = NORMAL_REACH_MIN
+    _packing_reach_slider.max_value = NORMAL_REACH_MAX
+    _packing_reach_slider.step = 1
+    _packing_reach_slider.rounded = true
+    _packing_reach_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _packing_reach_slider.tooltip_text = "How deep the rim is taken to be, in pixels, and so how far in the replacements\ncome from.\n\nOne is the single outermost ring of pixels and is enough for most art. Larger\nnumbers reach past a thicker band of antialiasing, at the cost of flattening\ndetail that genuinely belongs near the outline."
+    _packing_reach_slider.value_changed.connect(_on_inner_reach_changed)
+    extras.add_child(_packing_reach_slider)
 
     _packing_status = Label.new()
     _packing_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -4064,11 +4097,50 @@ func _on_green_down_toggled(pressed: bool) -> void:
     _on_setting_changed()
 
 
-## Puts the tick where the setting is, for a rebuilt dock or a loaded config.
-func _refresh_green_toggle() -> void:
-    if _packing_green_toggle == null or _packing == null:
+func _on_clean_edges_toggled(pressed: bool) -> void:
+    if _refreshing or _packing == null:
         return
-    _packing_green_toggle.set_pressed_no_signal(_packing.get_settings().normal_green_down)
+    _packing.get_settings().normal_clean_edges = pressed
+    # The reach only means anything while this is on, so it comes and goes with it.
+    _update_normal_extras()
+    _on_setting_changed()
+
+
+func _on_inner_reach_changed(value: float) -> void:
+    if _refreshing or _packing == null:
+        return
+    _packing.get_settings().normal_inner_reach = int(value)
+    _on_setting_changed()
+
+
+## Puts the hand-built controls where the settings are, for a rebuilt dock or a loaded config.
+func _refresh_green_toggle() -> void:
+    if _packing == null:
+        return
+    var settings := _packing.get_settings()
+    if _packing_green_toggle != null:
+        _packing_green_toggle.set_pressed_no_signal(settings.normal_green_down)
+    if _packing_clean_toggle != null:
+        _packing_clean_toggle.set_pressed_no_signal(settings.normal_clean_edges)
+    if _packing_reach_slider != null:
+        _packing_reach_slider.set_value_no_signal(clampi(settings.normal_inner_reach,
+                NORMAL_REACH_MIN, NORMAL_REACH_MAX))
+        # EditorSpinSlider paints its own value, and the quiet setter skips the notification
+        # that would repaint it.
+        _packing_reach_slider.queue_redraw()
+    _update_normal_extras()
+
+
+## Shows the rim controls only once there is a stack for them to be about.
+##
+## An empty stack writes no map at all, so a tick saying what would be done to one is a
+## control about nothing. The reach hangs off the tick for the same reason.
+func _update_normal_extras() -> void:
+    if _packing_clean_toggle == null or _packing == null or _normal_stack == null:
+        return
+    var any: bool = _normal_stack.stages().size() > 0
+    _packing_clean_toggle.visible = any
+    _packing_reach_slider.visible = any and _packing.get_settings().normal_clean_edges
 
 
 # --- The normal map stack -----------------------------------------------
@@ -4204,6 +4276,9 @@ func _on_normal_fold_changed() -> void:
 
 func _on_normal_entries_rebuilt() -> void:
     _sync_normal_layers()
+    # The rim controls are about the stack existing at all, and this is every moment it can
+    # have started or stopped doing so.
+    _update_normal_extras()
 
 
 ## The stack in the codec's record shape, which is what both the clipboard and the export
@@ -4469,7 +4544,9 @@ func _packing_normal_signature() -> String:
             "enabled": layer.enabled,
             "settings": SettingsIO.to_dict(how),
         })
-    return "%s/%s" % [_packing.get_settings().normal_green_down, JSON.stringify(parts)]
+    var settings := _packing.get_settings()
+    return "%s/%s/%d/%s" % [settings.normal_green_down, settings.normal_clean_edges,
+            settings.normal_inner_reach, JSON.stringify(parts)]
 
 
 ## The settings that decide what the sheet looks like, as one string.

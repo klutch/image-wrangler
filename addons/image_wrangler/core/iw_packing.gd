@@ -641,7 +641,13 @@ func build_normal_map(sheet: Image, rects: Array) -> Image:
             out = IWStageKernels.combine_normals(out, map, flat, how.combine_mode,
                     how.combine_opacity)
 
-    if out != null and settings.normal_green_down:
+    if out == null:
+        return null
+    # Before the flip, which only moves a channel and so cannot care either way — but after
+    # everything that makes a shape, since what this evens out is what they left at the rim.
+    if settings.normal_clean_edges:
+        out = IWStageKernels.normal_clean_edges(out, flat, settings.normal_inner_reach)
+    if settings.normal_green_down:
         out = IWStageKernels.normal_flip_green(out)
     return out
 

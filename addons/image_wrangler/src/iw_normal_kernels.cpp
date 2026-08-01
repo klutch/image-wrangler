@@ -478,6 +478,109 @@ Ref<Image> IWStageKernels::combine_normals(
     return Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, out);
 }
 
+Ref<Image> IWStageKernels::normal_clean_edges(
+        const Ref<Image> &map,
+        const PackedInt32Array &rects,
+        int64_t inner_reach) {
+    ERR_FAIL_COND_V(map.is_null(), Ref<Image>());
+    if (map->is_empty() || rects.is_empty()) {
+        return map;
+    }
+
+    const int64_t width = map->get_width();
+    const int64_t height = map->get_height();
+    const int64_t reach = iw::maxi(inner_reach, 1);
+
+    const PackedByteArray pixels = sheet_bytes(map);
+    PackedByteArray out = pixels;
+    uint8_t *dst = out.ptrw();
+    const uint8_t *src = pixels.ptr();
+
+    const int32_t *rect_ptr = rects.ptr();
+    for (int64_t n = 0; n + 3 < rects.size(); n += 4) {
+        int64_t rx = 0;
+        int64_t ry = 0;
+        int64_t rw = 0;
+        int64_t rh = 0;
+        if (!rect_at(rect_ptr, n, width, height, rx, ry, rw, rh)) {
+            continue;
+        }
+
+        const int64_t lw = rw + MARGIN * 2;
+        const int64_t lh = rh + MARGIN * 2;
+        const int64_t lcount = lw * lh;
+
+        // The margin is left clear, which is what makes the outline itself a seed below —
+        // the same trick the shape kernel uses, and the same half-alpha cut the packer made.
+        std::vector<uint8_t> solid(static_cast<size_t>(lcount), 0);
+        for (int64_t y = 0; y < rh; y++) {
+            const int64_t row = (ry + y) * width + rx;
+            const int64_t local = (y + MARGIN) * lw + MARGIN;
+            for (int64_t x = 0; x < rw; x++) {
+                const double alpha = src[(row + x) * 4 + 3] / 255.0;
+                solid[static_cast<size_t>(local + x)] = alpha >= iw::SOLID_ALPHA ? 1 : 0;
+            }
+        }
+
+        // Which pixels are rim, worked out by flooding in from outside and stopping after
+        // `reach` steps. Anything the flood did not claim is deeper than the rim, and so is
+        // something worth copying from.
+        PackedInt32Array outside;
+        for (int64_t i = 0; i < lcount; i++) {
+            if (!solid[static_cast<size_t>(i)]) {
+                outside.push_back(static_cast<int32_t>(i));
+            }
+        }
+        const PackedInt32Array rim = IWPixelMath::grassfire(outside, lw, lh, reach);
+        const int32_t *is_rim = rim.ptr();
+
+        PackedInt32Array inner;
+        for (int64_t i = 0; i < lcount; i++) {
+            if (solid[static_cast<size_t>(i)] && is_rim[i] < 0) {
+                inner.push_back(static_cast<int32_t>(i));
+            }
+        }
+        // Nothing in this sprite is further in than the rim, so there is nothing to spread.
+        // A sprite thinner than twice the reach is the ordinary case for this.
+        if (inner.is_empty()) {
+            continue;
+        }
+
+        // And now the other way: from the inside out, so every rim pixel is handed the
+        // nearest one that is properly inside. Twice the reach because a corner is further
+        // from the inside than a flat edge of the same depth is, counted in steps.
+        const PackedInt32Array nearest = IWPixelMath::grassfire(inner, lw, lh, reach * 2);
+        const int32_t *from = nearest.ptr();
+
+        for (int64_t y = 0; y < rh; y++) {
+            const int64_t row = (ry + y) * width + rx;
+            const int64_t local = (y + MARGIN) * lw + MARGIN;
+            for (int64_t x = 0; x < rw; x++) {
+                const int64_t at = local + x;
+                // Only the rim, and only where the flood found it something to copy.
+                if (!solid[static_cast<size_t>(at)] || is_rim[at] < 0) {
+                    continue;
+                }
+                const int32_t source = from[at];
+                if (source < 0 || source == at) {
+                    continue;
+                }
+                // Back out of the local grid, which the margin offsets by one both ways.
+                const int64_t sx = (source % lw) - MARGIN;
+                const int64_t sy = (source / lw) - MARGIN;
+                const int64_t taken = ((ry + sy) * width + rx + sx) * 4;
+                const int64_t here = (row + x) * 4;
+                // Alpha stays exactly as it was: the silhouette is not this pass's business.
+                dst[here] = src[taken];
+                dst[here + 1] = src[taken + 1];
+                dst[here + 2] = src[taken + 2];
+            }
+        }
+    }
+
+    return Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, out);
+}
+
 Ref<Image> IWStageKernels::normal_flip_green(const Ref<Image> &map) {
     ERR_FAIL_COND_V(map.is_null(), Ref<Image>());
     if (map->is_empty()) {
