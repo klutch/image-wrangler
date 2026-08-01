@@ -115,11 +115,8 @@ func prerequisite_note(ctx: IWPipelineContext) -> String:
     return "Reading the source's own transparency."
 
 
-## What it wants outlined: one box round every tile this is holding back, so each ghosted
-## tile has an edge of its own rather than sharing one box with whatever else went.
-##
-## Read off [member ExcludeTilesSettings.found_bounds], so there is nothing to draw until a
-## run has found some tiles, and nothing again once this stage stops taking any.
+## What it wants outlined: one box round every tile this is holding back, so each has an
+## edge of its own. Empty until a run has found some tiles.
 func marked_regions() -> Array[Rect2i]:
     var out: Array[Rect2i] = []
     if settings == null:
@@ -181,11 +178,8 @@ func process_context(ctx: IWPipelineContext) -> void:
     # Flattened out of the Resources they are kept in, the way every stage hands its lists
     # down: reading a TilePick per pixel is a property lookup the kernel cannot afford.
     #
-    # [b]Every pick goes down, switched off ones included[/b], with a second list saying
-    # which of them count. A switched-off pick still has to be told which tile it is
-    # sitting on — that is what keeps its row naming a real tile and what stops clicking
-    # that tile adding a second pick for it — and dropping it here would shift every pick
-    # after it out of step with what the kernel reports back.
+    # Switched-off picks go down too, with a second list saying which count, so each still
+    # comes back knowing its tile and the indices stay in step with what the kernel reports.
     var points := PackedInt32Array()
     var active := PackedByteArray()
     for pick in settings.picks:

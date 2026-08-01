@@ -67,11 +67,8 @@ const _V1_ORDER := [
 ## [method _crevice_from_block] takes back out.
 const _RETIRED_IDS := {}
 
-## Operation ids that changed name, mapped to what they are called now.
-##
-## The operation is the same one and its settings kept their names, so a file naming the
-## old id is read straight into the new one. Nothing is written back until the user edits
-## something, so opening an old file and closing it again leaves the old id in place.
+## Operation ids that changed name, mapped to what they are called now. The settings kept
+## their names, so an old id is read straight into the new one.
 const _RENAMED_IDS := {
     &"tile_selector": &"exclude_tiles",
 }
@@ -315,8 +312,7 @@ static func decode_stack(envelope: Dictionary, registry: Dictionary, source: Str
             continue
         var entry: Dictionary = element
         var id := StringName(entry.get("id", ""))
-        # Before anything else looks at it, so the rest of this only ever sees ids that
-        # this build actually uses.
+        # First, so the rest only ever sees ids this build uses.
         if _RENAMED_IDS.has(id):
             id = _RENAMED_IDS[id]
         if _RETIRED_IDS.has(id):

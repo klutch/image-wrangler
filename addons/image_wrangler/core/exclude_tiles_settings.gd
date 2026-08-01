@@ -38,9 +38,7 @@ func survives(tile: int) -> bool:
 
 ## Whether the tile numbered [param tile] was chosen by a pick that is switched on.
 ##
-## A switched-off pick still knows its tile, so this asks about the switch as well — it is
-## what [method survives] is read through, and a pick that is not acting must not change
-## what the preview says about the picture.
+## A switched-off pick still knows its tile, so the switch has to be asked about here too.
 func chose(tile: int) -> bool:
     if tile < 0:
         return false
@@ -50,10 +48,10 @@ func chose(tile: int) -> bool:
     return false
 
 
-## The pick sitting on tile [param tile], or -1.
+## The pick sitting on tile [param tile], switched off or not, or -1.
 ##
-## Switched off or not, because this is what clicking a tile is answered with: a tile
-## already in the list should let go of its pick rather than gain a second one.
+## Clicking a tile is answered with this, so a tile already in the list lets its pick go
+## rather than gaining a second one.
 func pick_on(tile: int) -> int:
     if tile < 0:
         return -1

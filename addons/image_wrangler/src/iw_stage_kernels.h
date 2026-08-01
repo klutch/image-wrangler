@@ -332,11 +332,10 @@ public:
     // ExcludeTiles: keeps or removes whole tiles, by which ones the user picked.
     //
     // `points` is x,y interleaved, one pair per pick. `active` is one byte per pick, zero
-    // for a pick the user switched off; every point is still resolved to its tile, but a
-    // switched-off one does not choose it. Shorter than the picks, or empty, means all of
-    // them count. `mode` is 0 to remove the picked tiles and 1 to remove everything else.
-    // Returns "bounds", the rectangle of every tile found, and "picked", which tile each
-    // point landed on or -1.
+    // for one switched off; empty or short means the rest count. Every point is resolved
+    // to its tile either way. `mode` is 0 to remove the picked tiles and 1 to remove
+    // everything else. Returns "bounds", the rectangle of every tile found, and "picked",
+    // which tile each point landed on or -1.
     static Dictionary exclude_tiles(
             const Ref<IWPipelineContext> &ctx, const PackedInt32Array &points,
             const PackedByteArray &active, int64_t mode);

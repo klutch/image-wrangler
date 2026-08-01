@@ -230,11 +230,12 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
 // this took out is still in the alpha handed to the next run, so the point that chose it
 // still lands on it and it still gets an outline to click.
 //
-// [b]A switched-off pick is resolved but does not choose.[/b] Every point is told which
-// tile it landed on, whether or not `active` says it counts, so the dock can keep naming
-// the tile under a pick the user has switched off and bring it back without a second
-// click. Dropping those points before the call would have been the other way to do it,
-// and it would have shifted every pick after them out of step with "picked".
+// [b]A tile is its whole rectangle.[/b] Everything inside a doomed tile's box goes,
+// whatever its alpha, which is what the outlines and the picking already mean by a tile.
+// Erasing only the labelled pixels leaves the unlabelled fringe behind as a faint rim.
+//
+// [b]A switched-off pick is still resolved.[/b] Every point is told which tile it landed
+// on whether or not `active` counts it, so the dock keeps naming the tile under it.
 //
 // `points` is x,y interleaved, one pair per pick. `active` is one byte per pick, zero for
 // one that is switched off; empty or short means the rest count. `mode` is 0 to remove
@@ -315,6 +316,28 @@ Dictionary IWStageKernels::exclude_tiles(
         return out;
     }
 
+    // Every pixel inside a doomed tile's rectangle, whatever its alpha.
+    std::vector<uint8_t> taken(static_cast<size_t>(pixel_count), 0);
+    for (int64_t n = 0; n < count; n++) {
+        if (doomed[static_cast<size_t>(n)] == 0) {
+            continue;
+        }
+        for (int64_t y = found.min_y[n]; y <= found.max_y[n]; y++) {
+            const int64_t row = y * width;
+            for (int64_t x = found.min_x[n]; x <= found.max_x[n]; x++) {
+                taken[static_cast<size_t>(row + x)] = 1;
+            }
+        }
+    }
+
+    // Boxes overlap, so spare any pixel belonging to a tile that is staying.
+    for (int64_t i = 0; i < pixel_count; i++) {
+        const int32_t island = found.label[static_cast<size_t>(i)];
+        if (island >= 0 && doomed[static_cast<size_t>(island)] == 0) {
+            taken[static_cast<size_t>(i)] = 0;
+        }
+    }
+
     // A picture of what is about to go, taken before it goes. The preview lays this back
     // over the result faintly, so a tile held back is still visible as the thing it was
     // rather than as an empty rectangle.
@@ -347,8 +370,7 @@ Dictionary IWStageKernels::exclude_tiles(
         for (int64_t y = 0; y < hidden_height; y++) {
             for (int64_t x = 0; x < hidden_width; x++) {
                 const int64_t from = (y + min_y) * width + (x + min_x);
-                const int32_t island = found.label[static_cast<size_t>(from)];
-                if (island < 0 || doomed[static_cast<size_t>(island)] == 0) {
+                if (taken[static_cast<size_t>(from)] == 0) {
                     continue;
                 }
                 const int64_t to = (y * hidden_width + x) * 4;
@@ -364,6 +386,12 @@ Dictionary IWStageKernels::exclude_tiles(
         out["hidden_rect"] = Rect2i(min_x, min_y, hidden_width, hidden_height);
     }
 
-    erase_pixels(ctx, pixels_of(found, doomed));
+    PackedInt32Array going;
+    for (int64_t i = 0; i < pixel_count; i++) {
+        if (taken[static_cast<size_t>(i)] != 0) {
+            going.push_back(static_cast<int32_t>(i));
+        }
+    }
+    erase_pixels(ctx, going);
     return out;
 }
