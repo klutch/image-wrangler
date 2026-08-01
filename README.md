@@ -153,9 +153,10 @@ adjust — it works on the finished picture, so moving it doesn't run the networ
   fade the original back in over the result, and a magenta backdrop for spotting stray pixels.
 - **↩️ Undo history** — every edit made to an image's stack this session, in a list. Click one
   to rewind to it.
-- **💾 Settings sidecars** — each image's stack is saved next to it as `yourfile_wrangler.json`,
-  so reopening the project picks up where you left off. Settings can also be copied between
-  images or saved as a preset.
+- **💾 Settings sidecars** — each image's stack is saved next to it as `yourfile.iwc`, so
+  reopening the project picks up where you left off. Older `yourfile_wrangler.json` sidecars
+  are converted to the new form the first time their image is opened. Settings can also be
+  copied between images or saved as a preset.
 - **📥 Drag and drop** — drag images straight in from the FileSystem dock.
 - **⚡ Fast** — the heavy pixel work is C++ running off the main thread, with a progress bar
   per stage so you can see which one is the slow one.

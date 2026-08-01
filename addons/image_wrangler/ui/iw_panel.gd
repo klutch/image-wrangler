@@ -4091,13 +4091,19 @@ func _on_output_dir_chosen(directory: String) -> void:
         jobs[path] = destination
         if FileAccess.file_exists(destination):
             existing.append(destination.get_file())
-        if not carries_sidecars or not FileAccess.file_exists(SettingsIO.sidecar_path(path)):
+        if not carries_sidecars:
             continue
-        # Only ours is listed: one belonging to something else is refused rather
-        # than replaced, so naming it here would promise a write that never comes.
-        var destination_sidecar := SettingsIO.sidecar_path(destination)
-        if SettingsIO.is_sidecar(destination_sidecar):
-            existing.append(destination_sidecar.get_file())
+        # Both names, since an image whose settings were never opened may still have an
+        # unconverted one beside it — and whichever is there is the one that travels.
+        var sources := SettingsIO.sidecar_paths(path)
+        var destinations := SettingsIO.sidecar_paths(destination)
+        for i in sources.size():
+            if not FileAccess.file_exists(sources[i]):
+                continue
+            # Only ours is listed: one belonging to something else is refused rather
+            # than replaced, so naming it here would promise a write that never comes.
+            if SettingsIO.is_sidecar(destinations[i]):
+                existing.append(destinations[i].get_file())
 
     _pending_outputs = jobs
     if existing.is_empty():
@@ -4276,19 +4282,21 @@ func _output_name_for(path: String) -> String:
 ## Sidecar paths that sources outside [param jobs] still read from.
 ##
 ## A sidecar is named from the basename alone, so [code]flower.png[/code] and
-## [code]flower.jpg[/code] in one folder share [code]flower_wrangler.json[/code].
-## Renaming only one of them must not carry that file away from the other, which
-## would strip settings off an image this run never touched.
+## [code]flower.jpg[/code] in one folder share [code]flower.iwc[/code]. Renaming only one
+## of them must not carry that file away from the other, which would strip settings off an
+## image this run never touched.
 func _sidecars_held_outside(jobs: Dictionary) -> Dictionary:
     var held := {}
     for path in _sources:
         var source := String(path)
-        if not jobs.has(source):
-            held[SettingsIO.sidecar_path(source)] = true
+        if jobs.has(source):
+            continue
+        for sidecar in SettingsIO.sidecar_paths(source):
+            held[sidecar] = true
     return held
 
 
-## Copies a source's JSON counterpart alongside the copy of the image, and queues
+## Copies a source's settings counterpart alongside the copy of the image, and queues
 ## the original for the same removal check the image gets.
 ##
 ## The sidecar describes the image, so a rename that left it behind would strand
@@ -4298,23 +4306,43 @@ func _sidecars_held_outside(jobs: Dictionary) -> Dictionary:
 ## almost certainly is ours, and a stranger's file named for this image belongs with
 ## it just as much.
 ##
-## Returns the empty String when the sidecar was carried or there was none, and
-## the name of the file left behind otherwise. Never fails the image: by the time
+## [b]Both names are tried.[/b] An image whose settings were never opened in this session
+## has never been through the conversion, so what is beside it may still be the old
+## [code]_wrangler.json[/code] — and a rename that carried only the name it has not got yet
+## would leave the settings behind. Renaming is not the place to convert: it is a file
+## operation, and the file it would have to rewrite belongs to an image nobody has looked
+## at. Opening that image afterwards converts it where it now lives.
+##
+## Returns the empty String when the sidecars were carried or there were none, and
+## the name of the first file left behind otherwise. Never fails the image: by the time
 ## this runs the image is already written, and reporting a rename as failed
 ## because of its sidecar would be a lie about what is on disk.
 func _carry_sidecar(source_path: String, destination: String, held: Dictionary) -> String:
-    var source_sidecar := SettingsIO.sidecar_path(source_path)
+    var sources := SettingsIO.sidecar_paths(source_path)
+    var destinations := SettingsIO.sidecar_paths(destination)
+    var stranded := ""
+    for i in sources.size():
+        var left := _carry_one_sidecar(sources[i], destinations[i], held)
+        if stranded.is_empty():
+            stranded = left
+    return stranded
+
+
+## One sidecar carried from [param source_sidecar] to [param destination_sidecar].
+##
+## Split out of [method _carry_sidecar] only so that the two names it has to try are a loop
+## rather than the same twenty lines twice.
+func _carry_one_sidecar(source_sidecar: String, destination_sidecar: String, held: Dictionary) -> String:
     if not FileAccess.file_exists(source_sidecar):
         return ""
 
     # Both sidecars are named from their image's basename, so a rename that only
     # changed the extension's case leaves them the same file. Copying it onto
     # itself would truncate it.
-    var destination_sidecar := SettingsIO.sidecar_path(destination)
     if _is_same_file(source_sidecar, destination_sidecar):
         return ""
 
-    # The one case where refusing beats writing: a JSON already at the new name
+    # The one case where refusing beats writing: a file already at the new name
     # that this addon did not write is somebody else's, and a rename is no licence
     # to destroy it. Same judgement [method SettingsIO.save_settings] makes.
     if FileAccess.file_exists(destination_sidecar) and not SettingsIO.is_sidecar(destination_sidecar):
