@@ -331,7 +331,11 @@ var _packing_normal_image: Image
 var _packing_normal_key := ""
 
 ## Whether the preview is showing the normal map in place of the sheet.
-var _showing_normals := false
+##
+## On to begin with, since a stack of generators is only worth having if the map it makes is
+## looked at. It is a wish rather than a fact: with no map made, the preview shows the sheet
+## and the tick is hidden, and the map comes back the moment there is one again.
+var _showing_normals := true
 
 ## Whether a packing is running, so a change arriving mid-run cannot start a second on top
 ## of the first, and whether one asked for itself while that was true.
@@ -3896,12 +3900,18 @@ func _run_packing() -> void:
         sheet.blit_rect(sprites[i], Rect2i(Vector2i.ZERO, sizes[i]), at)
         rects.append(Rect2i(at, sizes[i]))
 
+    # [b]Only the first sheet is fitted.[/b] Every later one leaves the view exactly where
+    # it was, for the reason [method IWPreviewView.set_image] does: a re-run is the same
+    # picture worked out again, and pressing Refresh to see what changed is no use if it
+    # throws away the zoom and the corner you were looking at to find out.
+    var arriving := _packing_image == null
     _packing_image = sheet
     _packing_rects = rects
     # A new sheet is new sprites in new places, so whatever map was held describes nothing
     # that is on screen any more. This updates the preview itself.
     _rebuild_packing_normals()
-    _preview.fit_to_view()
+    if arriving:
+        _preview.fit_to_view()
     var settings := _packing.get_settings()
     var grown := ""
     if packed_width != settings.output_width or packed_height != settings.output_height:
@@ -4034,15 +4044,15 @@ func _rebuild_packing_normals() -> void:
     _update_preview_texture()
 
 
-## Shows the toggle only when there is a map to show, and drops the preview back to the sheet
-## when there is not — so it cannot be left looking at a map that is no longer made.
+## Shows the toggle only when there is a map to show.
+##
+## The wish behind it is left alone, so switching every generator off and back on again finds
+## the preview as it was left. [method _update_preview_texture] is what keeps it honest: with
+## no map made it shows the sheet whatever the tick says.
 func _update_normal_toggle() -> void:
     if _packing_normal_toggle == null:
         return
-    var offered := _packing_normal_image != null
-    _packing_normal_toggle.visible = offered
-    if not offered:
-        _showing_normals = false
+    _packing_normal_toggle.visible = _packing_normal_image != null
     # Written rather than read, so a rebuilt dock comes back showing what it was showing.
     _packing_normal_toggle.set_pressed_no_signal(_showing_normals)
 
@@ -4627,6 +4637,9 @@ func _run_upscale() -> void:
         _set_status(failure)
         return
 
+    # The first picture the network makes is fitted; every later one leaves the view where
+    # it was. See the same rule in _run_packing.
+    var arriving := _upscale_image == null
     _upscale_raw = result
     _upscale_raw_source = source
     _upscale_raw_key = signature
@@ -4634,7 +4647,8 @@ func _run_upscale() -> void:
     _upscale_image = result
     _upscale_source = source
     _update_preview_texture()
-    _preview.fit_to_view()
+    if arriving:
+        _preview.fit_to_view()
     var elapsed := Time.get_ticks_msec() - started
     _set_upscale_status("%s at %dx: %d x %d in %d ms." % [
         path.get_file(), _upscale.scale_ratio(), result.get_width(), result.get_height(), elapsed,
