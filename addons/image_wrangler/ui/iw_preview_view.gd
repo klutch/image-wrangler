@@ -62,6 +62,15 @@ const CHECKER_LIGHT := Color(0.24, 0.24, 0.27)
 ## fringe or a pinhole has to be found rather than judged.
 const TRANSPARENCY_COLOR := Color(1, 0, 1)
 
+## The line drawn round the image's own edge, and how thick it is on screen.
+##
+## An image that is transparent at its corners has no visible edge at all against the
+## checkerboard, so where the picture stops has to be stated rather than shown. One screen
+## pixel whatever the zoom, since this is about the boundary and not about any pixel
+## inside it — a line that grew with the zoom would start reading as part of the artwork.
+const BORDER_COLOR := Color(0, 0, 0)
+const BORDER_WIDTH := 1.0
+
 ## What a marker is drawn in, alpha included.
 ##
 ## The alpha belongs here rather than being mixed in at each draw. There is one answer
@@ -1340,6 +1349,10 @@ func _draw_canvas() -> void:
     # asked for.
     if original_fade > 0.0 and _original_texture != null:
         _canvas.draw_texture_rect(_original_texture, frame, false, Color(1, 1, 1, original_fade))
+    # Just outside the image rather than on it, so the line says where the picture stops
+    # without covering the outermost row of pixels it is there to bound — which at a zoom
+    # of 1 is the difference between marking that row and hiding it.
+    _canvas.draw_rect(frame.grow(BORDER_WIDTH * 0.5), BORDER_COLOR, false, BORDER_WIDTH)
     _draw_markers()
     _draw_polygons()
     _draw_brush()

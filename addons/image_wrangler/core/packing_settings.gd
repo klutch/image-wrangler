@@ -31,7 +31,11 @@ extends Resource
 ##
 ## It is a second file, not a change to the sheet: one pixel per sprite, holding where that
 ## sprite landed. See [IWPacking]'s class note for what is in it and how it is read.
-@export var create_lookup_table: bool = false
+##
+## On by default. A packed sheet is close to unusable without something naming where each
+## sprite went, and the table costs a small file next to the sheet rather than anything in
+## it — so having it and not needing it is the cheaper mistake of the two.
+@export var create_lookup_table: bool = true
 
 
 ## A copy that belongs to no image.
