@@ -824,6 +824,15 @@ func _build_packing() -> void:
             push_error("Image Wrangler: could not load operation script at %s" % PACKING_SCRIPT)
             return
         _packing = script.new()
+    # The note lives in the box the builder is about to clear, and clearing frees. Lifted
+    # out first so the Label survives the rebuild; _place_packing_note puts it back.
+    # Remade if a past rebuild already freed it — a dead reference is not null.
+    if not is_instance_valid(_packing_mode_note):
+        _packing_mode_note = Label.new()
+        _packing_mode_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+        _packing_mode_note.modulate = Color(1, 1, 1, 0.6)
+    elif _packing_mode_note.get_parent() != null:
+        _packing_mode_note.get_parent().remove_child(_packing_mode_note)
     SettingsBuilder.build(_packing, _packing_box, _on_setting_changed, _fold_state, "packing")
 
     # The note goes under the dropdown rather than at the top or the bottom of the form,
@@ -890,6 +899,13 @@ func _build_upscale() -> void:
     # the settings actually name. See Upscale.sync_engine.
     _upscale.sync_engine()
     _upscale_form_key = _upscale_form_signature()
+    # Lifted out before the builder clears the box, for the reason _build_packing gives.
+    if not is_instance_valid(_upscale_model_note):
+        _upscale_model_note = Label.new()
+        _upscale_model_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+        _upscale_model_note.modulate = Color(1, 1, 1, 0.6)
+    elif _upscale_model_note.get_parent() != null:
+        _upscale_model_note.get_parent().remove_child(_upscale_model_note)
     SettingsBuilder.build(_upscale, _upscale_box, _on_setting_changed, _fold_state, "upscale")
 
     # Under the model dropdown for the same reason Packing's note sits under its mode
