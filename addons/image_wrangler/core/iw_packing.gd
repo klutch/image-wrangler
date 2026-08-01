@@ -28,6 +28,14 @@ extends IWOperation
 ## nothing to mean here, since the whole list has already gone into the one image, and
 ## stands down while this is showing. Nothing is written to a sidecar either — these
 ## settings describe the batch, like [Rename]'s.
+##
+## [b]The one thing a sheet cannot tell you is where anything on it went.[/b] Switch
+## [member PackingSettings.create_lookup_table] on and saving writes a second file beside
+## the PNG, named the same with [code]_lut.res[/code] on the end — a texture holding one
+## pixel per sprite, in the order the sprites were found, whose red, green, blue and alpha
+## are that sprite's left, top, width and height on the sheet in pixels. A shader given the
+## sprite's number reads its rectangle in one fetch, instead of being told the layout some
+## other way. See [method build_lookup_image] for the shape of it.
 
 ## How the sprites are arranged.
 ##
@@ -78,6 +86,17 @@ const MODE_DESCRIPTIONS := [
 ## stops you asking.
 const MIN_SIZE := 1
 const MAX_SIZE := 16384
+
+## How wide the lookup table is, in pixels, whatever is in it.
+##
+## Fixed rather than fitted to the sprite count so the shader side is a constant it can
+## divide by rather than a number it has to be told. 256 rows the table over at a width
+## every GPU takes, and a row of it is 4 KB — small enough that a sheet of nine sprites
+## paying for the whole row is not worth a second thought.
+const LUT_WIDTH := 256
+
+## What goes on the end of the lookup table's name, extension included.
+const LUT_SUFFIX := "_lut.res"
 
 var settings: PackingSettings
 
@@ -159,6 +178,12 @@ func get_settings_schema() -> Array[Dictionary]:
             "label": "Expand to Fit",
             "type": SettingType.BOOL,
             "tooltip": "Doubles the sheet until everything fits, taking the width first, then the\nheight, then the width again.\n\nOff, the sheet stays exactly the size above and you are told when that is not\nenough — which is what you want when the size is one something else has already\ndecided.\n\nIt stops at %d, the largest a texture is allowed to be almost anywhere, and\nsays so if it gets there with sprites still to place." % MAX_SIZE,
+        },
+        {
+            "property": &"create_lookup_table",
+            "label": "Create Lookup Table",
+            "type": SettingType.BOOL,
+            "tooltip": "Writes a second file beside the sheet holding where every sprite landed on\nit, named the same with %s on the end.\n\nIt is a %d-wide texture with one pixel per sprite, in the order the sprites\nwere found. That pixel's red, green, blue and alpha are the sprite's left,\ntop, width and height on the sheet, in pixels — so a shader handed a sprite\nnumber can read its rectangle in one fetch.\n\nSprite n is at x = n %% %d, y = n / %d. The file is only written when the\nsheet is saved." % [LUT_SUFFIX, LUT_WIDTH, LUT_WIDTH, LUT_WIDTH],
         },
     ]
 
@@ -431,3 +456,56 @@ func _blank_positions(count: int) -> Array:
     for _i in count:
         out.append(Vector2i(-1, -1))
     return out
+
+
+# --- The lookup table ----------------------------------------------------
+
+## Where the lookup table goes, given where the sheet went.
+##
+## The sheet's own name with the extension swapped, so the two travel together and it is
+## obvious at a glance which table belongs to which sheet.
+static func lookup_path_for(sheet_path: String) -> String:
+    return sheet_path.get_basename() + LUT_SUFFIX
+
+
+## How big a table [param count] sprites needs.
+##
+## [constant LUT_WIDTH] across always, and as many rows as that takes rounded up to a power
+## of two. Rounding wastes at most half a table's worth of empty pixels, which at 4 KB a row
+## is nothing, and buys a height a shader can shift by rather than divide by — and one that
+## stops changing every time a sprite is added or taken away.
+static func lookup_size(count: int) -> Vector2i:
+    var rows: int = maxi(1, ceili(float(maxi(count, 1)) / float(LUT_WIDTH)))
+    return Vector2i(LUT_WIDTH, nearest_po2(rows))
+
+
+## The lookup table itself, from one [Rect2i] per sprite in the order they were found.
+##
+## Sprite n is the pixel at [code](n % LUT_WIDTH, n / LUT_WIDTH)[/code], and its channels
+## are the rectangle: red and green the top-left corner, blue and alpha the size, all four
+## in sheet pixels rather than normalized — divide by [code]textureSize()[/code] in the
+## shader if UVs are what is wanted.
+##
+## [b]RGBAF, so the numbers survive.[/b] A coordinate on a 2048-wide sheet needs more than
+## the 256 steps a byte per channel gives, and full floats hold a whole pixel count exactly
+## with nothing to unpack at the other end. Pixels past the last sprite are left at zero,
+## which is a rectangle of no area and so cannot be mistaken for a sprite.
+static func build_lookup_image(rects: Array) -> Image:
+    var size := lookup_size(rects.size())
+    var image := Image.create_empty(size.x, size.y, false, Image.FORMAT_RGBAF)
+    for i in rects.size():
+        var rect: Rect2i = rects[i]
+        @warning_ignore("integer_division")
+        image.set_pixel(i % LUT_WIDTH, i / LUT_WIDTH,
+                Color(rect.position.x, rect.position.y, rect.size.x, rect.size.y))
+    return image
+
+
+## The lookup table as the thing that gets saved.
+##
+## An [ImageTexture] rather than the [Image], because what this is for is being dropped into
+## a shader's texture slot — and saved as a binary [code].res[/code], which keeps the float
+## format exactly. A PNG could not: the image importer only ever hands back bytes, and
+## Detect 3D would quietly re-compress it the first time a 3D material touched it.
+static func build_lookup_texture(rects: Array) -> ImageTexture:
+    return ImageTexture.create_from_image(build_lookup_image(rects))

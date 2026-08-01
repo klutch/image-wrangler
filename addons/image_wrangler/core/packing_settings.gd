@@ -27,6 +27,12 @@ extends Resource
 ## something else has already decided.
 @export var expand_to_fit: bool = true
 
+## Whether a lookup table is written beside the sheet when it is saved.
+##
+## It is a second file, not a change to the sheet: one pixel per sprite, holding where that
+## sprite landed. See [IWPacking]'s class note for what is in it and how it is read.
+@export var create_lookup_table: bool = false
+
 
 ## A copy that belongs to no image.
 ##

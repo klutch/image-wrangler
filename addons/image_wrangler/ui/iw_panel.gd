@@ -307,10 +307,26 @@ var _upscale: Upscale
 ## it is asked for and then stands until asked again.
 var _packing_image: Image
 
+## Where every sprite landed on [member _packing_image], one [Rect2i] each in the order the
+## sprites were found.
+##
+## Kept because the sheet cannot be asked: once the sprites are painted on there is nothing
+## in the pixels that says where one ends and the next begins. This is what the lookup table
+## is written out of, and it is kept whether or not that switch is on — it is a few dozen
+## rectangles, and holding it means ticking the box does not mean packing again.
+var _packing_rects: Array = []
+
 ## Whether a packing is running, so a change arriving mid-run cannot start a second on top
 ## of the first, and whether one asked for itself while that was true.
 var _packing_running := false
 var _packing_pending := false
+
+## What the last packing was made from, as one string.
+##
+## Compared against the settings after each edit so that the switches which do not change
+## the sheet — Create Lookup Table is the only one so far — do not run every open image's
+## whole stack again for a sheet that would come out identical.
+var _packing_sheet_key := ""
 
 ## The highlighted image, run through its stack and then through waifu2x, shown in the
 ## viewport while the Upscale tab is up.
@@ -744,6 +760,7 @@ func _build_packing() -> void:
         _packing_box.add_child(_packing_mode_note)
         _packing_box.move_child(_packing_mode_note, _packing_note_index())
     _refresh_packing_note()
+    _packing_sheet_key = _packing_sheet_signature()
 
 
 ## Where the mode note belongs: directly after whichever row carries the mode dropdown.
@@ -1488,8 +1505,9 @@ func _build_output_section() -> Control:
     _process_selected_button.tooltip_text = "Process the selected image and ask where to save it.
 
 On the Packing tab it saves the packed sheet instead, which is the one
-thing there is to save there. On Upscale it runs the image's operations
-and then the network, which is what the tab is showing."
+thing there is to save there — plus the lookup table beside it, if that
+switch is on. On Upscale it runs the image's operations and then the
+network, which is what the tab is showing."
     _process_selected_button.pressed.connect(_on_process_selected)
     section.add_child(_process_selected_button)
 
@@ -3161,7 +3179,13 @@ func _on_setting_changed() -> void:
         # The note under the dropdown is the one part of this form that is not a setting,
         # so nothing else would notice the mode had moved.
         _refresh_packing_note()
-        _schedule_packing()
+        # Only when the sheet itself would come out different. Create Lookup Table is
+        # answered at save time out of a plan already made, and repacking for it would cost
+        # a run of every open image's stack to arrive back at the same pixels.
+        var key := _packing_sheet_signature()
+        if key != _packing_sheet_key:
+            _packing_sheet_key = key
+            _schedule_packing()
         return
     if _mode == Mode.UPSCALE:
         # A setting can be the one that changes what the form itself holds, and rebuilding
@@ -3409,7 +3433,7 @@ func _run_packing_now() -> void:
         _packing_pending = true
         return
     if _sources.is_empty():
-        _packing_image = null
+        _forget_packed_sheet()
         _update_preview_texture()
         _set_packing_status("Nothing to pack: add some images to the list.")
         return
@@ -3462,7 +3486,7 @@ func _run_packing() -> void:
         sprites.append_array(_sprites_in(result))
 
     if sprites.is_empty():
-        _packing_image = null
+        _forget_packed_sheet()
         _update_preview_texture()
         _set_packing_status("Nothing to pack: no objects were found in %d image%s."
                 % [read, "" if read == 1 else "s"])
@@ -3486,13 +3510,20 @@ func _run_packing() -> void:
     var sheet := Image.create_empty(
             packed_width, packed_height, false, Image.FORMAT_RGBA8)
     sheet.fill(Color(0, 0, 0, 0))
+    # Filled alongside the painting so the two cannot disagree: a sprite that went down is a
+    # rectangle in the table, and one that did not is a rectangle of no area rather than a
+    # gap that would shift every sprite after it onto the wrong number.
+    var rects: Array = []
     for i in sprites.size():
         var at: Vector2i = positions[i]
         if at.x < 0:
+            rects.append(Rect2i())
             continue
         sheet.blit_rect(sprites[i], Rect2i(Vector2i.ZERO, sizes[i]), at)
+        rects.append(Rect2i(at, sizes[i]))
 
     _packing_image = sheet
+    _packing_rects = rects
     _update_preview_texture()
     _preview.fit_to_view()
     var settings := _packing.get_settings()
@@ -3563,6 +3594,24 @@ func _warn_packing_overflowed(placed: int, total: int, width: int, height: int) 
 func _set_packing_status(text: String) -> void:
     if _packing_status != null:
         _packing_status.text = text
+
+
+## Drops the sheet and the layout together, since one without the other is a trap.
+func _forget_packed_sheet() -> void:
+    _packing_image = null
+    _packing_rects = []
+
+
+## The settings that decide what the sheet looks like, as one string.
+##
+## Create Lookup Table is deliberately not in it — that is the whole point of the thing. See
+## [member _packing_sheet_key].
+func _packing_sheet_signature() -> String:
+    if _packing == null:
+        return ""
+    var settings := _packing.get_settings()
+    return "%d/%d/%d/%s" % [settings.mode, settings.output_width, settings.output_height,
+            settings.expand_to_fit]
 
 
 # --- Upscaling -----------------------------------------------------------
@@ -3988,8 +4037,37 @@ func _write_packed_sheet(destination: String) -> void:
     if _packing_image.save_png(destination) != OK:
         _set_status("Could not write %s." % destination.get_file())
         return
-    _set_status("Saved %s." % destination.get_file())
-    _set_packing_status("Saved %s." % destination.get_file())
+
+    var written := destination.get_file()
+    if _packing != null and _packing.get_settings().create_lookup_table:
+        var table := _write_lookup_table(destination)
+        if table.is_empty():
+            # The sheet is on disk and is the thing that was asked for, so this reports the
+            # half that failed rather than pretending the whole write did.
+            _set_status("Saved %s, but could not write the lookup table." % written)
+            _set_packing_status("Saved %s, but could not write the lookup table." % written)
+            return
+        written = "%s and %s" % [written, table]
+
+    _set_status("Saved %s." % written)
+    _set_packing_status("Saved %s." % written)
+
+
+## Writes the lookup table beside the sheet, and returns what it was called — or an empty
+## string if it could not be written.
+##
+## [b]A resource rather than an image.[/b] The rectangles are floats and have to stay
+## floats, and a [code].res[/code] is the only way out of here that keeps them: it is read
+## back exactly as written, where anything going through the image importer would come back
+## as bytes. See [method IWPacking.build_lookup_texture].
+func _write_lookup_table(sheet_path: String) -> String:
+    if _packing_rects.is_empty():
+        return ""
+    var destination := IWPacking.lookup_path_for(sheet_path)
+    var table := IWPacking.build_lookup_texture(_packing_rects)
+    if ResourceSaver.save(table, destination) != OK:
+        return ""
+    return destination.get_file()
 
 
 ## Processing the whole list asks for a folder instead: one dialog cannot name
