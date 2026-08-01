@@ -8,9 +8,11 @@ extends IWStackOperation
 ## the odd frame that came out wrong, or the six you actually wanted out of forty.
 ##
 ## [b]A tile here is a sprite there.[/b] The labelling is the one Packing lifts its sprites
-## with, so anything held back is exactly one sprite that would have gone on the sheet —
-## until [member ExcludeTilesSettings.alpha_threshold] is moved off the half the packer
-## uses, which is the one thing here that can part the two.
+## with, so anything held back is exactly one sprite that would have gone on the sheet.
+##
+## [b]Objects whose boxes overlap are one tile.[/b] A box is what this takes, so a pair that
+## interlocks cannot be separated by one — taking either would cut a bite out of the other.
+## They get a single box round the pair, and pick as one.
 ##
 ## [b]Every tile gets an outline, not only the chosen ones.[/b] A tile this removes is no
 ## longer in the picture to be clicked, so the outline is what you click instead. Under
@@ -89,15 +91,6 @@ func get_settings_schema() -> Array[Dictionary]:
             "tooltip": "What happens to the tiles you pick.\n\nExclude Selected removes the ones you picked and lets the rest through.\nInclude Selected does the opposite and keeps only those.\n\nEvery tile is outlined either way, including the ones that have been removed,\nso a tile is always there to be clicked again. The ones on their way out are\ndrawn faded.",
         },
         {
-            "property": &"alpha_threshold",
-            "label": "Alpha Threshold",
-            "type": SettingType.FLOAT,
-            "min": 0.0,
-            "max": 1.0,
-            "step": 0.01,
-            "tooltip": "How solid a pixel has to be to count as part of a tile rather than as the soft\nedge round one.\n\nHalf is what the packer uses, so at half a tile here is exactly a sprite there.\nRaise it to split a shape its faint pixels are holding together, lower it to\njoin shapes that only their edges touch. A fully clear pixel is never part of a\ntile, however low this goes.\n\nMoving it changes which tiles exist, so a pick can land on a different one.",
-        },
-        {
             "property": &"hidden_opacity",
             "label": "Hidden Opacity",
             "hidden_when": &"excluding_selected",
@@ -110,7 +103,7 @@ func get_settings_schema() -> Array[Dictionary]:
         {
             "property": &"picks",
             "type": SettingType.EXCLUDE_TILES,
-            "tooltip": "The tiles you picked. Press Pick, then click one on the preview or drag a\nrectangle over several.\n\nA tile is one whole object, the same one the packer would lift out as a\nsprite. Picking stores the spot you clicked rather than the tile's number, so\nit keeps hold of the same tile when something above this changes.",
+            "tooltip": "The tiles you picked. Press Pick, then click one on the preview or drag a\nrectangle over several.\n\nA tile is one whole object, the same one the packer would lift out as a\nsprite, or several joined where their boxes overlap — a box is what this takes,\nso objects that interlock go together. Picking stores the spot you clicked\nrather than the tile's number, so it keeps hold of the same tile when something\nabove this changes.",
         },
     ]
 
@@ -211,8 +204,7 @@ func process_context(ctx: IWPipelineContext) -> void:
         active.append(1 if pick.enabled else 0)
 
     var report := IWStageKernels.exclude_tiles(
-            ctx, points, active, sanitise_mode(settings.mode),
-            clampf(settings.alpha_threshold, 0.0, 1.0))
+            ctx, points, active, sanitise_mode(settings.mode))
     _absorb(report)
     if not report_progress(0.8):
         return

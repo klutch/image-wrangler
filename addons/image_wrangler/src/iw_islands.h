@@ -20,9 +20,6 @@ namespace iw {
 
 // How much of a pixel has to survive for it to count as part of an object rather than
 // part of its fringe. Half, matching what RemoveLines calls the solid part of a shape.
-//
-// What every caller gets unless it asks for another, so the stages that have to agree
-// about what an object is agree by default.
 inline constexpr double SOLID_ALPHA = 0.5;
 
 // Which island each pixel belongs to, and the smallest rectangle round each one.
@@ -58,15 +55,6 @@ struct Islands {
 //
 // Islands come back in the order they were found, which is the scan order of their first
 // solid pixel: top to bottom, then left to right.
-//
-// `solid_alpha` is what the first pass calls solid. Raising it splits a shape held
-// together by soft pixels into pieces and drops the faintest objects entirely; lowering it
-// joins objects that only their fringes touch. Anything fully clear is never solid however
-// low it goes, so a threshold of zero means every visible pixel rather than every pixel.
-// [b]Move it and this labelling no longer agrees with the stages that took the
-// default[/b] — the same image can then hold a different number of objects depending on
-// which stage is asking.
-Islands label_islands(const float *alpha, int64_t width, int64_t height,
-        double solid_alpha = SOLID_ALPHA);
+Islands label_islands(const float *alpha, int64_t width, int64_t height);
 
 } // namespace iw

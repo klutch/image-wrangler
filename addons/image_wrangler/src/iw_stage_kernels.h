@@ -331,16 +331,17 @@ public:
 
     // ExcludeTiles: keeps or removes whole tiles, by which ones the user picked.
     //
+    // A tile is one object, or several joined into one where their rectangles overlap —
+    // a rectangle is what this takes, so interlocking objects cannot be separated by it.
+    //
     // `points` is x,y interleaved, one pair per pick. `active` is one byte per pick, zero
     // for one switched off; empty or short means the rest count. Every point is resolved
     // to its tile either way. `mode` is 0 to remove the picked tiles and 1 to remove
-    // everything else. `alpha_threshold` is how solid a pixel has to be to count as part
-    // of a tile; at iw::SOLID_ALPHA the tiles are exactly Packing's sprites and away from
-    // it they need not be. Returns "bounds", the rectangle of every tile found, and
-    // "picked", which tile each point landed on or -1.
+    // everything else. Returns "bounds", the rectangle of every tile found, and "picked",
+    // which tile each point landed on or -1.
     static Dictionary exclude_tiles(
             const Ref<IWPipelineContext> &ctx, const PackedInt32Array &points,
-            const PackedByteArray &active, int64_t mode, double alpha_threshold);
+            const PackedByteArray &active, int64_t mode);
 };
 
 } // namespace godot

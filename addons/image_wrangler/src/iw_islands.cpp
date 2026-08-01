@@ -4,21 +4,12 @@
 
 namespace iw {
 
-Islands label_islands(const float *alpha, int64_t width, int64_t height,
-        double solid_alpha) {
+Islands label_islands(const float *alpha, int64_t width, int64_t height) {
     Islands found;
     const int64_t pixel_count = width * height;
     if (alpha == nullptr || pixel_count <= 0) {
         return found;
     }
-
-    // A clear pixel is never solid, whatever the threshold is set to, so the bottom of
-    // the range means every visible pixel rather than every pixel — one island the size
-    // of the image, made mostly of nothing, is not an object anybody picked.
-    const auto is_solid = [&](int64_t index) {
-        const double a = iw::widen(alpha[index]);
-        return a > 0.0 && a >= solid_alpha;
-    };
 
     found.label.assign(static_cast<size_t>(pixel_count), -1);
     std::vector<int32_t> &label = found.label;
@@ -56,7 +47,7 @@ Islands label_islands(const float *alpha, int64_t width, int64_t height,
     // The solid part, one island at a time. Each island's flood drains before the scan
     // moves on, so the queue holds them in the order they were found.
     for (int64_t i = 0; i < pixel_count; i++) {
-        if (label[i] >= 0 || !is_solid(i)) {
+        if (label[i] >= 0 || iw::widen(alpha[i]) < SOLID_ALPHA) {
             continue;
         }
         const int32_t here = static_cast<int32_t>(found.min_x.size());
@@ -77,7 +68,7 @@ Islands label_islands(const float *alpha, int64_t width, int64_t height,
             for (int64_t row = first_row; row <= last_row; row++) {
                 for (int64_t col = first_col; col <= last_col; col++) {
                     const int32_t n = static_cast<int32_t>(row * width + col);
-                    if (label[n] < 0 && is_solid(n)) {
+                    if (label[n] < 0 && iw::widen(alpha[n]) >= SOLID_ALPHA) {
                         claim(n, here);
                     }
                 }

@@ -210,9 +210,14 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
 
 // ExcludeTiles.process_context.
 //
-// [b]The tiles are the packer's sprites.[/b] iw::label_islands, so at the threshold both
-// take by default anything held back here is exactly one sprite Packing would have lifted
-// out. That is what the caller gives up by moving `alpha_threshold`.
+// [b]The tiles are the packer's sprites.[/b] iw::label_islands unchanged, so anything held
+// back here is exactly one sprite Packing would have lifted out — except where two of them
+// interlock, which is the next note.
+//
+// [b]Objects whose rectangles overlap are one tile.[/b] What this stage takes is a
+// rectangle, so a pair whose rectangles share pixels cannot be separated: taking either
+// would cut a bite out of the other. They are joined into a single tile with a single
+// rectangle round the pair, and joining repeats until no two overlap.
 //
 // [b]Labelled before anything is removed.[/b] That is what keeps the picks stable: a tile
 // this took out is still in the alpha handed to the next run, so the point that chose it
@@ -227,15 +232,13 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
 //
 // `points` is x,y interleaved, one pair per pick. `active` is one byte per pick, zero for
 // one that is switched off; empty or short means the rest count. `mode` is 0 to remove
-// what was picked and 1 to remove everything else. `alpha_threshold` is how solid a pixel
-// has to be to count as part of a tile rather than as fringe round one, and moving it off
-// iw::SOLID_ALPHA is what parts this stage's tiles from Packing's sprites. Returns the
-// rectangle of every tile found under "bounds", and under "picked" which tile each point
-// landed on, or -1. "hidden" and "hidden_rect" carry a picture of what was taken, for the
-// preview to ghost back in.
+// what was picked and 1 to remove everything else. Returns the rectangle of every tile
+// found under "bounds", and under "picked" which tile each point landed on, or -1.
+// "hidden" and "hidden_rect" carry a picture of what was taken, for the preview to ghost
+// back in.
 Dictionary IWStageKernels::exclude_tiles(
         const Ref<IWPipelineContext> &ctx, const PackedInt32Array &points,
-        const PackedByteArray &active, int64_t mode, double alpha_threshold) {
+        const PackedByteArray &active, int64_t mode) {
     Dictionary out;
     ERR_FAIL_COND_V(ctx.is_null(), out);
     out["bounds"] = PackedInt32Array();
@@ -252,33 +255,106 @@ Dictionary IWStageKernels::exclude_tiles(
 
     const int64_t width = ctx->width;
     const int64_t height = ctx->height;
-    const iw::Islands found = iw::label_islands(
-            visible.ptr(), width, height, alpha_threshold);
-    const int64_t count = found.count();
+    const iw::Islands found = iw::label_islands(visible.ptr(), width, height);
+    const int64_t island_count = found.count();
 
-    // A tile is its rectangle grown by TILE_MARGIN. Keying above this leaves a halo of
+    // An island's rectangle grown by TILE_MARGIN. Keying above this leaves a halo of
     // zero-coverage pixels round a sprite, invisible here and so no part of the tile, but
     // a stage below that rebuilds coverage lifts them back into view as a faint rim.
     // Their alpha is still in the source, so the margin is what reaches them.
-    std::vector<int32_t> min_x(static_cast<size_t>(count));
-    std::vector<int32_t> min_y(static_cast<size_t>(count));
-    std::vector<int32_t> max_x(static_cast<size_t>(count));
-    std::vector<int32_t> max_y(static_cast<size_t>(count));
-    for (int64_t n = 0; n < count; n++) {
+    std::vector<int32_t> min_x(static_cast<size_t>(island_count));
+    std::vector<int32_t> min_y(static_cast<size_t>(island_count));
+    std::vector<int32_t> max_x(static_cast<size_t>(island_count));
+    std::vector<int32_t> max_y(static_cast<size_t>(island_count));
+    for (int64_t n = 0; n < island_count; n++) {
         min_x[n] = static_cast<int32_t>(iw::maxi(found.min_x[n] - TILE_MARGIN, 0));
         min_y[n] = static_cast<int32_t>(iw::maxi(found.min_y[n] - TILE_MARGIN, 0));
         max_x[n] = static_cast<int32_t>(iw::mini(found.max_x[n] + TILE_MARGIN, width - 1));
         max_y[n] = static_cast<int32_t>(iw::mini(found.max_y[n] + TILE_MARGIN, height - 1));
     }
 
+    // [b]Islands whose rectangles share a pixel are one tile.[/b] A rectangle is what this
+    // stage takes, so two objects that interlock cannot be told apart by one: holding
+    // either back would cut a bite out of the other, and outlining them separately would
+    // draw two boxes round one thing to click. Joined, they are one outline and one
+    // rectangle that can be taken whole.
+    //
+    // Run to a standstill rather than in a single pass. A joined rectangle is larger than
+    // either of the two it replaced, so it can reach a third that neither reached alone.
+    std::vector<int32_t> parent(static_cast<size_t>(island_count));
+    for (int64_t n = 0; n < island_count; n++) {
+        parent[static_cast<size_t>(n)] = static_cast<int32_t>(n);
+    }
+    const auto root_of = [&parent](int32_t n) {
+        while (parent[static_cast<size_t>(n)] != n) {
+            const int32_t up = parent[static_cast<size_t>(n)];
+            parent[static_cast<size_t>(n)] = parent[static_cast<size_t>(up)];
+            n = parent[static_cast<size_t>(n)];
+        }
+        return n;
+    };
+    bool joined = true;
+    while (joined) {
+        joined = false;
+        for (int64_t a = 0; a < island_count; a++) {
+            if (root_of(static_cast<int32_t>(a)) != static_cast<int32_t>(a)) {
+                continue;
+            }
+            for (int64_t b = a + 1; b < island_count; b++) {
+                const int32_t here = root_of(static_cast<int32_t>(a));
+                const int32_t there = root_of(static_cast<int32_t>(b));
+                if (here == there || there != static_cast<int32_t>(b)) {
+                    continue;
+                }
+                if (min_x[here] > max_x[there] || min_x[there] > max_x[here]
+                        || min_y[here] > max_y[there] || min_y[there] > max_y[here]) {
+                    continue;
+                }
+                // The lower index keeps the group, so the tiles stay in the order the
+                // islands were found in and a tile's number goes on meaning what it meant.
+                parent[static_cast<size_t>(there)] = here;
+                min_x[here] = static_cast<int32_t>(iw::mini(min_x[here], min_x[there]));
+                min_y[here] = static_cast<int32_t>(iw::mini(min_y[here], min_y[there]));
+                max_x[here] = static_cast<int32_t>(iw::maxi(max_x[here], max_x[there]));
+                max_y[here] = static_cast<int32_t>(iw::maxi(max_y[here], max_y[there]));
+                joined = true;
+            }
+        }
+    }
+
+    // Numbered off the islands that kept their group, which is every tile exactly once.
+    std::vector<int32_t> tile_of(static_cast<size_t>(island_count), -1);
+    int64_t count = 0;
+    for (int64_t n = 0; n < island_count; n++) {
+        if (root_of(static_cast<int32_t>(n)) == static_cast<int32_t>(n)) {
+            tile_of[static_cast<size_t>(n)] = static_cast<int32_t>(count++);
+        }
+    }
+    std::vector<int32_t> tile_min_x(static_cast<size_t>(count));
+    std::vector<int32_t> tile_min_y(static_cast<size_t>(count));
+    std::vector<int32_t> tile_max_x(static_cast<size_t>(count));
+    std::vector<int32_t> tile_max_y(static_cast<size_t>(count));
+    for (int64_t n = 0; n < island_count; n++) {
+        const int32_t root = root_of(static_cast<int32_t>(n));
+        tile_of[static_cast<size_t>(n)] = tile_of[static_cast<size_t>(root)];
+        if (root != static_cast<int32_t>(n)) {
+            continue;
+        }
+        const size_t tile = static_cast<size_t>(tile_of[static_cast<size_t>(n)]);
+        tile_min_x[tile] = min_x[n];
+        tile_min_y[tile] = min_y[n];
+        tile_max_x[tile] = max_x[n];
+        tile_max_y[tile] = max_y[n];
+    }
+
     PackedInt32Array bounds;
     bounds.resize(count * 4);
     int32_t *bounds_ptr = bounds.ptrw();
     for (int64_t n = 0; n < count; n++) {
-        bounds_ptr[n * 4] = min_x[n];
-        bounds_ptr[n * 4 + 1] = min_y[n];
-        bounds_ptr[n * 4 + 2] = max_x[n] - min_x[n] + 1;
-        bounds_ptr[n * 4 + 3] = max_y[n] - min_y[n] + 1;
+        bounds_ptr[n * 4] = tile_min_x[n];
+        bounds_ptr[n * 4 + 1] = tile_min_y[n];
+        bounds_ptr[n * 4 + 2] = tile_max_x[n] - tile_min_x[n] + 1;
+        bounds_ptr[n * 4 + 3] = tile_max_y[n] - tile_min_y[n] + 1;
     }
     out["bounds"] = bounds;
 
@@ -297,7 +373,8 @@ Dictionary IWStageKernels::exclude_tiles(
         if (x < 0 || y < 0 || x >= width || y >= height || count <= 0) {
             continue;
         }
-        picked_ptr[p] = found.label[static_cast<size_t>(y * width + x)];
+        const int32_t island = found.label[static_cast<size_t>(y * width + x)];
+        picked_ptr[p] = island >= 0 ? tile_of[static_cast<size_t>(island)] : -1;
     }
     out["picked"] = picked;
 
@@ -333,24 +410,19 @@ Dictionary IWStageKernels::exclude_tiles(
     }
 
     // Every pixel inside a doomed tile's rectangle, whatever its alpha.
+    //
+    // Nothing has to be spared back out of it: no two tiles share a pixel now, so a
+    // rectangle on its way out cannot be holding any part of one that is staying.
     std::vector<uint8_t> taken(static_cast<size_t>(pixel_count), 0);
     for (int64_t n = 0; n < count; n++) {
         if (doomed[static_cast<size_t>(n)] == 0) {
             continue;
         }
-        for (int64_t y = min_y[n]; y <= max_y[n]; y++) {
+        for (int64_t y = tile_min_y[n]; y <= tile_max_y[n]; y++) {
             const int64_t row = y * width;
-            for (int64_t x = min_x[n]; x <= max_x[n]; x++) {
+            for (int64_t x = tile_min_x[n]; x <= tile_max_x[n]; x++) {
                 taken[static_cast<size_t>(row + x)] = 1;
             }
-        }
-    }
-
-    // Boxes overlap, so spare any pixel belonging to a tile that is staying.
-    for (int64_t i = 0; i < pixel_count; i++) {
-        const int32_t island = found.label[static_cast<size_t>(i)];
-        if (island >= 0 && doomed[static_cast<size_t>(island)] == 0) {
-            taken[static_cast<size_t>(i)] = 0;
         }
     }
 
@@ -369,10 +441,10 @@ Dictionary IWStageKernels::exclude_tiles(
         if (doomed[static_cast<size_t>(n)] == 0) {
             continue;
         }
-        hidden_min_x = iw::mini(hidden_min_x, static_cast<int64_t>(min_x[n]));
-        hidden_min_y = iw::mini(hidden_min_y, static_cast<int64_t>(min_y[n]));
-        hidden_max_x = iw::maxi(hidden_max_x, static_cast<int64_t>(max_x[n]));
-        hidden_max_y = iw::maxi(hidden_max_y, static_cast<int64_t>(max_y[n]));
+        hidden_min_x = iw::mini(hidden_min_x, static_cast<int64_t>(tile_min_x[n]));
+        hidden_min_y = iw::mini(hidden_min_y, static_cast<int64_t>(tile_min_y[n]));
+        hidden_max_x = iw::maxi(hidden_max_x, static_cast<int64_t>(tile_max_x[n]));
+        hidden_max_y = iw::maxi(hidden_max_y, static_cast<int64_t>(tile_max_y[n]));
     }
     if (hidden_max_x >= hidden_min_x && hidden_max_y >= hidden_min_y) {
         const int64_t hidden_width = hidden_max_x - hidden_min_x + 1;
