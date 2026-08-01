@@ -69,14 +69,17 @@ extends Resource
 ## decide what counts as overall rather than as detail.
 ##
 ## Zero strength skips the pass. Used by Brightness.
-@export var normal_coarse: float = 0.5
+##
+## The strength is a plain multiplier on a gradient of brightness, and the gradient across
+## even a hard painted edge is small — so the useful numbers are several, not fractions.
+@export var normal_coarse: float = 4.0
 @export var normal_coarse_size: int = 6
 
 ## How much of the sprite's line work and texture becomes shape.
 ##
 ## Read from the colours as they are rather than from a blur, so it picks up single pixels.
-## Zero skips the pass. Used by Brightness.
-@export var normal_fine: float = 0.5
+## Zero skips the pass. On the same scale as [member normal_coarse]. Used by Brightness.
+@export var normal_fine: float = 3.0
 
 ## Whether green is written the way DirectX reads it rather than the way Godot does.
 ##

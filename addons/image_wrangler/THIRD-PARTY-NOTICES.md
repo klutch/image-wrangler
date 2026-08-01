@@ -64,9 +64,17 @@ compiled-shader cache is a function-local static that is not keyed on TTA mode, 
 that setting inside one process runs the wrong shader and crashes. Upstream picks TTA once
 from the command line, so it never meets this; a checkbox in a dock does.
 
-`thirdparty/waifu2x-realesrgan-layers.patch` turns four ncnn layers on in
-`src/deps_ncnn.cmake`. waifu2x uses none of them — they are Real-ESRGAN's, and that file is
-where ncnn's layer whitelist lives.
+`thirdparty/waifu2x-realesrgan-layers.patch` turns eight ncnn layers on in
+`src/deps_ncnn.cmake`, which is where ncnn's layer whitelist lives. waifu2x uses none of
+them. Four are Real-ESRGAN's. The other four — `convolutiondepthwise`, `clip`, `sigmoid`
+and `reshape` — are for the Export tab's Neural normal mode, which runs whatever network
+the user points it at; no such network ships here. See `core/iw_packing.gd`.
+
+Note that three of those four are on for networks that hold no layer of that type at all.
+`clip` and `sigmoid` serve activations *fused into convolutions*, and `reshape` is made by
+every 1x1 convolution's Vulkan pipeline for a fallback path — ncnn builds real layer
+objects for these and does not check they exist. A model wanting one that is switched off
+does not fail to load; it crashes partway through, with nothing said about why.
 
 Past that, `src/iw_waifu2x.cpp` calls the `Waifu2x` class and reimplements the two decisions
 its command-line front end makes — which model file a noise level and ratio resolve to, and

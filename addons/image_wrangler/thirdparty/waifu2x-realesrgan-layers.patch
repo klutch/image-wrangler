@@ -1,5 +1,4 @@
 diff --git a/src/deps_ncnn.cmake b/src/deps_ncnn.cmake
-index 7fd691d..645da93 100644
 --- a/src/deps_ncnn.cmake
 +++ b/src/deps_ncnn.cmake
 @@ -72,7 +72,9 @@ if(NOT USE_SYSTEM_NCNN)
@@ -13,7 +12,7 @@ index 7fd691d..645da93 100644
      option(WITH_LAYER_convolution "" ON)
      option(WITH_LAYER_crop "" ON)
      option(WITH_LAYER_deconvolution "" ON)
-@@ -90,7 +92,8 @@ if(NOT USE_SYSTEM_NCNN)
+@@ -90,14 +92,22 @@ if(NOT USE_SYSTEM_NCNN)
      option(WITH_LAYER_mvn "" OFF)
      option(WITH_LAYER_pooling "" ON)
      option(WITH_LAYER_power "" OFF)
@@ -23,7 +22,23 @@ index 7fd691d..645da93 100644
      option(WITH_LAYER_proposal "" OFF)
      option(WITH_LAYER_reduction "" OFF)
      option(WITH_LAYER_relu "" ON)
-@@ -107,7 +110,9 @@ if(NOT USE_SYSTEM_NCNN)
+-    option(WITH_LAYER_reshape "" OFF)
++    # IMAGE WRANGLER: on for DeepBump, though the model holds no Reshape at all. Every 1x1
++    # convolution's Vulkan pipeline makes two of these for its flattened-input fallback,
++    # and makes them without checking they exist — so a whitelist without this is a crash
++    # inside the load, not a refusal. The upscalers never meet it: their convolutions are
++    # all 3x3.
++    option(WITH_LAYER_reshape "" ON)
+     option(WITH_LAYER_roipooling "" OFF)
+     option(WITH_LAYER_scale "" ON)
+-    option(WITH_LAYER_sigmoid "" OFF)
++    # IMAGE WRANGLER: on for DeepBump, whose last convolution ends in one. A fused
++    # activation, and needed for the same reason clip is.
++    option(WITH_LAYER_sigmoid "" ON)
+     option(WITH_LAYER_slice "" OFF)
+     option(WITH_LAYER_softmax "" OFF)
+     option(WITH_LAYER_split "" ON)
+@@ -107,9 +117,13 @@ if(NOT USE_SYSTEM_NCNN)
      option(WITH_LAYER_tile "" OFF)
      option(WITH_LAYER_rnn "" OFF)
      option(WITH_LAYER_lstm "" OFF)
@@ -32,9 +47,27 @@ index 7fd691d..645da93 100644
 +    # input back onto the network's output with one of these.
 +    option(WITH_LAYER_binaryop "" ON)
      option(WITH_LAYER_unaryop "" OFF)
-     option(WITH_LAYER_convolutiondepthwise "" OFF)
+-    option(WITH_LAYER_convolutiondepthwise "" OFF)
++    # IMAGE WRANGLER: on for DeepBump, whose MobileNetV2 encoder is built almost entirely
++    # out of these. Neither upscaler uses one.
++    option(WITH_LAYER_convolutiondepthwise "" ON)
      option(WITH_LAYER_padding "" ON)
-@@ -136,7 +141,9 @@ if(NOT USE_SYSTEM_NCNN)
+     option(WITH_LAYER_squeeze "" OFF)
+     option(WITH_LAYER_expanddims "" OFF)
+@@ -121,7 +135,11 @@ if(NOT USE_SYSTEM_NCNN)
+     option(WITH_LAYER_deconvolutiondepthwise "" OFF)
+     option(WITH_LAYER_shufflechannel "" OFF)
+     option(WITH_LAYER_instancenorm "" OFF)
+-    option(WITH_LAYER_clip "" OFF)
++    # IMAGE WRANGLER: on for DeepBump. Not because the model has a Clip layer in it — it has
++    # none — but because thirty-five of its convolutions carry a clipped activation, and ncnn
++    # builds a real layer for a fused activation rather than inlining it. Left off, that
++    # build returns nothing and the caller uses it: a crash inside the load with no message.
++    option(WITH_LAYER_clip "" ON)
+     option(WITH_LAYER_reorg "" OFF)
+     option(WITH_LAYER_yolodetectionoutput "" OFF)
+     option(WITH_LAYER_quantize "" OFF)
+@@ -136,7 +154,9 @@ if(NOT USE_SYSTEM_NCNN)
      option(WITH_LAYER_selu "" OFF)
      option(WITH_LAYER_hardswish "" OFF)
      option(WITH_LAYER_noop "" OFF)

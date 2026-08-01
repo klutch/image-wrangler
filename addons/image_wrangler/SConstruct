@@ -98,7 +98,12 @@ SHADER_DIR = "thirdparty/ncnn-shaders"
 # The wrappers, which are ours but include ncnn's headers and so cannot be built under the
 # flags the rest of src/ uses. Taken out of the glob either way — when ncnn is missing they
 # are dropped, and when it is there they are built in their own environment below.
-NCNN_WRAPPERS = ["iw_ncnn_instance.cpp", "iw_waifu2x.cpp", "iw_realesrgan.cpp"]
+NCNN_WRAPPERS = [
+    "iw_ncnn_instance.cpp",
+    "iw_waifu2x.cpp",
+    "iw_realesrgan.cpp",
+    "iw_normal_net.cpp",
+]
 
 
 

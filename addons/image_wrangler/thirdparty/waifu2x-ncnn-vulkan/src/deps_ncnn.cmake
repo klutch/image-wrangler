@@ -97,10 +97,17 @@ if(NOT USE_SYSTEM_NCNN)
     option(WITH_LAYER_proposal "" OFF)
     option(WITH_LAYER_reduction "" OFF)
     option(WITH_LAYER_relu "" ON)
-    option(WITH_LAYER_reshape "" OFF)
+    # IMAGE WRANGLER: on for DeepBump, though the model holds no Reshape at all. Every 1x1
+    # convolution's Vulkan pipeline makes two of these for its flattened-input fallback,
+    # and makes them without checking they exist — so a whitelist without this is a crash
+    # inside the load, not a refusal. The upscalers never meet it: their convolutions are
+    # all 3x3.
+    option(WITH_LAYER_reshape "" ON)
     option(WITH_LAYER_roipooling "" OFF)
     option(WITH_LAYER_scale "" ON)
-    option(WITH_LAYER_sigmoid "" OFF)
+    # IMAGE WRANGLER: on for DeepBump, whose last convolution ends in one. A fused
+    # activation, and needed for the same reason clip is.
+    option(WITH_LAYER_sigmoid "" ON)
     option(WITH_LAYER_slice "" OFF)
     option(WITH_LAYER_softmax "" OFF)
     option(WITH_LAYER_split "" ON)
@@ -114,7 +121,9 @@ if(NOT USE_SYSTEM_NCNN)
     # input back onto the network's output with one of these.
     option(WITH_LAYER_binaryop "" ON)
     option(WITH_LAYER_unaryop "" OFF)
-    option(WITH_LAYER_convolutiondepthwise "" OFF)
+    # IMAGE WRANGLER: on for DeepBump, whose MobileNetV2 encoder is built almost entirely
+    # out of these. Neither upscaler uses one.
+    option(WITH_LAYER_convolutiondepthwise "" ON)
     option(WITH_LAYER_padding "" ON)
     option(WITH_LAYER_squeeze "" OFF)
     option(WITH_LAYER_expanddims "" OFF)
@@ -126,7 +135,11 @@ if(NOT USE_SYSTEM_NCNN)
     option(WITH_LAYER_deconvolutiondepthwise "" OFF)
     option(WITH_LAYER_shufflechannel "" OFF)
     option(WITH_LAYER_instancenorm "" OFF)
-    option(WITH_LAYER_clip "" OFF)
+    # IMAGE WRANGLER: on for DeepBump. Not because the model has a Clip layer in it — it has
+    # none — but because thirty-five of its convolutions carry a clipped activation, and ncnn
+    # builds a real layer for a fused activation rather than inlining it. Left off, that
+    # build returns nothing and the caller uses it: a crash inside the load with no message.
+    option(WITH_LAYER_clip "" ON)
     option(WITH_LAYER_reorg "" OFF)
     option(WITH_LAYER_yolodetectionoutput "" OFF)
     option(WITH_LAYER_quantize "" OFF)

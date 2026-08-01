@@ -3836,6 +3836,13 @@ func _schedule_packing_normals() -> void:
     # Null while the dock is being built, exactly as the packing timer is.
     if _mode != Mode.PACKING or _shutting_down or _packing_normal_debounce == null:
         return
+    # The network is seconds rather than milliseconds, so it stands down from following a
+    # setting the way the other three do. Refresh is what runs it, the way it is for an
+    # upscale too big to preview.
+    if _packing != null and _packing.sanitise_normals(_packing.get_settings().normals) \
+            == IWPacking.NormalMode.NEURAL:
+        _set_packing_status("Normals changed. Press Refresh to run the network.")
+        return
     _packing_normal_debounce.start()
 
 
@@ -3846,6 +3853,12 @@ func _rebuild_packing_normals() -> void:
         _packing_normal_image = null
     else:
         _packing_normal_image = _packing.build_normal_map(_packing_image, _packing_rects)
+        # Only the network can fail for a reason the user can do something about — a folder
+        # holding no model, or one it could not read. The other three either make a map or
+        # were switched off.
+        var why: String = _packing.normal_error
+        if _packing_normal_image == null and not why.is_empty():
+            _set_packing_status("No normal map: %s" % why)
     _update_normal_toggle()
     _update_preview_texture()
 

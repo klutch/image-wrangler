@@ -163,6 +163,20 @@ const LUT_SUFFIX := "_lut.res"
 
 var settings: PackingSettings
 
+## The network the Neural mode runs, held open across a run so a 13 MB model is not read
+## again for every sheet. Null in a build without ncnn. See [method _normal_net].
+var _net: RefCounted
+
+## Which folder [member _net] currently has open, so a changed one is noticed.
+var _open_model_dir := ""
+
+## Why the last normal map could not be made, or empty when it could.
+##
+## [b]Deliberately not exported.[/b] An observation about one run rather than a setting, the
+## way [member RemoveMinimumAreaSettings.removed_bounds] is — and the only mode that can
+## fail for a reason worth reading is the one that depends on a file the user brought.
+var normal_error := ""
+
 
 func _init() -> void:
     settings = PackingSettings.new()
@@ -302,11 +316,11 @@ func get_settings_schema() -> Array[Dictionary]:
             "label": "Coarse Detail",
             "type": SettingType.FLOAT,
             "min": 0.0,
-            "max": 2.0,
-            "step": 0.01,
+            "max": 16.0,
+            "step": 0.05,
             "shown_when": &"normals",
             "shown_values": [NormalMode.BRIGHTNESS],
-            "tooltip": "How much of the sprite's overall shading becomes shape.\n\nThis is the half that gives a sprite its large form. At zero the pass is skipped\nand only fine detail is left.",
+            "tooltip": "How much of the sprite's overall shading becomes shape.\n\nThis is the half that gives a sprite its large form. At zero the pass is skipped\nand only fine detail is left.\n\nThe useful numbers here run to several rather than to fractions: even a hard\npainted edge only changes brightness a little from one pixel to the next.",
         },
         {
             "property": &"normal_coarse_size",
@@ -324,11 +338,11 @@ func get_settings_schema() -> Array[Dictionary]:
             "label": "Fine Detail",
             "type": SettingType.FLOAT,
             "min": 0.0,
-            "max": 2.0,
-            "step": 0.01,
+            "max": 16.0,
+            "step": 0.05,
             "shown_when": &"normals",
             "shown_values": [NormalMode.BRIGHTNESS],
-            "tooltip": "How much of the sprite's line work and texture becomes shape.\n\nRead from the colours as they are rather than from a blur, so it picks up single\npixels. At zero the pass is skipped.",
+            "tooltip": "How much of the sprite's line work and texture becomes shape.\n\nRead from the colours as they are rather than from a blur, so it picks up single\npixels. At zero the pass is skipped.\n\nOn the same scale as Coarse Detail.",
         },
         {
             "property": &"normal_green_down",
@@ -345,43 +359,46 @@ func get_settings_schema() -> Array[Dictionary]:
             "type": SettingType.STRING,
             "shown_when": &"normals",
             "shown_values": [NormalMode.NEURAL],
-            "tooltip": "The folder holding the converted model, as a path.\n\nNo model ships with this. Convert one to ncnn's format yourself and put the\n.param and .bin in a folder, then paste the path here. The mode stands down\nwhen the folder holds neither.",
+            "tooltip": "The folder holding the converted model, as a path.\n\nNo model ships with this addon. Convert one to ncnn's format yourself and put\nthe .param and .bin in a folder, then paste the path here — any pair will do,\nsince nothing here knows what your model is called.\n\nUntil then this mode is offered but writes nothing, and says why.",
         },
     ]
 
 
 ## The dropdown labels, less the modes this build cannot offer.
 ##
-## Neural is dropped whenever there is no wrapper compiled in or no model to point it at.
-## Because it is the last entry, dropping it leaves every other index exactly where it was —
-## so a settings file written by a build that had it still means the same thing here.
+## Neural is dropped when the wrapper was left out of the build, which is the ordinary state
+## of a checkout that has not run [code]tools/build_ncnn.py[/code]. Because it is the last
+## entry, dropping it leaves every other index exactly where it was — so a settings file
+## written by a build that had it still means the same thing here.
+##
+## [b]Not dropped for the want of a model.[/b] The folder is named on a setting that only
+## shows while Neural is picked, so a mode that hid itself until a model was found could
+## never be given one.
 func normal_labels() -> Array:
-    if normal_model_available():
+    if normal_mode_offered():
         return NORMAL_LABELS
     return NORMAL_LABELS.slice(0, NORMAL_LABELS.size() - 1)
 
 
-## Whether the neural mode can be offered: a wrapper in this build, and a model to run.
+## Whether this build has the network wrapper at all.
+func normal_mode_offered() -> bool:
+    return ClassDB.class_exists(&"IWNormalNet")
+
+
+## Whether the neural mode has everything it needs to actually run.
 func normal_model_available() -> bool:
-    if not ClassDB.class_exists(&"IWNormalNet"):
-        return false
-    return not _model_files(settings.normal_model_dir).is_empty()
+    var net := _normal_net()
+    return net != null and net.has_model(settings.normal_model_dir)
 
 
-## The model's two files, or an empty array when the folder does not hold a pair.
-func _model_files(directory: String) -> PackedStringArray:
-    if directory.strip_edges().is_empty():
-        return PackedStringArray()
-    var names := DirAccess.get_files_at(directory)
-    if names.is_empty():
-        return PackedStringArray()
-    for name in names:
-        if name.get_extension().to_lower() != "param":
-            continue
-        var binary := name.get_basename() + ".bin"
-        if names.has(binary):
-            return PackedStringArray([directory.path_join(name), directory.path_join(binary)])
-    return PackedStringArray()
+## The wrapper, made once and held. Null in a build without ncnn.
+##
+## Reached by name rather than named in source, for the reason [Upscale] gives: a class this
+## build may not have would take the whole addon down at parse time.
+func _normal_net() -> RefCounted:
+    if _net == null and normal_mode_offered():
+        _net = ClassDB.instantiate(&"IWNormalNet")
+    return _net
 
 
 ## [param mode] pulled back into range, for a value that came from a hand-edited file
@@ -395,13 +412,16 @@ static func describe_mode(mode: int) -> String:
     return MODE_DESCRIPTIONS[sanitise_mode(mode)]
 
 
-## [param mode] pulled back into range, and back to Disabled when it is a mode this build
-## cannot run — a folder moved out from under Neural stands the mode down rather than
-## failing at the point of saving.
+## [param mode] pulled back into range, and back to Disabled when it is one this build cannot
+## run at all.
+##
+## A missing model is not that: Neural stays selected without one, so the folder can still be
+## named and the reason shown. What it cannot do is produce a map, and
+## [method build_normal_map] says so.
 func sanitise_normals(mode: int) -> int:
     if mode < 0 or mode >= NORMAL_LABELS.size():
         return NormalMode.DISABLED
-    if mode == NormalMode.NEURAL and not normal_model_available():
+    if mode == NormalMode.NEURAL and not normal_mode_offered():
         return NormalMode.DISABLED
     return mode
 
@@ -752,6 +772,7 @@ static func normal_path_for(sheet_path: String) -> String:
 ## Every sprite is worked out inside its own rectangle and nowhere else, which is what stops
 ## one leaning on whatever it was packed next to. The space between them is left flat.
 func build_normal_map(sheet: Image, rects: Array) -> Image:
+    normal_error = ""
     var mode := sanitise_normals(settings.normals)
     if mode == NormalMode.DISABLED or sheet == null or sheet.is_empty():
         return null
@@ -793,7 +814,25 @@ func _flat_rects(rects: Array) -> PackedInt32Array:
     return flat
 
 
-## Not built yet. The mode it belongs to cannot be reached until it is, since
-## [method normal_model_available] gates the dropdown on the wrapper existing.
-func _neural_normal_map(_sheet: Image, _flat: PackedInt32Array) -> Image:
-    return null
+## The map the network makes, or null with [member normal_error] set to why not.
+##
+## The model is opened once and left open — reading it again per sheet would cost more than
+## the run does. A changed folder is what reopens it.
+func _neural_normal_map(sheet: Image, flat: PackedInt32Array) -> Image:
+    normal_error = ""
+    var net := _normal_net()
+    if net == null:
+        normal_error = "This build has no network to run. See tools/build_ncnn.py."
+        return null
+
+    if not net.is_open() or _open_model_dir != settings.normal_model_dir:
+        net.close()
+        _open_model_dir = settings.normal_model_dir
+        if net.open(settings.normal_model_dir) != OK:
+            normal_error = net.get_last_error()
+            return null
+
+    var map: Image = net.process(sheet, flat, settings.normal_green_down)
+    if map == null:
+        normal_error = net.get_last_error()
+    return map

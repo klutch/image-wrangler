@@ -6,11 +6,12 @@
 #include "iw_pixel_math.h"
 #include "iw_stage_kernels.h"
 
-// The two upscalers are left out of a build that has not had ncnn made for it, which is the
-// ordinary state of a fresh checkout — see tools/build_ncnn.py. SConstruct defines this
-// when it has one to link against, and the Upscale tab tests for the classes at runtime.
+// The three classes built on ncnn are left out of a build that has not had it made, which is
+// the ordinary state of a fresh checkout — see tools/build_ncnn.py. SConstruct defines this
+// when it has one to link against, and the tabs that use them test at runtime.
 #ifdef IW_HAVE_NCNN
 #include "iw_ncnn_instance.h"
+#include "iw_normal_net.h"
 #include "iw_realesrgan.h"
 #include "iw_waifu2x.h"
 #endif
@@ -36,6 +37,7 @@ void initialize_image_wrangler(ModuleInitializationLevel p_level) {
 #ifdef IW_HAVE_NCNN
     GDREGISTER_CLASS(IWWaifu2x);
     GDREGISTER_CLASS(IWRealESRGAN);
+    GDREGISTER_CLASS(IWNormalNet);
 #endif
 }
 
@@ -44,9 +46,9 @@ void uninitialize_image_wrangler(ModuleInitializationLevel p_level) {
         return;
     }
 #ifdef IW_HAVE_NCNN
-    // The one thing here that is process-wide: the Vulkan instance both upscalers run on.
-    // Everything else is either a static kernel or a Resource the engine is already taking
-    // apart.
+    // The one thing here that is process-wide: the Vulkan instance the upscalers and the
+    // normal map network all run on. Everything else is either a static kernel or a Resource
+    // the engine is already taking apart.
     iw_ncnn::shutdown();
 #endif
 }

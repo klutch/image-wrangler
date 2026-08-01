@@ -1,5 +1,6 @@
 #include "iw_islands.h"
 #include "iw_math.h"
+#include "iw_normal_shared.h"
 #include "iw_pixel_math.h"
 #include "iw_stage_kernels.h"
 
@@ -13,53 +14,9 @@ using namespace godot;
 
 namespace {
 
-// Facing straight out. What a pixel holds where nothing tilts it.
-constexpr uint8_t FLAT_R = 128;
-constexpr uint8_t FLAT_G = 128;
-constexpr uint8_t FLAT_B = 255;
-
-// The sheet's pixels as RGBA8, whatever it arrived as.
-PackedByteArray sheet_bytes(const Ref<Image> &sheet) {
-    PackedByteArray pixels = sheet->get_data();
-    if (sheet->get_format() != Image::FORMAT_RGBA8) {
-        Ref<Image> converted = Image::create_from_data(
-                sheet->get_width(), sheet->get_height(), false, sheet->get_format(), pixels);
-        converted->convert(Image::FORMAT_RGBA8);
-        pixels = converted->get_data();
-    }
-    return pixels;
-}
-
-// A map the size of the sheet, flat everywhere, carrying the sheet's own alpha.
-//
-// [b]The alpha is copied rather than filled in solid.[/b] It gives the map the same
-// silhouette as the sheet, and the dock draws its sprite outlines underneath the image —
-// an opaque map would hide them the moment the preview was switched over.
-PackedByteArray blank_normal(const uint8_t *src, int64_t count) {
-    PackedByteArray out;
-    out.resize(count * 4);
-    uint8_t *dst = out.ptrw();
-    for (int64_t i = 0; i < count; i++) {
-        dst[i * 4] = FLAT_R;
-        dst[i * 4 + 1] = FLAT_G;
-        dst[i * 4 + 2] = FLAT_B;
-        dst[i * 4 + 3] = src[i * 4 + 3];
-    }
-    return out;
-}
-
-// One sprite's rectangle, clipped to the sheet. False for one of no area, which is what a
-// sprite that never got placed leaves behind.
-bool rect_at(const int32_t *rects, int64_t n, int64_t width, int64_t height,
-        int64_t &r_x, int64_t &r_y, int64_t &r_w, int64_t &r_h) {
-    r_x = iw::maxi(rects[n], 0);
-    r_y = iw::maxi(rects[n + 1], 0);
-    const int64_t right = iw::mini(static_cast<int64_t>(rects[n]) + rects[n + 2], width);
-    const int64_t bottom = iw::mini(static_cast<int64_t>(rects[n + 1]) + rects[n + 3], height);
-    r_w = right - r_x;
-    r_h = bottom - r_y;
-    return r_w > 0 && r_h > 0;
-}
+using iw::blank_normal;
+using iw::rect_at;
+using iw::sheet_bytes;
 
 // How far the surface has risen `t` of the way in from the outline, 0 to 1 in both.
 double curve_height(int64_t curve, double t) {
