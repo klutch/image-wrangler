@@ -73,10 +73,6 @@ var operation_groups: Array = []
 ## settings builder.
 var form_builder := Callable()
 
-## Which entries are folded, keyed by uid. Held by the dock so a fold outlives a
-## rebuild.
-var fold_state: Dictionary = {}
-
 ## Where a tool button keeps the icon it wants and the word to fall back on.
 const META_ICON := &"iw_icon"
 const META_LABEL := &"iw_label"
@@ -84,12 +80,24 @@ const META_LABEL := &"iw_label"
 ## Smallest a tool button is allowed to get, however narrow the dock is squeezed.
 const TOOL_MIN_SIZE := 24
 
+## How near an edge the pointer has to be for a drag to scroll the list, and how fast
+## the list runs right at that edge, in pixels a second.
+const AUTO_SCROLL_EDGE := 16.0
+const AUTO_SCROLL_SPEED := 480.0
+
 ## The live stack, in order.
 var _entries: Array = []
 var _selector: OptionButton
 var _list: VBoxContainer
 var _tools: HBoxContainer
+var _scroll: ScrollContainer
 var _next_uid := 1
+
+## The part of a pixel this frame's scroll did not add up to.
+##
+## Carried rather than rounded away, because the scroll position is a whole number and a
+## slow scroll would otherwise round down to nothing every frame and never move at all.
+var _scroll_carry := 0.0
 
 
 func _ready() -> void:
@@ -105,6 +113,19 @@ func _ready() -> void:
 ## not changed, so making them again is the same answer for less code than reaching into
 ## each one.
 func _notification(what: int) -> void:
+    # A drag anywhere in the editor raises these, so only ours starts the list moving —
+    # a file dragged in from the FileSystem dock is not a reorder, and scrolling the
+    # stack under it would be a mystery.
+    if what == NOTIFICATION_DRAG_BEGIN:
+        _scroll_carry = 0.0
+        var payload: Variant = get_viewport().gui_get_drag_data()
+        set_process(payload is Dictionary
+                and String((payload as Dictionary).get("type", "")) == "iw_stack_entry")
+        return
+    # Always arrives, including when a drag is abandoned, so this cannot be left running.
+    if what == NOTIFICATION_DRAG_END:
+        set_process(false)
+        return
     if what != NOTIFICATION_THEME_CHANGED:
         return
     if _tools != null:
@@ -113,6 +134,45 @@ func _notification(what: int) -> void:
                 _dress(child)
     if _selector != null:
         _refresh_selector()
+
+
+## Runs the list up or down while an entry is dragged near an edge.
+##
+## On only between the two drag notifications above, and it allocates nothing — a stack
+## being dragged is the one moment the dock is doing per-frame work.
+func _process(delta: float) -> void:
+    if _scroll == null:
+        return
+    var at := _scroll.get_local_mouse_position()
+    # Sideways out of the column is not a request to scroll it.
+    if at.x < 0.0 or at.x > _scroll.size.x:
+        return
+
+    var speed := 0.0
+    if at.y < AUTO_SCROLL_EDGE:
+        speed = -_edge_speed(AUTO_SCROLL_EDGE - at.y)
+    elif at.y > _scroll.size.y - AUTO_SCROLL_EDGE:
+        speed = _edge_speed(at.y - (_scroll.size.y - AUTO_SCROLL_EDGE))
+    if is_zero_approx(speed):
+        _scroll_carry = 0.0
+        return
+
+    _scroll_carry += speed * delta
+    var whole := int(_scroll_carry)
+    if whole == 0:
+        return
+    _scroll_carry -= float(whole)
+    _scroll.scroll_vertical += whole
+
+
+## How fast the list runs, given how far past the edge the pointer has reached.
+##
+## Squared rather than straight, so brushing the edge nudges the list where pushing right
+## up against it runs at full speed. Clamped, so holding the pointer outside the dock does
+## not keep getting faster.
+func _edge_speed(depth: float) -> float:
+    var reach := clampf(depth / AUTO_SCROLL_EDGE, 0.0, 1.0)
+    return AUTO_SCROLL_SPEED * reach * reach
 
 
 ## One button on the tool row.
@@ -219,7 +279,8 @@ func _build() -> void:
     # operation meant scrolling back up, picking, and scrolling down again to reach what
     # you had just added. The two things that are always worth reaching are the two that
     # now never move.
-    var scroll := ScrollContainer.new()
+    _scroll = ScrollContainer.new()
+    var scroll := _scroll
     scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
     # The dock column is narrow and the forms inside give rather than overflow, so a
@@ -246,6 +307,8 @@ func _build() -> void:
     _list.add_theme_constant_override("separation", ENTRY_GAP)
     inset.add_child(_list)
 
+    # Off until a drag of ours starts. See _notification.
+    set_process(false)
     _refresh_selector()
 
 
@@ -373,6 +436,10 @@ func is_empty() -> bool:
 func rebuild() -> void:
     if _list == null:
         _build()
+    # Before the rows go, since the fold lives on the row until it does. Every rebuild,
+    # not only the ones a remove or a reorder started: a fold followed by anything else
+    # would otherwise be thrown away.
+    capture_folds()
     for child in _list.get_children():
         _list.remove_child(child)
         child.queue_free()
@@ -380,7 +447,7 @@ func rebuild() -> void:
     for record: Dictionary in _entries:
         var entry: Control = StackEntry.new()
         _list.add_child(entry)
-        entry.setup(record["stage"], record["uid"], bool(fold_state.get(record["uid"], false)))
+        entry.setup(record["stage"], record["uid"], (record["stage"] as IWStackOperation).folded)
         entry.remove_requested.connect(_on_remove)
         entry.reorder_requested.connect(_on_reorder)
         entry.enabled_toggled.connect(func(_e: Control, _on: bool) -> void: stack_changed.emit())
@@ -396,19 +463,21 @@ func rebuild() -> void:
     entries_rebuilt.emit()
 
 
-## Captures which entries are folded, so a rebuild does not open them all.
+## Copies each row's fold back onto its operation, so a rebuild does not open them all.
+##
+## The operation is where the fold is kept, so this also puts it somewhere the sidecar
+## will save it.
 func capture_folds() -> void:
     for record: Dictionary in _entries:
         var entry: Control = record["entry"]
-        if entry != null:
-            fold_state[record["uid"]] = entry.is_folded()
+        if entry != null and is_instance_valid(entry):
+            (record["stage"] as IWStackOperation).folded = entry.is_folded()
 
 
 func _on_remove(entry: Control) -> void:
     capture_folds()
     for i in _entries.size():
         if _entries[i]["entry"] == entry:
-            fold_state.erase(_entries[i]["uid"])
             _entries.remove_at(i)
             break
     rebuild()

@@ -14,37 +14,44 @@ extends Resource
 
 ## Setting kinds the dock knows how to build a control for.
 enum SettingType {
-	BOOL,
-	INT,
-	FLOAT,
-	## A line of free text.
-	STRING,
-	## A fixed choice. The entry must carry an [code]options[/code] key listing
-	## the labels; the property holds the chosen index.
-	ENUM,
-	## A single colour, alpha included. The property must hold a [Color].
-	COLOR,
-	## A list of image positions the user picks off the preview, each standing
-	## for a region to act on. The property must hold an [IslandList].
-	ISLAND_PICKER,
-	## A list of colours, each with a tolerance of its own, sampled off the
-	## preview or set by hand. The property must hold a [RemoveColorList].
-	COLOR_LIST,
-	## A list of polygons the user draws over the preview, each standing for a
-	## region to act on. The property must hold a [PolygonRegionList].
-	POLYGON_LIST,
-	## A list of rectangles the user picks off the preview, each carrying its own
-	## hue, saturation and value. The property must hold an [HSVRegionList].
-	HSV_LIST,
-	## A list of strokes the user drags over the preview, each carrying its own
-	## brush and mode. The property must hold a [BrushStrokeList].
-	BRUSH_LIST,
+    BOOL,
+    INT,
+    FLOAT,
+    ## A line of free text.
+    STRING,
+    ## A fixed choice. The entry must carry an [code]options[/code] key listing
+    ## the labels; the property holds the chosen index.
+    ENUM,
+    ## A single colour, alpha included. The property must hold a [Color].
+    COLOR,
+    ## A list of image positions the user picks off the preview, each standing
+    ## for a region to act on. The property must hold an [IslandList].
+    ISLAND_PICKER,
+    ## A list of colours, each with a tolerance of its own, sampled off the
+    ## preview or set by hand. The property must hold a [RemoveColorList].
+    COLOR_LIST,
+    ## A list of polygons the user draws over the preview, each standing for a
+    ## region to act on. The property must hold a [PolygonRegionList].
+    POLYGON_LIST,
+    ## A list of rectangles the user picks off the preview, each carrying its own
+    ## hue, saturation and value. The property must hold an [HSVRegionList].
+    HSV_LIST,
+    ## A list of strokes the user drags over the preview, each carrying its own
+    ## brush and mode. The property must hold a [BrushStrokeList].
+    BRUSH_LIST,
+    ## A line of text worked out from the settings and shown rather than edited. The
+    ## entry must carry a [code]text_from[/code] key naming a method on the settings
+    ## that returns the line; it is asked again whenever anything changes.
+    READOUT,
+    ## A list of whole objects the user picks off the preview. The property must hold
+    ## an Array of [TilePick].
+    TILE_SELECTOR,
 }
 
 
 ## Name shown in the operation dropdown.
 func get_operation_name() -> String:
-	return "Operation"
+    return "Operation"
 
 
 ## Stable identifier for this operation in saved files.
@@ -53,12 +60,12 @@ func get_operation_name() -> String:
 ## is exactly the kind of string that gets reworded, which would orphan every
 ## file keyed off it.
 func get_operation_id() -> StringName:
-	return &""
+    return &""
 
 
 ## Appended to the source file name when writing the processed image.
 func get_output_suffix() -> String:
-	return "_out"
+    return "_out"
 
 
 ## Whether processing rewrites the pixels.
@@ -67,7 +74,7 @@ func get_output_suffix() -> String:
 ## byte-for-byte instead of being re-encoded, so an operation that only moves a
 ## file around cannot quietly turn a JPEG into a PNG behind the extension.
 func transforms_pixels() -> bool:
-	return true
+    return true
 
 
 ## Whether these settings belong to one image or to the whole session.
@@ -77,7 +84,7 @@ func transforms_pixels() -> bool:
 ## image returns false: one set is held for as long as the dock is open, nothing
 ## is read or written to a sidecar, and every image is processed by it.
 func settings_are_per_image() -> bool:
-	return true
+    return true
 
 
 ## Whether a source should be offered for deletion once its output is written.
@@ -86,7 +93,7 @@ func settings_are_per_image() -> bool:
 ## before acting on it. An operation that rewrites pixels has no business
 ## returning true, since its output is not a copy of anything.
 func removes_sources() -> bool:
-	return false
+    return false
 
 
 ## Name to write [param source_path]'s result under, without any directory.
@@ -96,8 +103,8 @@ func removes_sources() -> bool:
 ## keeps the source's own name and takes the extension from
 ## [method transforms_pixels], since anything re-encoded is written as PNG.
 func get_output_name(source_path: String, suffix: String, _index: int) -> String:
-	var extension := "png" if transforms_pixels() else source_path.get_extension()
-	return source_path.get_file().get_basename() + suffix + "." + extension
+    var extension := "png" if transforms_pixels() else source_path.get_extension()
+    return source_path.get_file().get_basename() + suffix + "." + extension
 
 
 ## One line describing what processing [param source_path] would produce, for the
@@ -106,7 +113,7 @@ func get_output_name(source_path: String, suffix: String, _index: int) -> String
 ## An operation whose whole effect is on the file name has nothing to show in the
 ## preview, so this is how it stays inspectable before being run.
 func describe_output(_source_path: String, _suffix: String, _index: int) -> String:
-	return ""
+    return ""
 
 
 ## The Resource holding this operation's tunables.
@@ -115,13 +122,13 @@ func describe_output(_source_path: String, _suffix: String, _index: int) -> Stri
 ## named by [method get_key_color_property], resolves against this object rather
 ## than against the operation.
 func get_settings() -> Resource:
-	return null
+    return null
 
 
 ## Points the operation at a different settings Resource. Implementations reject
 ## a Resource of the wrong type rather than storing it.
 func set_settings(_settings: Resource) -> void:
-	pass
+    pass
 
 
 ## A settings Resource of this operation's type, at its defaults.
@@ -129,7 +136,7 @@ func set_settings(_settings: Resource) -> void:
 ## Loading a saved file decodes into one of these, so a key the file is missing
 ## comes out at its default rather than at whatever happened to be dialled in.
 func make_settings() -> Resource:
-	return null
+    return null
 
 
 ## Name of a [Color] property that is this operation's primary input, or an
@@ -139,7 +146,7 @@ func make_settings() -> Resource:
 ## burying it in the settings form, since it is the thing the operation is
 ## *about* rather than a parameter of how it works.
 func get_key_color_property() -> StringName:
-	return &""
+    return &""
 
 
 ## Describes the editable settings, in display order.
@@ -166,7 +173,7 @@ func get_key_color_property() -> StringName:
 ## — a colour picked by hand against one worked out from the image — showing both
 ## would mean showing one that does nothing.
 func get_settings_schema() -> Array[Dictionary]:
-	return []
+    return []
 
 
 ## Pulls every numeric setting back inside the range its schema declares.
@@ -181,23 +188,23 @@ func get_settings_schema() -> Array[Dictionary]:
 ## file is clamped before the operation is pointed at it, so the target has to be
 ## nameable.
 func clamp_settings_to_schema(settings: Resource = null) -> void:
-	if settings == null:
-		settings = get_settings()
-	if settings == null:
-		return
-	for entry in get_settings_schema():
-		var property: StringName = entry.get("property", &"")
-		var type: int = entry.get("type", SettingType.FLOAT)
-		if property == &"":
-			continue
-		if type != SettingType.INT and type != SettingType.FLOAT:
-			continue
-		if not entry.has("min") and not entry.has("max"):
-			continue
-		var low: float = entry.get("min", -INF)
-		var high: float = entry.get("max", INF)
-		var value := clampf(float(settings.get(property)), low, high)
-		settings.set(property, int(value) if type == SettingType.INT else value)
+    if settings == null:
+        settings = get_settings()
+    if settings == null:
+        return
+    for entry in get_settings_schema():
+        var property: StringName = entry.get("property", &"")
+        var type: int = entry.get("type", SettingType.FLOAT)
+        if property == &"":
+            continue
+        if type != SettingType.INT and type != SettingType.FLOAT:
+            continue
+        if not entry.has("min") and not entry.has("max"):
+            continue
+        var low: float = entry.get("min", -INF)
+        var high: float = entry.get("max", INF)
+        var value := clampf(float(settings.get(property)), low, high)
+        settings.set(property, int(value) if type == SettingType.INT else value)
 
 
 ## Called with a fraction from 0 to 1 as [method process_image] advances, when
@@ -232,9 +239,9 @@ var cancelled := false
 ## must expect that — the dock's reporter defers to the main thread rather than
 ## touching a control from the worker.
 func report_progress(fraction: float) -> bool:
-	if progress_reporter.is_valid():
-		progress_reporter.call(clampf(fraction, 0.0, 1.0))
-	return not cancelled
+    if progress_reporter.is_valid():
+        progress_reporter.call(clampf(fraction, 0.0, 1.0))
+    return not cancelled
 
 
 ## Runs the operation. [param source] is left untouched; a new image is returned.
@@ -248,4 +255,4 @@ func report_progress(fraction: float) -> bool:
 ## quickly — the caller asked because it has already decided to throw the answer
 ## away. Returning [param source] is the cheapest way to say nothing.
 func process_image(source: Image) -> Image:
-	return source
+    return source

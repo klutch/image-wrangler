@@ -326,6 +326,7 @@ static func decode_stack(envelope: Dictionary, registry: Dictionary, source: Str
         stack.append({
             "id": id,
             "enabled": bool(entry.get("enabled", true)),
+            "folded": bool(entry.get("folded", false)),
             "settings": settings,
         })
         # A file written while the crevice rule lived inside the background flood keeps
@@ -416,9 +417,12 @@ static func save_stack(source_path: String, stack: Array) -> Error:
 
 ## One JSON block per stage, in order, for the [code]"stack"[/code] field.
 ##
-## [param stack] is the dock's own record shape — [code]{"id", "enabled",
+## [param stack] is the dock's own record shape — [code]{"id", "enabled", "folded",
 ## "settings"}[/code] — and any other key on a record, such as the live operation the
 ## dock hangs off it, is ignored rather than encoded.
+##
+## [code]folded[/code] needs no version bump, because the reader takes it with a default
+## and a file written before it existed simply comes back unfolded.
 static func encode_stack(stack: Array) -> Array:
     var encoded := []
     for entry: Dictionary in stack:
@@ -426,6 +430,7 @@ static func encode_stack(stack: Array) -> Array:
         encoded.append({
             "id": String(entry.get("id", &"")),
             "enabled": bool(entry.get("enabled", true)),
+            "folded": bool(entry.get("folded", false)),
             "settings": to_dict(settings),
         })
     return encoded

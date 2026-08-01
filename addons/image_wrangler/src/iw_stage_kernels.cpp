@@ -107,6 +107,13 @@ void IWStageKernels::_bind_methods() {
             D_METHOD("find_islands", "ctx"), &IWStageKernels::find_islands);
     ClassDB::bind_static_method("IWStageKernels",
             D_METHOD("cut_islands", "ctx"), &IWStageKernels::cut_islands);
+    // Defined in iw_island_kernels.cpp; bound here so every entry point is in one list.
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("remove_minimum_area", "ctx", "min_area"),
+            &IWStageKernels::remove_minimum_area);
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("select_tiles", "ctx", "points", "mode"),
+            &IWStageKernels::select_tiles);
 }
 
 // Rasterises this stage's shapes and folds them into whatever is already declared.

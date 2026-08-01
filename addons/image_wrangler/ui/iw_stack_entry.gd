@@ -9,12 +9,13 @@ extends PanelContainer
 ## the entry [i]is[/i] the group now, and a heading inside it would be a heading
 ## inside a heading.
 ##
-## [b]Dragging starts on the handle only.[/b] The whole entry implements the drag, so
+## [b]Dragging starts anywhere in the header.[/b] The whole entry implements the drag, so
 ## the preview and the drop indicator cover all of it and the gesture works across the
 ## scroll container. But an entry full of sliders and list rows would be impossible to
 ## use if a drag could start anywhere in it, so [method _get_drag_data] refuses unless
-## the press began inside the handle. The handle passes the mouse through rather than
-## taking it, which is why it is a [Label] and not a [Button].
+## the press began inside the header. The tick, the title and the close button take their
+## own mouse events, so each forwards a drag back here; a press that does not move still
+## does what the control it landed on says it does.
 
 ## Emitted when the close button is pressed.
 signal remove_requested(entry: Control)
@@ -65,6 +66,7 @@ var stage: IWStackOperation
 var uid := 0
 
 var _handle: Label
+var _header: HBoxContainer
 var _tick: CheckBox
 var _title: Button
 var _note: Label
@@ -156,7 +158,8 @@ func _build() -> void:
     column.add_theme_constant_override("separation", 0)
     add_child(column)
 
-    var header := HBoxContainer.new()
+    _header = HBoxContainer.new()
+    var header := _header
     column.add_child(header)
 
     # Passes the mouse through rather than taking it, so the press reaches the entry
@@ -194,8 +197,13 @@ func _build() -> void:
     _title.focus_mode = Control.FOCUS_NONE
     _title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
     _title.tooltip_text = "Show or hide these settings."
+    # Written straight onto the operation, and nothing is emitted. A fold changes no
+    # pixels, so it must not enter the undo history or start another run — it rides the
+    # next save any real edit asks for.
     _title.toggled.connect(func(pressed: bool) -> void:
         _body.visible = pressed
+        if stage != null:
+            stage.folded = not pressed
         _apply_fold_arrow())
     _title.theme_changed.connect(_apply_fold_arrow)
     _title.gui_input.connect(_on_title_input)
@@ -217,6 +225,15 @@ func _build() -> void:
     close.tooltip_text = "Remove this operation from the stack.\nIts settings go with it."
     close.pressed.connect(func() -> void: remove_requested.emit(self))
     header.add_child(close)
+
+    # The three controls in the header take their own mouse events, so a press on one
+    # never reaches this entry's _get_drag_data. Each hands the drag back here instead.
+    # A press that does not move still ticks, folds or closes: Godot drops a button's
+    # press when a drag begins, so the two cannot both happen.
+    for grabbable: Control in [_tick, _title, close]:
+        grabbable.set_drag_forwarding(
+                func(_at: Vector2) -> Variant: return _begin_drag(),
+                Callable(), Callable())
 
     _note = Label.new()
     _note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -324,19 +341,25 @@ func _offer_menu(event: InputEvent, over: Control) -> void:
 # --- Reordering ---------------------------------------------------------
 
 func _get_drag_data(at_position: Vector2) -> Variant:
-    # Only from the handle. Without this, dragging any spin slider or list row inside
+    # Only from the header. Without this, dragging any spin slider or list row inside
     # the entry would start a reorder instead of doing what it looks like it does.
     #
     # Measured against where the press began, which is what at_position is — not where
     # the pointer has since got to. A drag is not offered until the pointer has moved
-    # about ten pixels, and ten pixels from the middle of a handle this wide is outside
-    # it, so asking the live position turned most real drags down and the handle felt
-    # like it had to be grabbed several times.
-    if _handle == null:
+    # about ten pixels, and asking the live position turns down most real drags started
+    # near an edge.
+    #
+    # This catches the handle and the gaps around the controls. The controls themselves
+    # forward to _begin_drag, since they take their own mouse events.
+    if _header == null:
         return null
-    if not _handle.get_global_rect().has_point(get_global_transform() * at_position):
+    if not _header.get_global_rect().has_point(get_global_transform() * at_position):
         return null
+    return _begin_drag()
 
+
+## Starts a reorder: hangs a label off the pointer and says which entry is moving.
+func _begin_drag() -> Variant:
     var preview := Label.new()
     preview.text = stage.get_operation_name()
     preview.add_theme_constant_override("outline_size", 2)

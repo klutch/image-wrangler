@@ -71,26 +71,29 @@ const TRANSPARENCY_COLOR := Color(1, 0, 1)
 const BORDER_COLOR := Color(0, 0, 0)
 const BORDER_WIDTH := 1.0
 
-## What a marker is drawn in, alpha included.
-##
-## The alpha belongs here rather than being mixed in at each draw. There is one answer
-## to how present a marker should be, and every place that built its own from a bare
-## colour was another place for that answer to drift. A marker that should read
-## differently is a colour of its own, below, not the same colour re-alphaed on the way
-## past.
+## What a mark is drawn in when its operation gave no colour of its own.
 ##
 ## Softer than solid on purpose: these sit over the edges the tool exists to judge, and
 ## have to be readable without being what you look at.
-const MARKER_COLOR := Color(1, 1, 1, 0.6)
-const MARKER_SELECTED_COLOR := Color(1.0, 1.0, 0.2, 1)
+const MARKER_FALLBACK_COLOR := Color(1, 1, 1)
 
-## The same two for an island that has been switched off.
+## How present a mark is, by what it is saying.
 ##
-## It keeps its marker rather than vanishing — where it is stays worth seeing while it
-## is set aside — but drops back far enough that the image agrees with the greyed row in
-## the list.
-const MARKER_DISABLED_COLOR := Color(1, 1, 1, 0.27)
-const MARKER_DISABLED_SELECTED_COLOR := Color(1.0, 1.0, 0.2, 0.27)
+## The colour now says which operation a mark belongs to, so the state it is in has to
+## say itself some other way, and strength is it. Selected also draws a step thicker and
+## takes a fill; switched off keeps its mark rather than vanishing — where it is stays
+## worth seeing while it is set aside — but drops back far enough that the image agrees
+## with the greyed row in the list.
+const MARKER_ALPHA := 0.6
+const MARKER_SELECTED_ALPHA := 1.0
+const MARKER_DISABLED_ALPHA := 0.27
+
+## The rectangle being dragged out this instant.
+##
+## One fixed colour rather than the tint of whatever operation is picking. It is the
+## gesture in progress, not a mark on the result, and it disappears the moment the button
+## comes up — so it has nothing to be told apart from.
+const SWEEP_COLOR := Color(1.0, 1.0, 0.2)
 
 ## The dark backing every marker is laid over, so an outline reads against light and
 ## dark art alike. Drawn as the same shape, one step thicker.
@@ -384,6 +387,10 @@ var _marker_enabled := PackedByteArray()
 ## A byte per marker: one means the rectangle is where a run found the flood reached
 ## rather than where the pick was made, and is dashed to say so.
 var _marker_flooded := PackedByteArray()
+
+## A colour per marker: the tint of the operation the marker belongs to. Short or empty
+## where an operation gave none, which falls back to white.
+var _marker_tints := PackedColorArray()
 var _selected_marker := -1
 
 ## Where each packed tile sits on the sheet, in image coordinates, and the colour its
@@ -430,6 +437,8 @@ var _polygons: Array = []
 ## A byte per region: zero means it is switched off. It still draws — the shape
 ## took work to make — but without the fill, since nothing is being cut.
 var _polygon_enabled := PackedByteArray()
+## A colour per region: the tint of the operation it belongs to, as for the markers.
+var _polygon_tints := PackedColorArray()
 ## Row highlighted in the list. Its corners get grab handles.
 var _selected_polygon := -1
 ## Row being drawn, or -1. Drawn as an open path with a rubber band rather than
@@ -568,18 +577,37 @@ func set_original(image: Image) -> void:
 ## two are different claims about the image and only one of them is something the user
 ## chose. Without it every marker is taken to be a pick, which is what it is until a
 ## run has said otherwise.
+##
+## [param tints] runs alongside as well, one colour per marker, saying which operation
+## each belongs to. Short or empty falls back to white.
 func set_markers(
         markers: Array[Rect2i],
         selected: int,
         enabled := PackedByteArray(),
-        flooded := PackedByteArray()) -> void:
+        flooded := PackedByteArray(),
+        tints := PackedColorArray()) -> void:
     # Copied, not aliased: the caller's array belongs to the operation and can
     # change underneath us without a redraw being requested.
     _markers = markers.duplicate()
     _marker_enabled = enabled.duplicate()
     _marker_flooded = flooded.duplicate()
+    _marker_tints = tints.duplicate()
     _selected_marker = selected
     _canvas.queue_redraw()
+
+
+## The colour one mark is drawn in.
+##
+## The tint says which operation the mark belongs to and the strength says what state it
+## is in, so the two never compete for the same channel.
+func _mark_color(tints: PackedColorArray, index: int, selected: bool, on: bool) -> Color:
+    var base := MARKER_FALLBACK_COLOR
+    if index < tints.size() and tints[index].a > 0.0:
+        base = tints[index]
+    var alpha := MARKER_DISABLED_ALPHA
+    if on:
+        alpha = MARKER_SELECTED_ALPHA if selected else MARKER_ALPHA
+    return Color(base.r, base.g, base.b, alpha)
 
 
 ## Lays a solid patch of colour under each of [param tiles], in image coordinates.
@@ -618,9 +646,15 @@ func set_tile_bounds(tiles: Array) -> void:
 ## [param selected] gets grab handles on its corners, [param draft] is drawn as an
 ## open path still being placed. Pass -1 for either when there is none.
 ## Each region's own swatch is deliberately not taken. It tells one row from another in
-## the list; on the image the colour says whether a shape is selected and switched on,
-## which is what the island boxes say too.
-func set_polygons(polygons: Array, selected: int, draft: int, enabled := PackedByteArray()) -> void:
+## the list; on the image the colour says which operation the shape belongs to and how
+## present it is, which is what the island boxes say too. [param tints] carries that,
+## one colour per shape.
+func set_polygons(
+        polygons: Array,
+        selected: int,
+        draft: int,
+        enabled := PackedByteArray(),
+        tints := PackedColorArray()) -> void:
     # Converted to float points once here rather than per redraw, and copied for
     # the same reason the markers are: the caller's arrays belong to the operation
     # and can change underneath us without a redraw being asked for.
@@ -631,6 +665,7 @@ func set_polygons(polygons: Array, selected: int, draft: int, enabled := PackedB
             converted.append(Vector2(point))
         _polygons.append(converted)
     _polygon_enabled = enabled.duplicate()
+    _polygon_tints = tints.duplicate()
     _selected_polygon = selected
     _draft_polygon = draft
     if draft < 0:
@@ -1414,9 +1449,7 @@ func _draw_markers() -> void:
             continue
         var selected := i == _selected_marker
         var on := i >= _marker_enabled.size() or _marker_enabled[i] != 0
-        var color := MARKER_SELECTED_COLOR if selected else MARKER_COLOR
-        if not on:
-            color = MARKER_DISABLED_SELECTED_COLOR if selected else MARKER_DISABLED_COLOR
+        var color := _mark_color(_marker_tints, i, selected, on)
         if i < _marker_flooded.size() and _marker_flooded[i] != 0:
             _draw_flood_marker(region, color, selected)
         elif region.size != Vector2i.ONE:
@@ -1523,9 +1556,9 @@ func _draw_region_band() -> void:
         _content_origin + Vector2(region.position) * scale,
         Vector2(region.size) * scale,
     )
-    _canvas.draw_rect(box, Color(MARKER_SELECTED_COLOR, MARKER_FILL_ALPHA), true)
+    _canvas.draw_rect(box, Color(SWEEP_COLOR, MARKER_FILL_ALPHA), true)
     _canvas.draw_rect(box, MARKER_SHADOW_COLOR, false, MARKER_WIDTH + 2.0)
-    _canvas.draw_rect(box, MARKER_SELECTED_COLOR, false, MARKER_WIDTH)
+    _canvas.draw_rect(box, SWEEP_COLOR, false, MARKER_WIDTH)
 
 
 ## Draws every drawn region: finished ones closed and shaded, the one being
@@ -1542,9 +1575,7 @@ func _draw_polygons() -> void:
             continue
         var selected := i == _selected_polygon
         var on := i >= _polygon_enabled.size() or _polygon_enabled[i] != 0
-        var color := MARKER_SELECTED_COLOR if selected else MARKER_COLOR
-        if not on:
-            color = MARKER_DISABLED_SELECTED_COLOR if selected else MARKER_DISABLED_COLOR
+        var color := _mark_color(_polygon_tints, i, selected, on)
         var screen := _to_screen(points)
         if i == _draft_polygon:
             # Drawn whether or not the overlays are showing. A shape being placed this

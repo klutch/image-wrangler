@@ -10,6 +10,7 @@ const ColorList := preload("res://addons/image_wrangler/ui/iw_color_list.gd")
 const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd")
 const HSVList := preload("res://addons/image_wrangler/ui/iw_hsv_list.gd")
 const BrushList := preload("res://addons/image_wrangler/ui/iw_brush_list.gd")
+const TileSelectorList := preload("res://addons/image_wrangler/ui/iw_tile_selector.gd")
 const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
 const StackView := preload("res://addons/image_wrangler/ui/iw_stack_view.gd")
 const HistoryView := preload("res://addons/image_wrangler/ui/iw_history_view.gd")
@@ -70,6 +71,7 @@ const OPERATION_GROUPS := [
             {"script": "res://addons/image_wrangler/core/brush_edit_op.gd", "icon": &"Paint"},
             {"script": "res://addons/image_wrangler/core/island_picker_op.gd", "icon": &"ColorPick"},
             {"script": "res://addons/image_wrangler/core/polygon_edit_op.gd", "icon": &"Polygon2D"},
+            {"script": "res://addons/image_wrangler/core/tile_selector.gd", "icon": &"ListSelect"},
         ],
     },
     {
@@ -77,6 +79,7 @@ const OPERATION_GROUPS := [
         "entries": [
             {"script": "res://addons/image_wrangler/core/fill_pinholes.gd", "icon": &"Bucket"},
             {"script": "res://addons/image_wrangler/core/remove_lines.gd", "icon": &"Line2D"},
+            {"script": "res://addons/image_wrangler/core/remove_minimum_area.gd", "icon": &"GPUParticles2D"},
         ],
     },
 ]
@@ -446,12 +449,10 @@ var _pending_outputs: Dictionary = {}
 ## cannot clobber live state.
 var _stacks_by_path: Dictionary = {}
 
-## Which stack entries are folded, keyed by the entry's uid.
+## Which groups inside a settings form are folded, keyed by the form and the group.
 ##
-## Keyed by uid rather than by operation id, because the same operation may appear
-## twice and folding one must not fold the other. Kept for the session and not written
-## to a sidecar: a fold is about what you are working on this afternoon, not about the
-## image.
+## Only the groups within a form. Whether a whole stack entry is folded lives on the
+## operation, beside whether it is enabled, and is saved with it.
 var _fold_state: Dictionary = {}
 
 ## Set while the form is being repointed at another image's settings. Every
@@ -1331,7 +1332,6 @@ func _build_operation_column() -> Control:
     _stack_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _stack_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
     _stack_view.operation_groups = OPERATION_GROUPS
-    _stack_view.fold_state = _fold_state
     _stack_view.form_builder = _build_entry_form
     _stack_view.stack_changed.connect(_on_stack_changed)
     _stack_view.setting_changed.connect(_on_setting_changed)
@@ -1871,6 +1871,11 @@ func _bind_pick_control(control: Control) -> void:
         brush.draw_toggled.connect(_on_pick_toggled.bind(brush))
         brush.strokes_changed.connect(_on_setting_changed)
         brush.selection_changed.connect(_on_selection_changed.bind(brush))
+    elif control is TileSelectorList:
+        var tiles := control as TileSelectorList
+        tiles.pick_toggled.connect(_on_pick_toggled.bind(tiles))
+        tiles.tiles_changed.connect(_on_setting_changed)
+        tiles.selection_changed.connect(_on_selection_changed.bind(tiles))
 
 
 ## The stack gained, lost or reordered an entry.
@@ -2211,6 +2216,7 @@ func _stack_records() -> Array:
         records.append({
             "id": stage.get_operation_id(),
             "enabled": stage.enabled,
+            "folded": stage.folded,
             "settings": stage.get_settings(),
             "operation": stage,
         })
@@ -2298,6 +2304,7 @@ func _copy_one(index: int) -> void:
     DisplayServer.clipboard_set(SettingsIO.stack_to_text([{
         "id": stage.get_operation_id(),
         "enabled": stage.enabled,
+        "folded": stage.folded,
         "settings": stage.get_settings(),
     }]))
     _set_status("Copied %s." % stage.get_operation_name())
@@ -2559,6 +2566,7 @@ func _stack_for(path: String) -> Array:
             records.append({
                 "id": stage.get_operation_id(),
                 "enabled": true,
+                "folded": false,
                 "settings": stage.get_settings(),
                 "operation": stage,
             })
@@ -2575,9 +2583,11 @@ func _stack_for(path: String) -> Array:
             stage.clamp_settings_to_schema(settings)
             stage.set_settings(settings)
             stage.enabled = bool(entry["enabled"])
+            stage.folded = bool(entry.get("folded", false))
             records.append({
                 "id": entry["id"],
                 "enabled": stage.enabled,
+                "folded": stage.folded,
                 "settings": settings,
                 "operation": stage,
             })
@@ -2710,7 +2720,8 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
     _preview.pick_mode = true
     # Three of them want a rectangle — one takes the pixels inside it, one the colours,
     # one the area to recolour. A polygon is built corner by corner and wants neither.
-    _preview.region_pick = source is IslandPicker or source is ColorList or source is HSVList
+    _preview.region_pick = source is IslandPicker or source is ColorList \
+            or source is HSVList or source is TileSelectorList
     # And the brush wants the whole drag rather than either end of it.
     _preview.stroke_pick = source is BrushList
     if source is BrushList:
@@ -2721,6 +2732,8 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
         _set_status("Click to place corners. Right-click or Escape closes the region.")
     elif source is HSVList:
         _set_status("Drag a rectangle in the preview to add it to the list.")
+    elif source is TileSelectorList:
+        _set_status("Click a tile to pick it, or drag over several. Clicking a picked one lets it go.")
     else:
         _set_status("Drag a region in the preview to add it to the list, or click one pixel.")
     _update_overlays()
@@ -2756,6 +2769,19 @@ func _on_region_picked(region: Rect2i) -> void:
         _pick_color_region(region)
     elif _pick_target is HSVList:
         _pick_hsv_region(region)
+    elif _pick_target is TileSelectorList:
+        _pick_tiles(region)
+
+
+## Takes or lets go of every tile the swept region touches.
+##
+## Toggling rather than adding, because a tile the operation has removed is not in the
+## picture any more and clicking its outline again is the only way to get it back.
+func _pick_tiles(region: Rect2i) -> void:
+    var changed := (_pick_target as TileSelectorList).toggle_tiles(region)
+    if changed <= 0:
+        return
+    _set_status("%d tile%s changed." % [changed, "" if changed == 1 else "s"])
 
 
 func _pick_hsv_region(region: Rect2i) -> void:
@@ -3069,10 +3095,12 @@ func _update_overlays() -> void:
     var islands: Array[Rect2i] = []
     var island_flags := PackedByteArray()
     var island_flooded := PackedByteArray()
+    var island_tints := PackedColorArray()
     var selected_island := -1
 
     var regions := []
     var region_flags := PackedByteArray()
+    var region_tints := PackedColorArray()
     var selected_region := -1
     var draft_region := -1
 
@@ -3083,49 +3111,78 @@ func _update_overlays() -> void:
     var brush_stroke: BrushStroke = null
 
     if _is_image_mode(_mode):
-        for control: Control in _pick_controls:
-            if control is IslandPicker:
-                var picker := control as IslandPicker
-                var own := picker.get_islands()
-                if picker == _overlay_owner and picker.selected_index() >= 0:
-                    selected_island = islands.size() + picker.selected_index()
-                islands.append_array(own)
-                island_flags.append_array(picker.get_enabled_flags())
-                island_flooded.append_array(picker.get_flooded_flags())
-            elif control is HSVList:
-                # Drawn with the islands rather than beside them: both are rectangles
-                # naming an area, and the boxes already say what one of those looks like.
-                # Flagged as flooded so they come out dashed, since a picked rectangle is
-                # exactly what it acts on rather than a guess at it.
-                var hsv := control as HSVList
-                var own_rects := hsv.get_regions()
-                if hsv == _overlay_owner and hsv.selected_index() >= 0:
-                    selected_island = islands.size() + hsv.selected_index()
-                islands.append_array(own_rects)
-                island_flags.append_array(hsv.get_enabled_flags())
-                for _i in own_rects.size():
-                    island_flooded.append(1)
-            elif control is PolygonList:
-                var list := control as PolygonList
-                var own_regions := list.get_polygons()
-                var offset := regions.size()
-                if list == _overlay_owner and list.selected_index() >= 0:
-                    selected_region = offset + list.selected_index()
-                # At most one list has a draft, because drawing is arbitrated.
-                if list.draft_index() >= 0:
-                    draft_region = offset + list.draft_index()
-                regions.append_array(own_regions)
-                region_flags.append_array(list.get_enabled_flags())
-            elif control is BrushList:
-                # Only from the list the user is working in, and never the stroke being
-                # drawn: that one is showing as paint on the image already, and a second
-                # picture of it is what the switch to live painting was made to get rid of.
-                var brush := control as BrushList
-                if brush == _overlay_owner and brush.selected_index() != brush.draft_index():
-                    brush_stroke = brush.selected_stroke()
+        # Walked entry by entry rather than straight down _pick_controls, which is the
+        # same order — both are built by going through the entries in turn — but this way
+        # each control arrives with the operation it belongs to, and that is where the
+        # colour comes from.
+        for entry: Control in _stack_view.entries():
+            var stage: IWStackOperation = entry.stage
+            var tint := stage.tint if stage != null else Color.WHITE
+            for control: Control in entry.pick_controls():
+                if control is IslandPicker:
+                    var picker := control as IslandPicker
+                    var own := picker.get_islands()
+                    if picker == _overlay_owner and picker.selected_index() >= 0:
+                        selected_island = islands.size() + picker.selected_index()
+                    islands.append_array(own)
+                    island_flags.append_array(picker.get_enabled_flags())
+                    island_flooded.append_array(picker.get_flooded_flags())
+                    for _i in own.size():
+                        island_tints.append(tint)
+                elif control is HSVList:
+                    # Drawn with the islands rather than beside them: both are rectangles
+                    # naming an area, and the boxes already say what one of those looks
+                    # like. Flagged as flooded so they come out dashed, since a picked
+                    # rectangle is exactly what it acts on rather than a guess at it.
+                    var hsv := control as HSVList
+                    var own_rects := hsv.get_regions()
+                    if hsv == _overlay_owner and hsv.selected_index() >= 0:
+                        selected_island = islands.size() + hsv.selected_index()
+                    islands.append_array(own_rects)
+                    island_flags.append_array(hsv.get_enabled_flags())
+                    for _i in own_rects.size():
+                        island_flooded.append(1)
+                        island_tints.append(tint)
+                elif control is PolygonList:
+                    var list := control as PolygonList
+                    var own_regions := list.get_polygons()
+                    var offset := regions.size()
+                    if list == _overlay_owner and list.selected_index() >= 0:
+                        selected_region = offset + list.selected_index()
+                    # At most one list has a draft, because drawing is arbitrated.
+                    if list.draft_index() >= 0:
+                        draft_region = offset + list.draft_index()
+                    regions.append_array(own_regions)
+                    region_flags.append_array(list.get_enabled_flags())
+                    for _i in own_regions.size():
+                        region_tints.append(tint)
+                elif control is BrushList:
+                    # Only from the list the user is working in, and never the stroke
+                    # being drawn: that one is showing as paint on the image already, and
+                    # a second picture of it is what the switch to live painting was made
+                    # to get rid of.
+                    var brush := control as BrushList
+                    if brush == _overlay_owner and brush.selected_index() != brush.draft_index():
+                        brush_stroke = brush.selected_stroke()
 
-    _preview.set_markers(islands, selected_island, island_flags, island_flooded)
-    _preview.set_polygons(regions, selected_region, draft_region, region_flags)
+        # After every pick control, never among them. selected_island is an index into the
+        # joined list, worked out from how much was in it as each control was reached, so
+        # anything slipped in earlier moves the highlight onto somebody else's rectangle.
+        for entry: Control in _stack_view.entries():
+            var stage: IWStackOperation = entry.stage
+            if stage == null:
+                continue
+            var marked := stage.marked_regions()
+            if marked.is_empty():
+                continue
+            islands.append_array(marked)
+            for _i in marked.size():
+                island_flags.append(1 if stage.enabled else 0)
+                island_flooded.append(1)
+                island_tints.append(stage.tint)
+
+    _preview.set_markers(islands, selected_island, island_flags, island_flooded, island_tints)
+    _preview.set_polygons(regions, selected_region, draft_region, region_flags, region_tints)
     _push_brush_overlay(brush_stroke)
 
 

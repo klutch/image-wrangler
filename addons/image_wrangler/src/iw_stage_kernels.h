@@ -320,6 +320,22 @@ public:
     // neighbour onto the packed sheet. Returns one RGBA8 image per island, in the same
     // order as find_islands.
     static TypedArray<Image> cut_islands(const Ref<IWPipelineContext> &ctx);
+
+    // RemoveMinimumArea: removes every island whose area is at or below `min_area`.
+    //
+    // Area is summed alpha, so a half-covered pixel counts a half. Labelled through any
+    // visible pixel rather than through the solid part, which is what lets a speck made
+    // entirely of fringe be measured and removed. Returns x, y, w, h per island removed.
+    static PackedInt32Array remove_minimum_area(
+            const Ref<IWPipelineContext> &ctx, int64_t min_area);
+
+    // TileSelector: keeps or removes whole tiles, by which ones the user picked.
+    //
+    // `points` is x,y interleaved, one pair per pick. `mode` is 0 to keep everything, 1 to
+    // remove the picked tiles, 2 to remove everything else. Returns "bounds", the
+    // rectangle of every tile found, and "picked", which tile each point landed on or -1.
+    static Dictionary select_tiles(
+            const Ref<IWPipelineContext> &ctx, const PackedInt32Array &points, int64_t mode);
 };
 
 } // namespace godot

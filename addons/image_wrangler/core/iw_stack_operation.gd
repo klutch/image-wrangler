@@ -42,6 +42,41 @@ const EPSILON := 0.0001
 ## keeps everything dialled into it, which deleting the entry would not.
 var enabled := true
 
+## Whether the dock draws this stage's settings folded away.
+##
+## Held here beside [member enabled] for the same reason: it is a fact about the entry
+## rather than about the operation, and it is saved beside the settings rather than
+## inside them.
+var folded := false
+
+## How far round the colour wheel each stage steps from the one before it, and the one
+## strength they are all drawn at.
+##
+## The golden ratio's fractional part, the same walk the packed tiles take: going round a
+## circle by it never repeats and never bunches, so two stages added one after the other
+## cannot come out the same colour. Pale and bright, since these sit over the edges the
+## tool exists to judge.
+const TINT_HUE_STEP := 0.6180339887
+const TINT_SATURATION := 0.45
+const TINT_VALUE := 1.0
+
+## Which colour the next stage built takes.
+static var _tints_taken := 0
+
+## The colour this stage's marks are drawn in on the preview.
+##
+## Taken when the stage is built and kept, so it follows the stage as it is dragged up and
+## down the stack and survives switching image and coming back. Not saved: it tells one
+## stage from another within a session, which is all it is for.
+var tint: Color = _take_tint()
+
+
+## The next colour off the wheel.
+static func _take_tint() -> Color:
+    var hue := fmod(float(_tints_taken) * TINT_HUE_STEP, 1.0)
+    _tints_taken += 1
+    return Color.from_hsv(hue, TINT_SATURATION, TINT_VALUE)
+
 ## The pipeline running this stage, or null when it is running on its own.
 ##
 ## Typed as the base rather than as [IWPipeline] deliberately: the only thing
@@ -60,7 +95,7 @@ var owner: IWOperation
 ## the run carries on with the context exactly as it found it — which is also what
 ## a stage does when [method report_progress] tells it to stop.
 func process_context(_ctx: IWPipelineContext) -> void:
-	pass
+    pass
 
 
 ## Takes back whatever the run learned that the dock wants to show.
@@ -76,7 +111,16 @@ func process_context(_ctx: IWPipelineContext) -> void:
 ## is called they may be a slider-drag out of date — writing them back would undo an
 ## edit made while the run was going.
 func absorb_run_report(_from: IWStackOperation) -> void:
-	pass
+    pass
+
+
+## What this stage wants outlined on the preview, or nothing.
+##
+## For a stage that acts on regions it worked out for itself rather than on ones the user
+## picked, so no control is holding them. Drawn dashed, since they are what a run found
+## rather than what anyone chose.
+func marked_regions() -> Array[Rect2i]:
+    return []
 
 
 ## Whether this stage needs a background to have been keyed out above it.
@@ -86,7 +130,7 @@ func absorb_run_report(_from: IWStackOperation) -> void:
 ## answered from the settings rather than from the class: a stage whose need
 ## depends on what has been dialled into it says so per instance.
 func needs_keying() -> bool:
-	return true
+    return true
 
 
 ## Whether this stage is one that establishes the keys and the classification.
@@ -95,7 +139,7 @@ func needs_keying() -> bool:
 ## because most stages do neither: geometry and the stroke work on their own
 ## without leaving a background behind for anything below to measure against.
 func establishes_keying() -> bool:
-	return false
+    return false
 
 
 ## One line saying what this stage is waiting for, or empty when it is ready.
@@ -105,7 +149,7 @@ func establishes_keying() -> bool:
 ## fault. [param ctx] is the run so far, or null when the dock is only asking what
 ## the stack looks like.
 func prerequisite_note(_ctx: IWPipelineContext) -> String:
-	return ""
+    return ""
 
 
 ## Roughly what share of a run this stage costs, relative to the others.
@@ -115,7 +159,7 @@ func prerequisite_note(_ctx: IWPipelineContext) -> String:
 ## stages — the same reason the checkpoints inside a single stage are hand-set
 ## rather than evenly spaced.
 func stage_weight() -> float:
-	return 1.0
+    return 1.0
 
 
 ## Reports [param fraction] of [i]this stage[/i] complete, and returns whether to
@@ -125,11 +169,11 @@ func stage_weight() -> float:
 ## cancel arrives: the dock knows about the run, not about which stage happens to
 ## be in it.
 func report_progress(fraction: float) -> bool:
-	if progress_reporter.is_valid():
-		progress_reporter.call(clampf(fraction, 0.0, 1.0))
-	if cancelled:
-		return false
-	return owner == null or not owner.cancelled
+    if progress_reporter.is_valid():
+        progress_reporter.call(clampf(fraction, 0.0, 1.0))
+    if cancelled:
+        return false
+    return owner == null or not owner.cancelled
 
 
 ## Runs this stage on its own and writes the result.
@@ -137,8 +181,8 @@ func report_progress(fraction: float) -> bool:
 ## The whole-operation contract, honoured for a single stage, so a stack operation
 ## is still usable from code that has one and just wants an image back.
 func process_image(source: Image) -> Image:
-	var ctx := IWPipelineContext.from_image(source)
-	if ctx.pixel_count == 0:
-		return source
-	process_context(ctx)
-	return IWCompose.compose(ctx)
+    var ctx := IWPipelineContext.from_image(source)
+    if ctx.pixel_count == 0:
+        return source
+    process_context(ctx)
+    return IWCompose.compose(ctx)
