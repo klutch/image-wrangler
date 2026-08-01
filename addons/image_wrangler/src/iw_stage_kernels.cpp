@@ -133,14 +133,17 @@ void IWStageKernels::rasterise_regions(
 	}
 	uint8_t *out = marked.ptrw();
 
-    // A shape retires whatever an island above it protected on the same pixels, and the
-    // forced opacity that protection was folded in as. Without this the declaration would
-    // still be standing when the regions are next folded in, and the shape drawn later
-    // would lose to the island drawn earlier.
+    // A shape retires whatever an island above it protected on the same pixels, the forced
+    // opacity that protection was folded in as, and the outline an Edge Cleanup above
+    // worked out for them. See IWPipelineContext::clear_regions_at for why each has to go.
     uint8_t *protect_ptr =
             ctx->protect.size() == pixel_count ? ctx->protect.ptrw() : nullptr;
     uint8_t *force_ptr =
             ctx->force_opaque.size() == pixel_count ? ctx->force_opaque.ptrw() : nullptr;
+    float *inner_ptr =
+            ctx->stroke_inner.size() == pixel_count ? ctx->stroke_inner.ptrw() : nullptr;
+    float *outer_ptr =
+            ctx->stroke_outer.size() == pixel_count ? ctx->stroke_outer.ptrw() : nullptr;
 
 	const int32_t *point_ptr = points.ptr();
 	std::vector<float> crossings;
@@ -214,6 +217,12 @@ void IWStageKernels::rasterise_regions(
                     }
                     if (force_ptr != nullptr) {
                         force_ptr[i] = 0;
+                    }
+                    if (inner_ptr != nullptr) {
+                        inner_ptr[i] = 0.0f;
+                    }
+                    if (outer_ptr != nullptr) {
+                        outer_ptr[i] = 0.0f;
                     }
                 }
 				pair += 2;
@@ -877,6 +886,26 @@ PackedInt32Array IWStageKernels::flood_protect(
 #undef IW_PROTECT_NEIGHBOUR
 		}
 	}
+
+    // The outline an Edge Cleanup above worked out for these pixels, dropped in one pass
+    // at the end rather than inside the flood. Not through clear_regions_at, which would
+    // take the protection this just wrote with it.
+    float *inner_ptr =
+            ctx->stroke_inner.size() == pixel_count ? ctx->stroke_inner.ptrw() : nullptr;
+    float *outer_ptr =
+            ctx->stroke_outer.size() == pixel_count ? ctx->stroke_outer.ptrw() : nullptr;
+    if (inner_ptr != nullptr || outer_ptr != nullptr) {
+        const int32_t *touched_ptr = touched.ptr();
+        for (int64_t t = 0; t < touched.size(); t++) {
+            const int32_t i = touched_ptr[t];
+            if (inner_ptr != nullptr) {
+                inner_ptr[i] = 0.0f;
+            }
+            if (outer_ptr != nullptr) {
+                outer_ptr[i] = 0.0f;
+            }
+        }
+    }
 
 	return touched;
 }

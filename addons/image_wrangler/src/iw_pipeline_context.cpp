@@ -748,17 +748,26 @@ void IWPipelineContext::apply_regions_to_mask() {
 // and it is folded into the result where that stage sits — so a stage below that sets
 // these pixels itself has to retire the record too, or the next stage to fold the regions
 // in would put the overruled answer straight back.
+//
+// The outline goes with them. It is drawn from a silhouette, and a stage that settles
+// these pixels has just changed the silhouette under it, so what was worked out for them
+// no longer describes anything. IWCompose paints it at the end of the run, which is late
+// enough that leaving it would show through whatever settled the pixel.
 void IWPipelineContext::clear_regions_at(const PackedInt32Array &indices) {
     const bool has_blacked = blacked.size() == pixel_count;
     const bool has_protect = protect.size() == pixel_count;
     const bool has_force = force_opaque.size() == pixel_count;
-    if (!has_blacked && !has_protect && !has_force) {
+    const bool has_inner = stroke_inner.size() == pixel_count;
+    const bool has_outer = stroke_outer.size() == pixel_count;
+    if (!has_blacked && !has_protect && !has_force && !has_inner && !has_outer) {
         return;
     }
 
     uint8_t *blacked_ptr = has_blacked ? blacked.ptrw() : nullptr;
     uint8_t *protect_ptr = has_protect ? protect.ptrw() : nullptr;
     uint8_t *force_ptr = has_force ? force_opaque.ptrw() : nullptr;
+    float *inner_ptr = has_inner ? stroke_inner.ptrw() : nullptr;
+    float *outer_ptr = has_outer ? stroke_outer.ptrw() : nullptr;
     const int32_t *index_ptr = indices.ptr();
 
     for (int64_t n = 0; n < indices.size(); n++) {
@@ -774,6 +783,12 @@ void IWPipelineContext::clear_regions_at(const PackedInt32Array &indices) {
         }
         if (has_force) {
             force_ptr[i] = 0;
+        }
+        if (has_inner) {
+            inner_ptr[i] = 0.0f;
+        }
+        if (has_outer) {
+            outer_ptr[i] = 0.0f;
         }
     }
 }
