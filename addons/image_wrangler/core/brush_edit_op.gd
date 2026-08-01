@@ -14,12 +14,11 @@ extends IWStackOperation
 ## quickly it was made. Storing the dense version would be the same picture in a sidecar
 ## tens of times the size.
 ##
-## [b]Strokes run top to bottom, each working on what the ones above it left.[/b] That is
-## the one place this parts company with [PolygonEditOp], where an Add is an override that
-## wins every overlap whatever position it holds. A brush is not a set of rules — it is
-## paint, and paint goes on in the order it was applied, so a Subtract stroke drawn after
-## an Add bites into it. Anything else would leave no way to take back part of a stroke
-## short of deleting the whole thing.
+## [b]Strokes run top to bottom, each working on what the ones above it left.[/b] Paint
+## goes on in the order it was applied, so a Subtract stroke drawn after an Add bites into
+## it. Anything else would leave no way to take back part of a stroke short of deleting
+## the whole thing. [PolygonEditOp] settles its shapes the same way, and so does the stack
+## as a whole.
 ##
 ## [b]Sharpness is a property of the stroke, not of the tool.[/b] So is the radius. Both are
 ## captured when the stroke is drawn and can be changed afterwards on the selected row,

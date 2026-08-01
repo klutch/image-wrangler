@@ -133,6 +133,15 @@ void IWStageKernels::rasterise_regions(
 	}
 	uint8_t *out = marked.ptrw();
 
+    // A shape retires whatever an island above it protected on the same pixels, and the
+    // forced opacity that protection was folded in as. Without this the declaration would
+    // still be standing when the regions are next folded in, and the shape drawn later
+    // would lose to the island drawn earlier.
+    uint8_t *protect_ptr =
+            ctx->protect.size() == pixel_count ? ctx->protect.ptrw() : nullptr;
+    uint8_t *force_ptr =
+            ctx->force_opaque.size() == pixel_count ? ctx->force_opaque.ptrw() : nullptr;
+
 	const int32_t *point_ptr = points.ptr();
 	std::vector<float> crossings;
 
@@ -193,13 +202,20 @@ void IWStageKernels::rasterise_regions(
 				// of a pixel rather than merely touching its edge.
 				const int64_t from_x = iw::maxi(iw::ceili(iw::widen(crossings[pair]) - 0.5), 0);
 				const int64_t to_x = iw::mini(iw::floori(iw::widen(crossings[pair + 1]) - 0.5), width - 1);
-				for (int64_t x = from_x; x <= to_x; x++) {
-					// Add overwrites whatever is there; Subtract yields to an Add
-					// already written. One pass, and row order stops mattering.
-					if (is_adding || out[row + x] != IWPipelineContext::REGION_KEEP) {
-						out[row + x] = value;
-					}
-				}
+                for (int64_t x = from_x; x <= to_x; x++) {
+                    // Rows resolve in the order they are listed, a later one overwriting
+                    // whatever an earlier one put down — Add and Cut alike. Subtract used
+                    // to yield to an Add already written, which meant the order the user
+                    // arranged the list in was not the order that settled an overlap.
+                    const int64_t i = row + x;
+                    out[i] = value;
+                    if (protect_ptr != nullptr) {
+                        protect_ptr[i] = 0;
+                    }
+                    if (force_ptr != nullptr) {
+                        force_ptr[i] = 0;
+                    }
+                }
 				pair += 2;
 			}
 		}
@@ -772,6 +788,10 @@ PackedInt32Array IWStageKernels::flood_islands(
 	// The band has to grow from what this opened, or an island region would have a hard
 	// rim where every other edge in the image has a matte.
 	touched.append_array(ctx->grow_edge_band(touched, ctx->edge_width));
+    // Everything this took stops being covered by whatever declared it kept — the band
+    // included, since that is part of what the island changed. Without it an Add above
+    // would be folded back in over the cut the moment the regions are next applied.
+    ctx->clear_regions_at(touched);
 	return touched;
 }
 
@@ -794,6 +814,11 @@ PackedInt32Array IWStageKernels::flood_protect(
 		ctx->protect.resize(pixel_count);
 	}
 	uint8_t *protect = ctx->protect.ptrw();
+    // An island retires whatever a shape above it cut on the same pixels, for the reason
+    // given in rasterise_regions: a declaration left standing is one the next fold-in
+    // would apply over the top of this one.
+    uint8_t *blacked_ptr =
+            ctx->blacked.size() == pixel_count ? ctx->blacked.ptrw() : nullptr;
 	std::vector<int32_t> queue(static_cast<size_t>(pixel_count), 0);
 
 	const int32_t *seed_ptr = seeds.ptr();
@@ -810,6 +835,9 @@ PackedInt32Array IWStageKernels::flood_protect(
 		int64_t tail = 0;
 		if (protect[seed_ptr[s]] == 0) {
 			protect[seed_ptr[s]] = 1;
+            if (blacked_ptr != nullptr) {
+                blacked_ptr[seed_ptr[s]] = IWPipelineContext::REGION_NONE;
+            }
 			touched.push_back(seed_ptr[s]);
 			queue[tail++] = seed_ptr[s];
 		}
@@ -826,6 +854,9 @@ PackedInt32Array IWStageKernels::flood_protect(
 		const int32_t n = (m_n);                                                 \
 		if (protect[n] == 0 && ctx->distance_at(n, key) <= tolerance) {          \
 			protect[n] = 1;                                                      \
+			if (blacked_ptr != nullptr) {                                        \
+				blacked_ptr[n] = IWPipelineContext::REGION_NONE;                 \
+			}                                                                    \
 			touched.push_back(n);                                                \
 			queue[tail++] = n;                                                   \
 		}                                                                        \

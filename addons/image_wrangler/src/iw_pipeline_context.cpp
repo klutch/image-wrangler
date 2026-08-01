@@ -75,6 +75,8 @@ void IWPipelineContext::_bind_methods() {
 			&IWPipelineContext::apply_regions_to_mask);
 	ClassDB::bind_method(D_METHOD("apply_regions_to_coverage"),
 			&IWPipelineContext::apply_regions_to_coverage);
+    ClassDB::bind_method(D_METHOD("clear_regions_at", "indices"),
+            &IWPipelineContext::clear_regions_at);
 
 	BIND_CONSTANT(MASK_BACKGROUND);
 	BIND_CONSTANT(MASK_EDGE);
@@ -701,48 +703,87 @@ PackedInt32Array IWPipelineContext::dilate(const PackedInt32Array &seeds, int64_
 	return out;
 }
 
-// Folds the drawn and picked regions into the classification.
+// Folds the standing regions into the classification.
 //
 // KEY_CLEAR on a cut, because the band pass skips a pixel with no key: a drawn cut is a
 // hard edge and must not be matted.
 //
-// Cuts first and protection second, so that where the two meet the protection is what
-// survives — Add wins every overlap whatever order the rows are in.
+// One pass, with no ordering between cut and keep. There used to be — cuts first so that
+// an Add won every overlap wherever it sat — and that was the mechanism by which a region
+// outranked the stages below it. A pixel can now carry only one declaration at a time:
+// whatever writes it clears the other buffers first, so the last stage to claim a pixel
+// is the one this reads.
 void IWPipelineContext::apply_regions_to_mask() {
-	if (mask.is_empty()) {
-		return;
-	}
-	const bool has_blacked = !blacked.is_empty();
-	const bool has_protect = !protect.is_empty();
-	if (!has_blacked && !has_protect) {
-		return;
-	}
+    if (mask.is_empty()) {
+        return;
+    }
+    const bool has_blacked = !blacked.is_empty();
+    const bool has_protect = !protect.is_empty();
+    if (!has_blacked && !has_protect) {
+        return;
+    }
 
-	uint8_t *mask_ptr = mask.ptrw();
-	int32_t *key_of_ptr = key_of.ptrw();
-	const uint8_t *blacked_ptr = blacked.ptr();
-	const uint8_t *protect_ptr = protect.ptr();
+    uint8_t *mask_ptr = mask.ptrw();
+    int32_t *key_of_ptr = key_of.ptrw();
+    const uint8_t *blacked_ptr = blacked.ptr();
+    const uint8_t *protect_ptr = protect.ptr();
 
-	if (has_blacked) {
-		for (int64_t i = 0; i < pixel_count; i++) {
-			if (blacked_ptr[i] == REGION_CUT) {
-				mask_ptr[i] = MASK_BACKGROUND;
-				key_of_ptr[i] = KEY_CLEAR;
-			}
-		}
-	}
-	for (int64_t i = 0; i < pixel_count; i++) {
-		if ((has_protect && protect_ptr[i] != 0) || (has_blacked && blacked_ptr[i] == REGION_KEEP)) {
-			mask_ptr[i] = MASK_SUBJECT;
-			key_of_ptr[i] = KEY_NONE;
-		}
-	}
+    for (int64_t i = 0; i < pixel_count; i++) {
+        if (has_blacked && blacked_ptr[i] == REGION_CUT) {
+            mask_ptr[i] = MASK_BACKGROUND;
+            key_of_ptr[i] = KEY_CLEAR;
+        } else if ((has_protect && protect_ptr[i] != 0)
+                || (has_blacked && blacked_ptr[i] == REGION_KEEP)) {
+            mask_ptr[i] = MASK_SUBJECT;
+            key_of_ptr[i] = KEY_NONE;
+        }
+    }
 }
 
-// Folds the drawn and picked regions into the alpha.
+
+// Drops any standing declaration on `indices`, along with the forced opacity a previous
+// application of one left behind.
 //
-// Applied after everything that can move alpha, since a region is an instruction about
-// the result rather than a suggestion to the keyer.
+// What keeps the stack in order. A declaration is a record of what some stage above said,
+// and it is folded into the result where that stage sits — so a stage below that sets
+// these pixels itself has to retire the record too, or the next stage to fold the regions
+// in would put the overruled answer straight back.
+void IWPipelineContext::clear_regions_at(const PackedInt32Array &indices) {
+    const bool has_blacked = blacked.size() == pixel_count;
+    const bool has_protect = protect.size() == pixel_count;
+    const bool has_force = force_opaque.size() == pixel_count;
+    if (!has_blacked && !has_protect && !has_force) {
+        return;
+    }
+
+    uint8_t *blacked_ptr = has_blacked ? blacked.ptrw() : nullptr;
+    uint8_t *protect_ptr = has_protect ? protect.ptrw() : nullptr;
+    uint8_t *force_ptr = has_force ? force_opaque.ptrw() : nullptr;
+    const int32_t *index_ptr = indices.ptr();
+
+    for (int64_t n = 0; n < indices.size(); n++) {
+        const int32_t i = index_ptr[n];
+        if (i < 0 || i >= pixel_count) {
+            continue;
+        }
+        if (has_blacked) {
+            blacked_ptr[i] = REGION_NONE;
+        }
+        if (has_protect) {
+            protect_ptr[i] = 0;
+        }
+        if (has_force) {
+            force_ptr[i] = 0;
+        }
+    }
+}
+
+// Folds the standing regions into the alpha.
+//
+// Called by the stage that declared them, at its own place in the stack, so that what a
+// region does lands where the user put it and a stage below can overrule it like any
+// other. This used to run once at the end of the whole run instead, which made every
+// region the last word regardless of position.
 //
 // An Add sets force_opaque rather than a coverage of 1.0, because the two differ where
 // the source was already transparent: coverage is multiplied by the source's own alpha,

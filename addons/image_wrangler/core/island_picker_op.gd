@@ -41,41 +41,41 @@ var settings: IslandPickerSettings
 
 
 func _init() -> void:
-	settings = IslandPickerSettings.new()
+    settings = IslandPickerSettings.new()
 
 
 func get_operation_name() -> String:
-	return "Island Picker"
+    return "Island Picker"
 
 
 func get_operation_id() -> StringName:
-	return &"island_picker"
+    return &"island_picker"
 
 
 func get_settings() -> Resource:
-	return settings
+    return settings
 
 
 func set_settings(new_settings: Resource) -> void:
-	var typed := new_settings as IslandPickerSettings
-	if typed == null:
-		push_error("Image Wrangler: IslandPickerOp was handed settings of the wrong type.")
-		return
-	settings = typed
+    var typed := new_settings as IslandPickerSettings
+    if typed == null:
+        push_error("Image Wrangler: IslandPickerOp was handed settings of the wrong type.")
+        return
+    settings = typed
 
 
 func make_settings() -> Resource:
-	return IslandPickerSettings.new()
+    return IslandPickerSettings.new()
 
 
 func get_settings_schema() -> Array[Dictionary]:
-	return [
-		{
-			"property": &"islands",
-			"type": SettingType.ISLAND_PICKER,
-			"tooltip": "Regions picked off the preview: drag a rectangle, or click for a single pixel.\n\nSubtract removes the region, which is how an enclosed background — an eye, a\ngap in lettering, a highlight — comes out, since no Remove Color ever reaches\nit. Add forces the region opaque, which is how a region a loose tolerance ate\ncomes back.\n\nEvery pixel you picked keys out its own color at its own tolerance, so an\nisland need not match anything in Remove Background.",
-		},
-	]
+    return [
+        {
+            "property": &"islands",
+            "type": SettingType.ISLAND_PICKER,
+            "tooltip": "Regions picked off the preview: drag a rectangle, or click for a single pixel.\n\nSubtract removes the region, which is how an enclosed background — an eye, a\ngap in lettering, a highlight — comes out, since no Remove Color ever reaches\nit. Add forces the region opaque, which is how a region a loose tolerance ate\ncomes back.\n\nEvery pixel you picked keys out its own color at its own tolerance, so an\nisland need not match anything in Remove Background.",
+        },
+    ]
 
 
 ## Pulls every pick's tolerance into range, on top of what the schema clamps.
@@ -83,66 +83,71 @@ func get_settings_schema() -> Array[Dictionary]:
 ## The schema cannot reach these: it names properties on the settings Resource, and a
 ## tolerance lives two levels down, on a pick inside an entry.
 func clamp_settings_to_schema(target: Resource = null) -> void:
-	super(target)
-	if target == null:
-		target = get_settings()
-	var typed := target as IslandPickerSettings
-	if typed == null or typed.islands == null:
-		return
-	for island in typed.islands.entries:
-		if island == null:
-			continue
-		for pick in island.picks:
-			if pick != null:
-				pick.color_tolerance = clampf(pick.color_tolerance, 0.0, RemoveColorEntry.MAX_TOLERANCE)
+    super(target)
+    if target == null:
+        target = get_settings()
+    var typed := target as IslandPickerSettings
+    if typed == null or typed.islands == null:
+        return
+    for island in typed.islands.entries:
+        if island == null:
+            continue
+        for pick in island.picks:
+            if pick != null:
+                pick.color_tolerance = clampf(pick.color_tolerance, 0.0, RemoveColorEntry.MAX_TOLERANCE)
 
 
 func stage_weight() -> float:
-	return 0.25
+    return 0.25
 
 
 ## An Add island needs nothing above it — it is its own flood and forces alpha
 ## directly. A Subtract one needs a classification to add background to, so the
 ## answer is about the islands picked rather than about the operation.
 func needs_keying() -> bool:
-	return settings.islands != null and _has(IWAlphaMode.Mode.SUBTRACT)
+    return settings.islands != null and _has(IWAlphaMode.Mode.SUBTRACT)
 
 
 func prerequisite_note(ctx: IWPipelineContext) -> String:
-	if settings.islands == null:
-		return ""
-	if not _has(IWAlphaMode.Mode.SUBTRACT):
-		return ""
-	if ctx != null and ctx.has_classification():
-		return ""
-	return "Subtract islands need a Remove Background above them."
+    if settings.islands == null:
+        return ""
+    if not _has(IWAlphaMode.Mode.SUBTRACT):
+        return ""
+    if ctx != null and ctx.has_classification():
+        return ""
+    return "Subtract islands need a Remove Background above them."
 
 
 func process_context(ctx: IWPipelineContext) -> void:
-	if settings.islands == null:
-		return
+    if settings.islands == null:
+        return
 
-	var touched := PackedInt32Array()
-	if ctx.has_classification():
-		touched = _subtract(ctx)
-	if not report_progress(0.5):
-		return
+    var touched := PackedInt32Array()
+    if ctx.has_classification():
+        touched = _subtract(ctx)
+    if not report_progress(0.5):
+        return
 
-	var protect_touched := _protect(ctx)
-	touched.append_array(protect_touched)
-	if touched.is_empty():
-		report_progress(1.0)
-		return
-	if not report_progress(0.7):
-		return
+    var protect_touched := _protect(ctx)
+    touched.append_array(protect_touched)
+    if touched.is_empty():
+        report_progress(1.0)
+        return
+    if not report_progress(0.7):
+        return
 
-	# Both halves moved pixels out of subject, so the map naming the nearest one is
-	# stale and the coverage that reads it with it.
-	if ctx.has_classification():
-		ctx.apply_regions_to_mask()
-		ctx.rebuild_nearest()
-		ctx.compute_coverage(ctx.dilate(touched, ctx.search_radius))
-	report_progress(1.0)
+    # Both halves moved pixels out of subject, so the map naming the nearest one is
+    # stale and the coverage that reads it with it.
+    if ctx.has_classification():
+        ctx.apply_regions_to_mask()
+        ctx.rebuild_nearest()
+        ctx.compute_coverage(ctx.dilate(touched, ctx.search_radius))
+    # Here rather than at the end of the run. An Add used to be folded into the alpha
+    # once everything had finished, which made it the last word over every stage below
+    # it whatever order the user had put them in. Folded in where the operation sits, it
+    # is an instruction like any other and the next stage down is free to overrule it.
+    ctx.apply_regions_to_coverage()
+    report_progress(1.0)
 
 
 ## Brings each island's flooded extent home from the copy that ran, so the preview can
@@ -154,25 +159,25 @@ func process_context(ctx: IWPipelineContext) -> void:
 ## marks catch up on the next answer rather than being drawn against the wrong island
 ## in the meantime.
 func absorb_run_report(from: IWStackOperation) -> void:
-	var source := from as IslandPickerOp
-	if source == null or source.settings == null:
-		return
-	if settings.islands == null or source.settings.islands == null:
-		return
-	var mine := settings.islands.entries
-	var theirs := source.settings.islands.entries
-	if mine.size() != theirs.size():
-		return
-	for i in mine.size():
-		if mine[i] != null and theirs[i] != null:
-			mine[i].flooded_bounds = theirs[i].flooded_bounds
+    var source := from as IslandPickerOp
+    if source == null or source.settings == null:
+        return
+    if settings.islands == null or source.settings.islands == null:
+        return
+    var mine := settings.islands.entries
+    var theirs := source.settings.islands.entries
+    if mine.size() != theirs.size():
+        return
+    for i in mine.size():
+        if mine[i] != null and theirs[i] != null:
+            mine[i].flooded_bounds = theirs[i].flooded_bounds
 
 
 func _has(mode: int) -> bool:
-	for entry in settings.islands.entries:
-		if entry != null and entry.enabled and entry.mode == mode:
-			return true
-	return false
+    for entry in settings.islands.entries:
+        if entry != null and entry.enabled and entry.mode == mode:
+            return true
+    return false
 
 
 ## Floods every Subtract island into the background and mattes what it opened.
@@ -183,40 +188,40 @@ func _has(mode: int) -> bool:
 ## into packed arrays first. That was already true when the flood was GDScript; the only
 ## thing that changed is where the flood is.
 func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
-	var width := ctx.width
-	var height := ctx.height
+    var width := ctx.width
+    var height := ctx.height
 
-	# Flattened out of the groups they are managed in, because the flood does not care
-	# which rectangle a seed was drawn in: what matters is that a pixel one seed claimed
-	# is never offered to the next, and that holds across entries exactly as it holds
-	# within one. The same shape [method _protect] uses, for the same reason.
-	var seeds := PackedInt32Array()
-	var seed_tolerances := PackedFloat32Array()
-	# Which entry each seed came from, parallel to the seeds themselves. Built here
-	# because the flattening is the last place the grouping still exists, and the
-	# preview wants what the flood took reported per group rather than per pixel.
-	var seed_entries := PackedInt32Array()
-	for e in settings.islands.entries.size():
-		var entry: IslandEntry = settings.islands.entries[e]
-		if entry == null or not entry.enabled or entry.mode != IWAlphaMode.Mode.SUBTRACT:
-			continue
-		for pick in entry.picks:
-			if pick == null:
-				continue
-			var point := pick.point
-			# Picks made on a different image, or on this one before it was cropped.
-			if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
-				continue
-			seeds.append(point.y * width + point.x)
-			seed_tolerances.append(pick.color_tolerance)
-			seed_entries.append(e)
+    # Flattened out of the groups they are managed in, because the flood does not care
+    # which rectangle a seed was drawn in: what matters is that a pixel one seed claimed
+    # is never offered to the next, and that holds across entries exactly as it holds
+    # within one. The same shape [method _protect] uses, for the same reason.
+    var seeds := PackedInt32Array()
+    var seed_tolerances := PackedFloat32Array()
+    # Which entry each seed came from, parallel to the seeds themselves. Built here
+    # because the flattening is the last place the grouping still exists, and the
+    # preview wants what the flood took reported per group rather than per pixel.
+    var seed_entries := PackedInt32Array()
+    for e in settings.islands.entries.size():
+        var entry: IslandEntry = settings.islands.entries[e]
+        if entry == null or not entry.enabled or entry.mode != IWAlphaMode.Mode.SUBTRACT:
+            continue
+        for pick in entry.picks:
+            if pick == null:
+                continue
+            var point := pick.point
+            # Picks made on a different image, or on this one before it was cropped.
+            if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
+                continue
+            seeds.append(point.y * width + point.x)
+            seed_tolerances.append(pick.color_tolerance)
+            seed_entries.append(e)
 
-	# Read before the flood, because what it adds from here on is exactly the keys the
-	# attribution below has to account for.
-	var key_base := ctx.keys.size()
-	var touched := IWStageKernels.flood_islands(ctx, seeds, seed_tolerances)
-	_record_subtract_bounds(ctx, touched, seeds, seed_entries, key_base)
-	return touched
+    # Read before the flood, because what it adds from here on is exactly the keys the
+    # attribution below has to account for.
+    var key_base := ctx.keys.size()
+    var touched := IWStageKernels.flood_islands(ctx, seeds, seed_tolerances)
+    _record_subtract_bounds(ctx, touched, seeds, seed_entries, key_base)
+    return touched
 
 
 ## Works out how much of the image each Subtract island took, and records it on the
@@ -233,70 +238,70 @@ func _subtract(ctx: IWPipelineContext) -> PackedInt32Array:
 ## seed landing somewhere already taken registers nothing — which is why the keys are
 ## walked rather than indexed: they are consecutive, but the seeds owning them are not.
 func _record_subtract_bounds(
-		ctx: IWPipelineContext,
-		touched: PackedInt32Array,
-		seeds: PackedInt32Array,
-		seed_entries: PackedInt32Array,
-		key_base: int) -> void:
-	if touched.is_empty():
-		return
-	var key_of := ctx.key_of
+        ctx: IWPipelineContext,
+        touched: PackedInt32Array,
+        seeds: PackedInt32Array,
+        seed_entries: PackedInt32Array,
+        key_base: int) -> void:
+    if touched.is_empty():
+        return
+    var key_of := ctx.key_of
 
-	# Key -> the entry that seeded it, as a flat table rather than a Dictionary: it is
-	# read once per claimed pixel, and a hashed lookup there costs more than the whole
-	# rest of this.
-	var key_entries := PackedInt32Array()
-	var next_key := key_base
-	for s in seeds.size():
-		# A seed whose own pixel does not carry the next key never flooded: the pixel
-		# was already claimed, and what it carries is the key of whatever claimed it —
-		# always one registered earlier, so it can never be mistaken for this one.
-		if key_of[seeds[s]] != next_key:
-			continue
-		key_entries.append(seed_entries[s])
-		next_key += 1
-	if key_entries.is_empty():
-		return
+    # Key -> the entry that seeded it, as a flat table rather than a Dictionary: it is
+    # read once per claimed pixel, and a hashed lookup there costs more than the whole
+    # rest of this.
+    var key_entries := PackedInt32Array()
+    var next_key := key_base
+    for s in seeds.size():
+        # A seed whose own pixel does not carry the next key never flooded: the pixel
+        # was already claimed, and what it carries is the key of whatever claimed it —
+        # always one registered earlier, so it can never be mistaken for this one.
+        if key_of[seeds[s]] != next_key:
+            continue
+        key_entries.append(seed_entries[s])
+        next_key += 1
+    if key_entries.is_empty():
+        return
 
-	var entry_count := settings.islands.entries.size()
-	var min_x := PackedInt32Array()
-	min_x.resize(entry_count)
-	min_x.fill(0x7fffffff)
-	var min_y := min_x.duplicate()
-	var max_x := PackedInt32Array()
-	max_x.resize(entry_count)
-	max_x.fill(-1)
-	var max_y := max_x.duplicate()
+    var entry_count := settings.islands.entries.size()
+    var min_x := PackedInt32Array()
+    min_x.resize(entry_count)
+    min_x.fill(0x7fffffff)
+    var min_y := min_x.duplicate()
+    var max_x := PackedInt32Array()
+    max_x.resize(entry_count)
+    max_x.fill(-1)
+    var max_y := max_x.duplicate()
 
-	# One pass over what the flood took. This includes the matte band grown off it,
-	# whose pixels carry the claiming island's key too — deliberately kept, since the
-	# band is part of what the island changed.
-	var width := ctx.width
-	for t in touched.size():
-		var index := touched[t]
-		var key := key_of[index]
-		if key < key_base or key >= next_key:
-			continue
-		var e := key_entries[key - key_base]
-		var x := index % width
-		@warning_ignore("integer_division")
-		var y := index / width
-		if x < min_x[e]:
-			min_x[e] = x
-		if x > max_x[e]:
-			max_x[e] = x
-		if y < min_y[e]:
-			min_y[e] = y
-		if y > max_y[e]:
-			max_y[e] = y
+    # One pass over what the flood took. This includes the matte band grown off it,
+    # whose pixels carry the claiming island's key too — deliberately kept, since the
+    # band is part of what the island changed.
+    var width := ctx.width
+    for t in touched.size():
+        var index := touched[t]
+        var key := key_of[index]
+        if key < key_base or key >= next_key:
+            continue
+        var e := key_entries[key - key_base]
+        var x := index % width
+        @warning_ignore("integer_division")
+        var y := index / width
+        if x < min_x[e]:
+            min_x[e] = x
+        if x > max_x[e]:
+            max_x[e] = x
+        if y < min_y[e]:
+            min_y[e] = y
+        if y > max_y[e]:
+            max_y[e] = y
 
-	for e in entry_count:
-		if max_x[e] < 0:
-			continue
-		var entry: IslandEntry = settings.islands.entries[e]
-		if entry != null:
-			entry.flooded_bounds = Rect2i(
-				min_x[e], min_y[e], max_x[e] - min_x[e] + 1, max_y[e] - min_y[e] + 1)
+    for e in entry_count:
+        if max_x[e] < 0:
+            continue
+        var entry: IslandEntry = settings.islands.entries[e]
+        if entry != null:
+            entry.flooded_bounds = Rect2i(
+                min_x[e], min_y[e], max_x[e] - min_x[e] + 1, max_y[e] - min_y[e] + 1)
 
 
 ## Floods every Add island and marks what it protects.
@@ -306,42 +311,42 @@ func _record_subtract_bounds(
 ## them; this one has to be free to reach pixels that flood already took, since
 ## those are precisely the ones worth protecting.
 func _protect(ctx: IWPipelineContext) -> PackedInt32Array:
-	var width := ctx.width
-	var height := ctx.height
+    var width := ctx.width
+    var height := ctx.height
 
-	# One call per entry rather than one for the lot, which the Subtract side cannot do
-	# and this side can: the only thing carried between seeds here is [code]protect[/code]
-	# itself, and that lives on the context and survives the call. Entries are still
-	# visited in order and seeds within them in order, so a pixel an earlier seed
-	# protected is skipped exactly as it was — the flood is handed the same seeds in the
-	# same sequence and finds the same buffer under it. What it buys is attribution:
-	# each call comes back with that entry's own pixels rather than everyone's.
-	var touched := PackedInt32Array()
-	for entry: IslandEntry in settings.islands.entries:
-		if entry == null or not entry.enabled or entry.mode != IWAlphaMode.Mode.ADD:
-			continue
+    # One call per entry rather than one for the lot, which the Subtract side cannot do
+    # and this side can: the only thing carried between seeds here is [code]protect[/code]
+    # itself, and that lives on the context and survives the call. Entries are still
+    # visited in order and seeds within them in order, so a pixel an earlier seed
+    # protected is skipped exactly as it was — the flood is handed the same seeds in the
+    # same sequence and finds the same buffer under it. What it buys is attribution:
+    # each call comes back with that entry's own pixels rather than everyone's.
+    var touched := PackedInt32Array()
+    for entry: IslandEntry in settings.islands.entries:
+        if entry == null or not entry.enabled or entry.mode != IWAlphaMode.Mode.ADD:
+            continue
 
-		# Float64 here where the Subtract side collects float32, because that is what each
-		# side always did and the difference reaches the last bit of every tolerance
-		# comparison in the flood below.
-		var seeds := PackedInt32Array()
-		var seed_tolerances := PackedFloat64Array()
-		for pick in entry.picks:
-			if pick == null:
-				continue
-			var point := pick.point
-			if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
-				continue
-			seeds.append(point.y * width + point.x)
-			seed_tolerances.append(pick.color_tolerance)
-		if seeds.is_empty():
-			continue
+        # Float64 here where the Subtract side collects float32, because that is what each
+        # side always did and the difference reaches the last bit of every tolerance
+        # comparison in the flood below.
+        var seeds := PackedInt32Array()
+        var seed_tolerances := PackedFloat64Array()
+        for pick in entry.picks:
+            if pick == null:
+                continue
+            var point := pick.point
+            if point.x < 0 or point.y < 0 or point.x >= width or point.y >= height:
+                continue
+            seeds.append(point.y * width + point.x)
+            seed_tolerances.append(pick.color_tolerance)
+        if seeds.is_empty():
+            continue
 
-		var own := IWStageKernels.flood_protect(ctx, seeds, seed_tolerances)
-		_record_bounds(entry, own, width)
-		touched.append_array(own)
+        var own := IWStageKernels.flood_protect(ctx, seeds, seed_tolerances)
+        _record_bounds(entry, own, width)
+        touched.append_array(own)
 
-	return touched
+    return touched
 
 
 ## Records the extent of [param indices] on [param entry].
@@ -349,23 +354,23 @@ func _protect(ctx: IWPipelineContext) -> PackedInt32Array:
 ## The Add side needs no attribution pass: its flood is asked for one entry at a time,
 ## so what comes back is already that entry's and nobody else's.
 func _record_bounds(entry: IslandEntry, indices: PackedInt32Array, width: int) -> void:
-	if indices.is_empty():
-		return
-	var min_x := 0x7fffffff
-	var min_y := 0x7fffffff
-	var max_x := -1
-	var max_y := -1
-	for i in indices.size():
-		var index := indices[i]
-		var x := index % width
-		@warning_ignore("integer_division")
-		var y := index / width
-		if x < min_x:
-			min_x = x
-		if x > max_x:
-			max_x = x
-		if y < min_y:
-			min_y = y
-		if y > max_y:
-			max_y = y
-	entry.flooded_bounds = Rect2i(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
+    if indices.is_empty():
+        return
+    var min_x := 0x7fffffff
+    var min_y := 0x7fffffff
+    var max_x := -1
+    var max_y := -1
+    for i in indices.size():
+        var index := indices[i]
+        var x := index % width
+        @warning_ignore("integer_division")
+        var y := index / width
+        if x < min_x:
+            min_x = x
+        if x > max_x:
+            max_x = x
+        if y < min_y:
+            min_y = y
+        if y > max_y:
+            max_y = y
+    entry.flooded_bounds = Rect2i(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)

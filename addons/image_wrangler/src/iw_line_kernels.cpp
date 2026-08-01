@@ -252,22 +252,20 @@ PackedInt32Array IWStageKernels::remove_lines(
 	// thinner than the square still brings its shape with it — otherwise painting Add over
 	// part of a hairline keeps the painted part and erases the rest, which looks arbitrary.
 	std::vector<int32_t> anchors;
-	for (int64_t i = 0; i < pixel_count; i++) {
-		const bool added = (protect_ptr != nullptr && protect_ptr[i] != 0)
-				|| (blacked_ptr != nullptr && blacked_ptr[i] == IWPipelineContext::REGION_KEEP);
-		// A drawn Cut is not folded into the coverage until IWCompose runs, so with no
-		// keyer above to have settled it already a cut pixel still reads opaque here.
-		// Counting it would measure a shape that is about to lose it and let the sliver
-		// left behind pass as thick enough. Add beats Cut, matching apply_regions_to_mask.
-		const bool cut = !added && blacked_ptr != nullptr
-				&& blacked_ptr[i] == IWPipelineContext::REGION_CUT;
-		const float a = alpha_ptr[i];
-		if (added) {
-			anchors.push_back(static_cast<int32_t>(i));
-		}
-		solid[static_cast<size_t>(i)] = (!cut && (added || a >= SOLID_ALPHA)) ? IN : 0;
-		support[static_cast<size_t>(i)] = (!cut && (added || a > 0.0f)) ? IN : 0;
-	}
+    for (int64_t i = 0; i < pixel_count; i++) {
+        // Only declarations still standing when this runs. A cut needs no test of its
+        // own any more: every region is folded into the coverage by the operation that
+        // declared it, so a cut pixel already reads clear in the alpha taken above. It
+        // used to be folded in at the very end, which left a cut reading opaque here.
+        const bool added = (protect_ptr != nullptr && protect_ptr[i] != 0)
+                || (blacked_ptr != nullptr && blacked_ptr[i] == IWPipelineContext::REGION_KEEP);
+        const float a = alpha_ptr[i];
+        if (added) {
+            anchors.push_back(static_cast<int32_t>(i));
+        }
+        solid[static_cast<size_t>(i)] = (added || a >= SOLID_ALPHA) ? IN : 0;
+        support[static_cast<size_t>(i)] = (added || a > 0.0f) ? IN : 0;
+    }
 
 	// Where a full span x span block of solid sits.
 	std::vector<uint8_t> cores = solid;

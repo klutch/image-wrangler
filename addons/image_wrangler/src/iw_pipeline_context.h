@@ -195,6 +195,7 @@ public:
 	PackedInt32Array dilate(const PackedInt32Array &seeds, int64_t radius);
 	void apply_regions_to_mask();
 	void apply_regions_to_coverage();
+	void clear_regions_at(const PackedInt32Array &indices);
 
 	// --- Property plumbing -----------------------------------------------
 	//

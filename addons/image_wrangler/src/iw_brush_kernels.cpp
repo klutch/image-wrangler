@@ -263,8 +263,10 @@ PackedInt32Array IWStageKernels::paint_strokes(
         if (value > 0.0) {
             data[static_cast<int64_t>(index) * 4 + 3] = 255;
         }
-        // A region declared solid elsewhere would otherwise overrule the paint, and a
-        // stroke the user has just drawn is the more recent instruction of the two.
+        // A region declared elsewhere would otherwise overrule the paint. Clearing the
+        // forced flag is not enough on its own: the declaration behind it is still
+        // standing, and the next stage to fold the regions in would set it again. So the
+        // declaration itself is retired below, over every painted pixel at once.
         if (has_force) {
             force[index] = 0;
         }
@@ -283,6 +285,7 @@ PackedInt32Array IWStageKernels::paint_strokes(
         }
     }
 
+    ctx->clear_regions_at(touched);
     return touched;
 }
 
