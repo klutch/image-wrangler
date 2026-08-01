@@ -124,7 +124,7 @@ void IWStageKernels::_bind_methods() {
                     "coarse_strength", "fine_strength", "green_down"),
             &IWStageKernels::normal_from_brightness);
     ClassDB::bind_static_method("IWStageKernels",
-            D_METHOD("combine_normals", "base", "detail", "rects", "mode", "strength"),
+            D_METHOD("combine_normals", "base", "detail", "rects", "mode", "opacity"),
             &IWStageKernels::combine_normals);
     ClassDB::bind_static_method("IWStageKernels",
             D_METHOD("normal_flip_green", "map"), &IWStageKernels::normal_flip_green);

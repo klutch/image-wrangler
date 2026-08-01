@@ -639,7 +639,7 @@ func build_normal_map(sheet: Image, rects: Array) -> Image:
         else:
             var how: NormalLayerSettings = layer.get_settings()
             out = IWStageKernels.combine_normals(out, map, flat, how.combine_mode,
-                    how.combine_strength)
+                    how.combine_opacity)
 
     if out != null and settings.normal_green_down:
         out = IWStageKernels.normal_flip_green(out)

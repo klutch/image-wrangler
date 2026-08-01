@@ -400,15 +400,15 @@ public:
     // rather than on a flat plane — right when `base` is a shape and `detail` is fine
     // detail meant to follow it.
     //
-    // `strength` scales the detail's slope before either mode runs, so 0 gives back `base`
-    // exactly in both. Returns `base` unchanged when there is nothing to merge, or when the
-    // two maps are not the same size.
+    // `opacity` scales the detail's slope before either mode runs, so 0 gives back `base`
+    // exactly in both and 1 lets the detail through in full. Returns `base` unchanged when
+    // there is nothing to merge, or when the two maps are not the same size.
     static Ref<Image> combine_normals(
             const Ref<Image> &base,
             const Ref<Image> &detail,
             const PackedInt32Array &rects,
             int64_t mode,
-            double strength);
+            double opacity);
 
     // A copy of `map` with green pointing the other way, which is the one thing two engines
     // never agree on. Red, blue and alpha are untouched.

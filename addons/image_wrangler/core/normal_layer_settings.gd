@@ -17,7 +17,7 @@ extends Resource
 ## Applied to the slope rather than to the finished colour, so zero gives back exactly what
 ## the layers above produced and every number between reads as a smooth dial rather than as
 ## a fade between two pictures.
-@export var combine_strength: float = 1.0
+@export var combine_opacity: float = 1.0
 
 
 ## A copy that belongs to no image.

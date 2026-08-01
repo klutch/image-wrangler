@@ -73,6 +73,20 @@ const _RENAMED_IDS := {
     &"tile_selector": &"exclude_tiles",
 }
 
+## Settings that changed name, mapped from what they are called now to what they used to be.
+##
+## Read by [method apply_dict] when a file holds nothing under the current name. Without it a
+## rename is silent data loss: the reader looks for a name the file has never heard of, finds
+## nothing, and leaves the default standing — so a tuned value comes back as though it had
+## never been set.
+##
+## [b]Keyed by the new name rather than the old one[/b], because that is the one the reader is
+## holding when it comes up empty. Nothing here needs a version bump: a file written since the
+## rename simply never reaches the fallback.
+const _RENAMED_PROPERTIES := {
+    "combine_opacity": "combine_strength",
+}
+
 
 ## What a sidecar's name is the image's basename plus.
 ##
@@ -733,10 +747,16 @@ static func apply_dict(resource: Resource, data: Dictionary) -> void:
         if not (usage & PROPERTY_USAGE_SCRIPT_VARIABLE):
             continue
         var name: String = property.get("name", "")
-        if name.is_empty() or not data.has(name):
+        if name.is_empty():
+            continue
+        # What the file calls this setting, which is not always what it is called now.
+        var key := name
+        if not data.has(key) and _RENAMED_PROPERTIES.has(name):
+            key = _RENAMED_PROPERTIES[name]
+        if not data.has(key):
             continue
         var current: Variant = resource.get(name)
-        var decoded: Variant = _decode(current, data[name])
+        var decoded: Variant = _decode(current, data[key])
         # _decode returns the target untouched when the stored value is the
         # wrong shape, so a single malformed entry costs that one setting rather
         # than the whole file.

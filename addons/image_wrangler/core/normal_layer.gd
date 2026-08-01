@@ -6,7 +6,7 @@ extends IWStackItem
 ##
 ## A layer is handed the finished sheet and where every sprite landed on it, and hands back
 ## a normal map the same size. The layers above it made one too; [member
-## NormalLayerSettings.combine_mode] and [member NormalLayerSettings.combine_strength] say
+## NormalLayerSettings.combine_mode] and [member NormalLayerSettings.combine_opacity] say
 ## how the two are joined. The first layer switched on has nothing to join, so those two
 ## settings are left off its card entirely — see [member is_first].
 ##
@@ -117,12 +117,12 @@ func combine_schema() -> Array[Dictionary]:
             "tooltip": "How this layer joins the one above it.\n\nSlope Blending adds the two surfaces' slopes, which is the same answer as\nadding the two heights together and working the shape out once — so neither\nlayer's detail is flattened by the other. Right when both layers describe the\nsame surface.\n\nReoriented Mapping turns this layer to face the way the one above it does, so\nits detail follows a curve instead of lying flat across it. Right when the\nlayer above is a shape and this one is surface detail meant to sit on it.\n\nThe topmost layer that is switched on is the base, and its own Combine setting\ndoes nothing.",
         },
         {
-            "property": &"combine_strength",
-            "label": "Strength",
+            "property": &"combine_opacity",
+            "label": "Opacity",
             "type": SettingType.FLOAT,
             "min": 0.0,
             "max": 1.0,
             "step": 0.01,
-            "tooltip": "How much of this layer reaches the result.\n\nAt zero the layers above come through untouched, whichever way they are being\ncombined. At one this layer is at full strength.",
+            "tooltip": "How much of this layer reaches the result.\n\nAt zero the layers above come through untouched, whichever way they are being\ncombined. At one this layer comes through in full.\n\nNamed for what it does rather than for how it is worked out: it dials this\nlayer's slope down before the two are joined, so it behaves like the opacity of\na layer above a picture rather than like the strength of the effect itself.",
         },
     ]

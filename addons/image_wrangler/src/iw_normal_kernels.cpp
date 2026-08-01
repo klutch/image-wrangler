@@ -401,7 +401,7 @@ Ref<Image> IWStageKernels::combine_normals(
         const Ref<Image> &detail,
         const PackedInt32Array &rects,
         int64_t mode,
-        double strength) {
+        double opacity) {
     ERR_FAIL_COND_V(base.is_null(), Ref<Image>());
     if (detail.is_null() || base->is_empty() || detail->is_empty() || rects.is_empty()) {
         return base;
@@ -449,11 +449,11 @@ Ref<Image> IWStageKernels::combine_normals(
                 double dz = 0.0;
                 unpack_normal(upper + at, dx, dy, dz);
 
-                // The detail as a slope, dialled down by the strength. Done before either
-                // mode runs, which is what makes a strength of zero mean "the base exactly"
+                // The detail as a slope, dialled down by the opacity. Done before either
+                // mode runs, which is what makes an opacity of zero mean "the base exactly"
                 // in both of them rather than in only one.
-                const double sx = dx / dz * strength;
-                const double sy = dy / dz * strength;
+                const double sx = dx / dz * opacity;
+                const double sy = dy / dz * opacity;
 
                 if (reorients) {
                     // The detail turned to face the way the base does, so it follows a
