@@ -2225,6 +2225,12 @@ func _apply_history_state(state: Array) -> void:
         stage.enabled = bool(record["enabled"])
         stages.append(stage)
 
+    # Written down before the rebuild frees the control holding it, and handed back after.
+    # An undo is not the user asking for anything to move, so it must not cost pick mode —
+    # stepping back through a few polygon edits would otherwise mean arming the tool again
+    # after every step.
+    var picking := _pick_address()
+
     # Both flags, and for different reasons: _refreshing stops the rebuild being read as
     # a settings edit, _applying_history stops anything that slips past it being recorded.
     var was_refreshing := _refreshing
@@ -2233,6 +2239,8 @@ func _apply_history_state(state: Array) -> void:
     _stack_view.set_stages(stages)
     _applying_history = false
     _refreshing = was_refreshing
+
+    _restore_pick(picking)
 
 
 ## A row in the History tab was clicked.
@@ -2789,6 +2797,59 @@ func _release_pick_if_disabled() -> void:
         if _pick_target in entry.pick_controls():
             _release_pick()
             return
+
+
+## Where the crosshair is, as a place in the stack rather than as a control.
+##
+## [b]A rebuild frees every control, so a reference to one is no use across it.[/b] What
+## survives is the shape of the stack, so the crosshair is written down as the entry's
+## position, which of that entry's pick controls held it, and which operation that entry was
+## — and all three have to still agree before it is handed back. Otherwise an undo that
+## removed an entry would arm whatever happened to end up standing at the same address.
+##
+## Empty when nothing is picking, which is the ordinary case.
+func _pick_address() -> Dictionary:
+    if _pick_target == null or _stack_view == null:
+        return {}
+    var entries: Array = _stack_view.entries()
+    for i in entries.size():
+        var controls: Array = entries[i].pick_controls()
+        var at := controls.find(_pick_target)
+        if at >= 0:
+            return {"entry": i, "control": at, "id": entries[i].stage.get_operation_id()}
+    return {}
+
+
+## Puts the crosshair back where [param address] says it was, if it is still there.
+##
+## Called after the rebuilds that are not the user changing the stack — an undo replaces
+## every control without the user having asked for anything to move, and losing pick mode
+## because of it means arming it again after every step.
+##
+## The button is pressed quietly and then the arbitration is run by hand, because
+## [code]set_pick_active[/code] deliberately does not echo back a signal — that is what stops
+## the dock hearing its own releases.
+func _restore_pick(address: Dictionary) -> void:
+    if address.is_empty() or _stack_view == null:
+        return
+    var entries: Array = _stack_view.entries()
+    var index: int = address.get("entry", -1)
+    if index < 0 or index >= entries.size():
+        return
+    var entry: Control = entries[index]
+    # A different operation standing at the same position is not the one that was picking,
+    # and a switched-off one has a form nothing can reach anyway.
+    if entry.stage.get_operation_id() != address.get("id", &"") or not entry.stage.enabled:
+        return
+    var controls: Array = entry.pick_controls()
+    var at: int = address.get("control", -1)
+    if at < 0 or at >= controls.size():
+        return
+
+    var control: Control = controls[at]
+    control.set_pick_active(true)
+    _on_pick_toggled(true, control)
+    _update_overlays()
 
 
 ## Drops out of pick mode, leaving every control's button unpressed.
