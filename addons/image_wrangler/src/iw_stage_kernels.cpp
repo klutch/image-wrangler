@@ -123,6 +123,11 @@ void IWStageKernels::_bind_methods() {
             D_METHOD("normal_from_brightness", "sheet", "rects", "coarse_size",
                     "coarse_strength", "fine_strength", "green_down"),
             &IWStageKernels::normal_from_brightness);
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("combine_normals", "base", "detail", "rects", "mode", "strength"),
+            &IWStageKernels::combine_normals);
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("normal_flip_green", "map"), &IWStageKernels::normal_flip_green);
 }
 
 // Rasterises this stage's shapes and folds them into whatever is already declared.

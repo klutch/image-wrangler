@@ -280,8 +280,18 @@ static func load_stack(source_path: String, registry: Dictionary) -> Array:
     # noticed. Converted before it is read rather than after, so there is only ever the one
     # decoder pointed at the one kind of file.
     migrate_legacy_sidecar(source_path)
-    var path := sidecar_path(source_path)
-    if not FileAccess.file_exists(path):
+    return load_stack_from(sidecar_path(source_path), registry)
+
+
+## The stack in the file at [param path], or an empty Array when there is no file there.
+##
+## Split out from [method load_stack] because not everything with a stack has an image to
+## hang it off. The Export tab describes a whole list of files rather than any one of them,
+## so its settings go to a file named for the batch; see
+## [method IWPacking.export_config_path]. Same envelope, same decoder, same everything but
+## how the name was arrived at.
+static func load_stack_from(path: String, registry: Dictionary) -> Array:
+    if path.is_empty() or not FileAccess.file_exists(path):
         return []
     return decode_stack(_read_envelope(path), registry, path.get_file())
 
@@ -404,7 +414,15 @@ static func _absorb_retired(stack: Array, retired: Array) -> void:
 ## [method save_settings] for why that check survives [constant SIDECAR_SUFFIX].
 static func save_stack(source_path: String, stack: Array) -> Error:
     migrate_legacy_sidecar(source_path)
-    var path := sidecar_path(source_path)
+    return save_stack_to(sidecar_path(source_path), stack)
+
+
+## Writes [param stack] into the file at [param path], leaving anything else in it alone.
+##
+## The counterpart to [method load_stack_from], and for the same reason.
+static func save_stack_to(path: String, stack: Array) -> Error:
+    if path.is_empty():
+        return ERR_INVALID_PARAMETER
     var envelope := {}
 
     if FileAccess.file_exists(path):

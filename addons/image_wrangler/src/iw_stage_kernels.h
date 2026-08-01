@@ -386,6 +386,36 @@ public:
             double coarse_strength,
             double fine_strength,
             bool green_down);
+
+    // Merges `detail` into `base`, sprite by sprite, for IWPacking's stack of normal map
+    // generators. Same rectangles and the same guarantee as the two above; the space
+    // between sprites keeps whatever `base` had there.
+    //
+    // `mode` 0 is slope blending, which adds the two surfaces' slopes. That is the same
+    // answer as adding the two height surfaces and working the normal out once, so neither
+    // layer's detail is averaged away — right when both maps describe the same surface as
+    // peers.
+    //
+    // `mode` 1 is reoriented mapping, which rotates `detail` so it sits on `base`'s surface
+    // rather than on a flat plane — right when `base` is a shape and `detail` is fine
+    // detail meant to follow it.
+    //
+    // `strength` scales the detail's slope before either mode runs, so 0 gives back `base`
+    // exactly in both. Returns `base` unchanged when there is nothing to merge, or when the
+    // two maps are not the same size.
+    static Ref<Image> combine_normals(
+            const Ref<Image> &base,
+            const Ref<Image> &detail,
+            const PackedInt32Array &rects,
+            int64_t mode,
+            double strength);
+
+    // A copy of `map` with green pointing the other way, which is the one thing two engines
+    // never agree on. Red, blue and alpha are untouched.
+    //
+    // Applied to the finished stack rather than to each generator, so combining never has to
+    // reason about which way round its inputs were written.
+    static Ref<Image> normal_flip_green(const Ref<Image> &map);
 };
 
 } // namespace godot

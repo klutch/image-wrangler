@@ -1,10 +1,14 @@
 @tool
 extends VBoxContainer
 
-## The operation stack: a dropdown to add with, and a draggable column of entries.
+## A stack: a dropdown to add with, and a draggable column of entries.
 ##
-## Holds the live [IWStackOperation] instances and their order. The dock owns the
+## Holds the live [IWStackItem] instances and their order. The dock owns the
 ## settings behind them and the running of them; this owns what the stack [i]is[/i].
+##
+## Two stacks are built out of this — the operations on an image, and the normal map
+## generators on the Export tab. Nothing here knows which: what the dropdown offers, what
+## a card's form looks like and what any of the tool buttons mean all arrive from the dock.
 ##
 ## Duplicates are allowed and mean what they look like — two Polygon Edits are two
 ## independent sets of shapes, and a second Remove Background adds its colours to the
@@ -80,6 +84,18 @@ var operations: Array = []
 ## settings builder.
 var form_builder := Callable()
 
+## What the dropdown always shows, and what a pick of it means: nothing.
+##
+## The row the control displays is the row it thinks is chosen, so without a standing entry
+## the dropdown would sit there naming whichever item was added last, as though that one
+## were somehow current. This is a button wearing a list's clothes.
+##
+## Set before the view enters the tree, alongside [member operations].
+var add_prompt := "Add New Operation"
+
+## What the dropdown says when it is hovered.
+var add_tooltip := "Add an operation to the bottom of the stack.\nDrag its header afterwards to move it.\n\nPicking the same one twice adds a second of it, which is what duplicates are for.\nDisabled while no image is open."
+
 ## Where a tool button keeps the icon it wants and the word to fall back on.
 const META_ICON := &"iw_icon"
 const META_LABEL := &"iw_label"
@@ -97,6 +113,7 @@ var _entries: Array = []
 var _selector: OptionButton
 var _list: VBoxContainer
 var _tools: HBoxContainer
+var _extras: VBoxContainer
 var _scroll: ScrollContainer
 var _next_uid := 1
 
@@ -281,10 +298,17 @@ func _build() -> void:
     # showing, and adding a second Polygon Edit is an ordinary thing to want.
     _selector = OptionButton.new()
     _selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _selector.tooltip_text = "Add an operation to the bottom of the stack.\nDrag its header afterwards to move it.\n\nPicking the same one twice adds a second of it, which is what duplicates are for.\nDisabled while no image is open."
+    _selector.tooltip_text = add_tooltip
     _selector.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
     _selector.get_popup().index_pressed.connect(_on_pick)
     add_child(_selector)
+
+    # Empty unless the dock puts something here. See [method extras_box].
+    _extras = VBoxContainer.new()
+    _extras.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _extras.visible = false
+    _extras.child_order_changed.connect(_settle_extras)
+    add_child(_extras)
 
     # [b]The scroll starts here, under the tools and the dropdown rather than above
     # them.[/b] It used to wrap the whole of this view, which meant a stack long enough to
@@ -325,23 +349,32 @@ func _build() -> void:
     _refresh_selector()
 
 
-## What the dropdown always shows, and what a pick of it means: nothing.
+## Room for controls that belong above the stack but below the dropdown.
 ##
-## The row the control displays is the row it thinks is chosen, so without a standing entry
-## the dropdown would sit there naming whichever operation was added last, as though that
-## one were somehow current. This is a button wearing a list's clothes.
-const ADD_PROMPT := "Add New Operation"
+## Anything put here sits with the tools and the dropdown on the part of the view that never
+## scrolls, which is where a control belongs when it is about the whole stack rather than
+## about any one card. Hidden while it holds nothing, so a stack that wants none pays no gap
+## for it.
+func extras_box() -> VBoxContainer:
+    if _extras == null:
+        _build()
+    return _extras
+
+
+func _settle_extras() -> void:
+    if _extras != null:
+        _extras.visible = _extras.get_child_count() > 0
 
 
 ## Fills the dropdown from [member operations].
 ##
-## Every operation stays offered however many are already in the stack, because a second
+## Every item stays offered however many are already in the stack, because a second
 ## one of anything is a legitimate thing to want.
 func _refresh_selector() -> void:
     if _selector == null:
         return
     _selector.clear()
-    _selector.add_item(ADD_PROMPT)
+    _selector.add_item(add_prompt)
     for entry: Dictionary in operations:
         var path := String(entry.get("script", ""))
         var script: Script = load(path)
@@ -377,18 +410,18 @@ func _on_pick(index: int) -> void:
 
 
 ## Appends [param stage] to the stack and rebuilds.
-func add_stage(stage: IWStackOperation) -> void:
+func add_stage(stage: IWStackItem) -> void:
     _entries.append(_record(stage))
     rebuild()
 
 
 ## One row's bookkeeping.
-func _record(stage: IWStackOperation) -> Dictionary:
+func _record(stage: IWStackItem) -> Dictionary:
     return {"uid": _take_uid(), "stage": stage, "entry": null}
 
 
 ## Puts [param stage] into the stack at [param at], pushing whatever was there down.
-func insert_stage(stage: IWStackOperation, at: int) -> void:
+func insert_stage(stage: IWStackItem, at: int) -> void:
     _entries.insert(clampi(at, 0, _entries.size()), _record(stage))
     rebuild()
     stack_changed.emit()
@@ -416,14 +449,17 @@ func _on_entry_menu(entry: Control, above: bool) -> void:
 ## Replaces the whole stack with [param stages], in order.
 func set_stages(stages: Array) -> void:
     _entries.clear()
-    for stage: IWStackOperation in stages:
+    for stage: IWStackItem in stages:
         _entries.append(_record(stage))
     rebuild()
 
 
-## The live operations, in stack order.
-func stages() -> Array[IWStackOperation]:
-    var out: Array[IWStackOperation] = []
+## The live items, in stack order.
+##
+## Untyped, because the two stacks built out of this hold different subclasses and a typed
+## Array of the base cannot be handed to anything expecting a typed Array of one of them.
+func stages() -> Array:
+    var out := []
     for record: Dictionary in _entries:
         out.append(record["stage"])
     return out
@@ -461,7 +497,7 @@ func rebuild() -> void:
     for record: Dictionary in _entries:
         var entry: Control = StackEntry.new()
         _list.add_child(entry)
-        entry.setup(record["stage"], record["uid"], (record["stage"] as IWStackOperation).folded)
+        entry.setup(record["stage"], record["uid"], (record["stage"] as IWStackItem).folded)
         entry.remove_requested.connect(_on_remove)
         entry.reorder_requested.connect(_on_reorder)
         entry.enabled_toggled.connect(func(_e: Control, _on: bool) -> void: stack_changed.emit())
@@ -510,8 +546,8 @@ func set_can_add(value: bool) -> void:
         _selector.disabled = not value
 
 
-## Which operation the stack is pointed at, or null when it holds none.
-func selected_stage() -> IWStackOperation:
+## Which item the stack is pointed at, or null when it holds none.
+func selected_stage() -> IWStackItem:
     for record: Dictionary in _entries:
         if record["uid"] == _selected_uid:
             return record["stage"]
@@ -562,7 +598,7 @@ func capture_folds() -> void:
     for record: Dictionary in _entries:
         var entry: Control = record["entry"]
         if entry != null and is_instance_valid(entry):
-            (record["stage"] as IWStackOperation).folded = entry.is_folded()
+            (record["stage"] as IWStackItem).folded = entry.is_folded()
 
 
 func _on_remove(entry: Control) -> void:

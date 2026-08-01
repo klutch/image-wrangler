@@ -75,8 +75,8 @@ const SELECTED_BORDER_WIDTH := 2
 ## colour undiluted, which is what keeps them readable over the art.
 const PANEL_TINT_MIX := 0.15
 
-## The operation this entry stands for. Its settings are the live ones.
-var stage: IWStackOperation
+## The item this entry stands for. Its settings are the live ones.
+var stage: IWStackItem
 
 ## Identity for this entry, unique for the session.
 ##
@@ -104,7 +104,7 @@ var _styling := false
 var _selected := false
 
 
-func setup(operation: IWStackOperation, entry_uid: int, folded: bool) -> void:
+func setup(operation: IWStackItem, entry_uid: int, folded: bool) -> void:
     stage = operation
     uid = entry_uid
     _build()
@@ -238,7 +238,11 @@ func _build() -> void:
     # in that path is a stop nobody wants.
     _title.focus_mode = Control.FOCUS_NONE
     _title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-    _title.tooltip_text = "Show or hide these settings."
+    # What the item does goes on the title, because the title is the only part of a folded
+    # card left to hover. Nothing has one where the name says the whole of it.
+    var about := stage.get_description()
+    _title.tooltip_text = "Show or hide these settings." if about.is_empty() \
+            else "%s\n\nClick to show or hide these settings." % about
     # Written straight onto the operation, which is where the sidecar picks it up.
     _title.toggled.connect(func(pressed: bool) -> void:
         _body.visible = pressed

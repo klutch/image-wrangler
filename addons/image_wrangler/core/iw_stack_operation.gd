@@ -1,6 +1,6 @@
 @tool
 class_name IWStackOperation
-extends IWOperation
+extends IWStackItem
 
 ## One stage in the dock's operation stack.
 ##
@@ -33,29 +33,6 @@ extends IWOperation
 ## Every stage that reads this is one whose loops move to C++ in turn, at which point
 ## both copies collapse back into the one on the context.
 const EPSILON := 0.0001
-
-## Whether this stage runs at all.
-##
-## Held here rather than as a setting, because it is a fact about the stack rather
-## than about the operation — the dock draws it as a tick on the entry's header and
-## saves it beside the settings rather than inside them. Switching a stage off
-## keeps everything dialled into it, which deleting the entry would not.
-var enabled := true
-
-## Whether the dock draws this stage's settings folded away.
-##
-## Held here beside [member enabled] for the same reason: it is a fact about the entry
-## rather than about the operation, and it is saved beside the settings rather than
-## inside them.
-var folded := false
-
-## The colour this stage's marks are drawn in on the preview.
-##
-## Each operation writes its own out as a [code]TINT[/code] constant, so a stage is the same
-## colour in every session and on every image. White here, which is what every mark used to
-## be, for anything that has not named one.
-func get_tint() -> Color:
-    return Color.WHITE
 
 ## The pipeline running this stage, or null when it is running on its own.
 ##

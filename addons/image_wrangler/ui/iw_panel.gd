@@ -46,6 +46,43 @@ const OPERATIONS := [
 ]
 
 
+## Every normal map generator the Export tab's dropdown offers, in the order it offers them.
+##
+## Not alphabetical, unlike [constant OPERATIONS]: these are four ways of doing one job, and
+## the order runs from the one that reads least about the sprite to the one that reads most.
+## Neural is last for a second reason as well — see [method normal_generators].
+const NORMAL_GENERATORS := [
+    {"script": "res://addons/image_wrangler/core/normal_round_edges.gd", "icon": &"CurveTexture"},
+    {"script": "res://addons/image_wrangler/core/normal_color_regions.gd", "icon": &"Bucket"},
+    {"script": "res://addons/image_wrangler/core/normal_brightness.gd", "icon": &"GradientTexture1D"},
+    {"script": "res://addons/image_wrangler/core/normal_neural.gd", "icon": &"AnimationTree"},
+]
+
+
+## The generators this build can actually offer.
+##
+## Neural is dropped when the network wrapper was left out of the build, which is the
+## ordinary state of a checkout that has not run [code]tools/build_ncnn.py[/code]. Dropped
+## rather than shown and refusing, because there is nothing the user could do about it from
+## here. [b]Not dropped for the want of a model[/b] — see [method NormalNeural.is_offered].
+static func normal_generators() -> Array:
+    if NormalNeural.is_offered():
+        return NORMAL_GENERATORS
+    return NORMAL_GENERATORS.slice(0, NORMAL_GENERATORS.size() - 1)
+
+
+## Every normal map generator script, whether or not this build offers it.
+##
+## The registry a saved stack is decoded against, which is deliberately wider than what the
+## dropdown shows: a file written by a build that had the network still names the layer, and
+## dropping it silently would lose the model folder somebody typed in.
+static func normal_generator_scripts() -> Array:
+    var out := []
+    for entry: Dictionary in NORMAL_GENERATORS:
+        out.append(entry["script"])
+    return out
+
+
 ## Every operation script, for the places that only need to know which operations exist —
 ## the registry a sidecar is decoded against, and the sweep that names them.
 static func operation_scripts() -> Array:
@@ -520,8 +557,12 @@ var _packing_status: Label
 ## Says what the selected packing mode does, sitting under the dropdown and above the rest
 ## of the form.
 var _packing_mode_note: Label
-## The same, for the normals dropdown further down the form.
-var _packing_normal_note: Label
+## The stack of normal map generators, under the packing form on the Export tab.
+var _normal_stack: Control
+## Flips the finished normal map's green channel. Hand-built rather than declared in
+## [method IWPacking.get_settings_schema], because it sits outside [member _packing_box] and
+## the settings builder frees everything in there on every rebuild.
+var _packing_green_toggle: CheckBox
 ## Swaps the preview between the sheet and the normal map made from it.
 var _packing_normal_toggle: CheckBox
 var _upscale_box: VBoxContainer
@@ -561,6 +602,9 @@ var _packing_debounce: Timer
 var _packing_normal_debounce: Timer
 var _upscale_debounce: Timer
 var _autosave: Timer
+## Writes the Export tab's own settings file. Separate from [member _autosave] because it is
+## keyed on the whole list of images rather than on whichever one is highlighted.
+var _export_save: Timer
 var _open_dialog: FileDialog
 var _output_dialog: FileDialog
 var _save_dialog: FileDialog
@@ -574,8 +618,17 @@ var _removal_dialog: ConfirmationDialog
 ## nothing to agree to, since the run has already stopped.
 var _packing_dialog: AcceptDialog
 var _reset_dialog: ConfirmationDialog
+## The same for the normal map stack, which throws away something different and says so.
+var _normal_reset_dialog: ConfirmationDialog
 var _stack_save_dialog: FileDialog
 var _stack_load_dialog: FileDialog
+
+## Which of the two stacks a pending Save or Load belongs to.
+##
+## One pair of dialogs rather than two, for the reason the dock has one Save As dialog for
+## every image: the file mode and the filter are the same, and only the title and which
+## stack answers differ.
+var _stack_dialog_normals := false
 
 ## The right-click menu over the stack, and what the choice on it would act on.
 ##
@@ -584,6 +637,17 @@ var _stack_load_dialog: FileDialog
 var _stack_menu: PopupMenu
 var _stack_menu_index := -1
 var _stack_menu_at := 0
+## Which stack the open menu is over, since one menu serves both.
+var _stack_menu_normals := false
+
+## Where this batch of images keeps its export settings, or empty while no images are open.
+##
+## Held rather than worked out per write, so a change to the list is noticed as a change:
+## see [method _load_export_config].
+var _export_config_path := ""
+
+## Whether the last write to it failed, so the reason is said once rather than every time.
+var _export_save_failed := false
 
 ## Sources whose originals may be deleted, mapped to the copy that replaced them.
 ## Filled during a run and acted on only after the user confirms and every copy
@@ -706,6 +770,7 @@ func _exit_tree() -> void:
         filesystem.resources_reload.disconnect(_on_resources_reload)
 
     _flush_autosave()
+    _flush_export_save()
     _preview_pending = false
     if _preview_worker_op != null:
         _preview_worker_op.cancelled = true
@@ -752,14 +817,11 @@ func _build_packing() -> void:
     # and a line of prose is not one — it has no property to write and nothing to read
     # back, and giving the schema a way to say "and now some words" would be a new kind of
     # entry for every other operation to ignore.
-    #
-    # The mode note goes first, so the search for the normals row sees the row it added and
-    # lands under that dropdown rather than one above it.
     _place_packing_note(_packing_mode_note, &"mode")
-    _place_packing_note(_packing_normal_note, &"normals")
     _refresh_packing_note()
     _packing_sheet_key = _packing_sheet_signature()
     _packing_normal_key = _packing_normal_signature()
+    _refresh_green_toggle()
     _update_normal_toggle()
 
 
@@ -792,8 +854,6 @@ func _refresh_packing_note() -> void:
     var settings := _packing.get_settings()
     if _packing_mode_note != null:
         _packing_mode_note.text = IWPacking.describe_mode(settings.mode)
-    if _packing_normal_note != null:
-        _packing_normal_note.text = _packing.describe_normals(settings.normals)
 
 
 ## The third of these, for the tab that runs the network.
@@ -935,6 +995,7 @@ func _rebuild_ui() -> void:
     # A pending sidecar write belongs to the stack about to be taken down, and the flush
     # resolves it against the current mode, so it goes before any of this.
     _flush_autosave()
+    _flush_export_save()
 
     # A run in flight reports into controls that are about to be freed. Cancelled exactly
     # as [method _exit_tree] does it: it cannot be waited on, but the cancel reaches it at
@@ -976,6 +1037,11 @@ func _rebuild_ui() -> void:
     _preview.magenta_background = magenta
     _magenta_toggle.set_pressed_no_signal(magenta)
     _apply_stack_for(path)
+    # The generators survive on _packing, which is not rebuilt, so they go back into the new
+    # view rather than being read off disk again — a pending edit has not been written yet.
+    _refreshing = true
+    _normal_stack.set_stages(_packing.normal_layers if _packing != null else [])
+    _refreshing = false
     _refresh_file_list()
     if selected >= 0 and selected < _file_list.item_count:
         _file_list.select(selected)
@@ -1019,7 +1085,8 @@ func _forget_controls() -> void:
     _packing_box = null
     _packing_status = null
     _packing_mode_note = null
-    _packing_normal_note = null
+    _normal_stack = null
+    _packing_green_toggle = null
     _packing_normal_toggle = null
     _upscale_box = null
     _upscale_status = null
@@ -1040,12 +1107,18 @@ func _forget_controls() -> void:
     _packing_normal_debounce = null
     _upscale_debounce = null
     _autosave = null
+    _export_save = null
     _open_dialog = null
     _output_dialog = null
     _save_dialog = null
     _overwrite_dialog = null
     _removal_dialog = null
     _packing_dialog = null
+    _reset_dialog = null
+    _normal_reset_dialog = null
+    _stack_save_dialog = null
+    _stack_load_dialog = null
+    _stack_menu = null
 
 
 # --- Layout -------------------------------------------------------------
@@ -1098,6 +1171,12 @@ func _build_ui() -> void:
     _autosave.wait_time = AUTOSAVE_DEBOUNCE
     _autosave.timeout.connect(_flush_autosave)
     add_child(_autosave)
+
+    _export_save = Timer.new()
+    _export_save.one_shot = true
+    _export_save.wait_time = AUTOSAVE_DEBOUNCE
+    _export_save.timeout.connect(_flush_export_save)
+    add_child(_export_save)
 
 
 ## Nothing is reprocessed: the overlays are drawn over the result rather than into it, so
@@ -1393,18 +1472,17 @@ func _build_operation_column() -> Control:
     _rename_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     rename_page.add_child(_rename_box)
 
-    var packing_page := ScrollContainer.new()
+    # No scroll of its own, for the reason the History tab has none: the normal map stack
+    # below brings one, and nesting the two would give the tab a scrollbar that moved a list
+    # with a scrollbar in it. The five rows above the stack sit at their natural height and
+    # the stack takes whatever pressure the dock is under.
+    var packing_page := VBoxContainer.new()
     packing_page.name = "Export"
-    packing_page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
     _modes.add_child(packing_page)
-
-    var packing_column := VBoxContainer.new()
-    packing_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    packing_page.add_child(packing_column)
 
     _packing_box = VBoxContainer.new()
     _packing_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    packing_column.add_child(_packing_box)
+    packing_page.add_child(_packing_box)
 
     # Says what the mode in the dropdown above it does. Built here and moved into the form
     # by _build_packing, which is the only thing that knows where the dropdown ended up.
@@ -1412,25 +1490,49 @@ func _build_operation_column() -> Control:
     _packing_mode_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     _packing_mode_note.modulate = Color(1, 1, 1, 0.6)
 
-    # The same for the normals dropdown, which needs one more than the packing mode does:
-    # the three that work read different things about the sprite, and the names alone do not
-    # say which suits the art in front of you.
-    _packing_normal_note = Label.new()
-    _packing_normal_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _packing_normal_note.modulate = Color(1, 1, 1, 0.6)
+    # The second stack in the dock, and the same class as the first. What it offers, what a
+    # card's form looks like and what each tool button does all arrive from here — see
+    # iw_stack_view.gd.
+    _normal_stack = StackView.new()
+    _normal_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _normal_stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    _normal_stack.operations = normal_generators()
+    _normal_stack.add_prompt = "Add Normal Map Generator"
+    _normal_stack.add_tooltip = "Add a normal map generator to the bottom of the stack.\nDrag its header afterwards to move it.\n\nEach one builds on what the ones above it made, in the way its own Combine\nsetting says. With none of them the sheet gets no normal map at all.\n\nDisabled while no image is open."
+    _normal_stack.form_builder = _build_normal_form
+    _normal_stack.stack_changed.connect(_on_normal_stack_changed)
+    _normal_stack.setting_changed.connect(_on_normal_setting_changed)
+    _normal_stack.fold_changed.connect(_on_normal_fold_changed)
+    _normal_stack.entries_rebuilt.connect(_on_normal_entries_rebuilt)
+    _normal_stack.copy_requested.connect(_on_copy_normals)
+    _normal_stack.paste_requested.connect(_on_paste_normals)
+    _normal_stack.save_requested.connect(_on_save_normals)
+    _normal_stack.load_requested.connect(_on_load_normals)
+    _normal_stack.reset_requested.connect(_on_reset_normals)
+    _normal_stack.menu_requested.connect(_on_normal_menu)
+    packing_page.add_child(_normal_stack)
 
-    # Outside _packing_box on purpose. The settings builder frees everything in that box
-    # every time it runs, and this has to outlive a rebuild of the form.
+    # Both of these are about the whole map rather than about any one generator, so they go
+    # in the part of the stack view that does not scroll — under the Add dropdown, above the
+    # cards. See IWStackView.extras_box.
+    var extras: VBoxContainer = _normal_stack.extras_box()
+
+    _packing_green_toggle = CheckBox.new()
+    _packing_green_toggle.text = "Green Points Down"
+    _packing_green_toggle.tooltip_text = "Flips the green channel, which is the one thing two engines never agree on.\n\nOff is what Godot wants. On is what DirectX and most of the tools written\naround it want. Get it wrong and everything lights from the wrong side up.\n\nApplied once to the finished stack rather than by each generator."
+    _packing_green_toggle.toggled.connect(_on_green_down_toggled)
+    extras.add_child(_packing_green_toggle)
+
     _packing_normal_toggle = CheckBox.new()
     _packing_normal_toggle.text = "Show Normal Map"
     _packing_normal_toggle.tooltip_text = "Shows the normal map in place of the sheet, so it can be tuned before it is\nwritten.\n\nThe fade slider brings the sheet back over it. The two line up pixel for pixel,\nwhich is the only way to tell whether the rounding is following the art."
     _packing_normal_toggle.toggled.connect(_on_show_normals_toggled)
-    packing_column.add_child(_packing_normal_toggle)
+    extras.add_child(_packing_normal_toggle)
 
     _packing_status = Label.new()
     _packing_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     _packing_status.modulate = Color(1, 1, 1, 0.6)
-    packing_column.add_child(_packing_status)
+    packing_page.add_child(_packing_status)
 
     var upscale_page := ScrollContainer.new()
     upscale_page.name = "Upscale"
@@ -1671,6 +1773,16 @@ func _build_dialogs() -> void:
     _reset_dialog.confirmed.connect(_reset_stack)
     add_child(_reset_dialog)
 
+    # Its own dialog rather than a flag on the one above, because what it throws away is a
+    # different thing and the wording is the whole point of asking.
+    _normal_reset_dialog = ConfirmationDialog.new()
+    _normal_reset_dialog.title = "Clear Normal Map Generators?"
+    _normal_reset_dialog.ok_button_text = "Clear"
+    _normal_reset_dialog.dialog_text = ("Are you sure you want to remove every normal map "
+            + "generator? Everything dialled into them goes with them.")
+    _normal_reset_dialog.confirmed.connect(_reset_normals)
+    add_child(_normal_reset_dialog)
+
 
 # --- Sources ------------------------------------------------------------
 
@@ -1720,8 +1832,13 @@ func _add_sources(paths: PackedStringArray) -> void:
 ## it is the one place that has to know a sheet made from those images is now out of date.
 ## Hooking the three of them separately would be three chances to add a fourth and forget.
 func _refresh_file_list() -> void:
+    # Before the packing is asked for, since the config may carry a different sheet size and
+    # a repack for the old one would only be thrown away.
+    _load_export_config()
     _schedule_packing()
     _schedule_upscale()
+    if _normal_stack != null:
+        _normal_stack.set_can_add(not _sources.is_empty())
     var selected := _selected_index()
     _file_list.clear()
     for path in _sources:
@@ -2353,6 +2470,7 @@ const MENU_PASTE := 1
 func _on_stack_menu(index: int, at: int) -> void:
     _stack_menu_index = index
     _stack_menu_at = at
+    _stack_menu_normals = false
 
     _stack_menu.clear()
     if index >= 0:
@@ -2375,9 +2493,15 @@ func _on_stack_menu(index: int, at: int) -> void:
 func _on_stack_menu_chosen(id: int) -> void:
     match id:
         MENU_COPY:
-            _copy_one(_stack_menu_index)
+            if _stack_menu_normals:
+                _copy_one_normal(_stack_menu_index)
+            else:
+                _copy_one(_stack_menu_index)
         MENU_PASTE:
-            _paste_one(_stack_menu_at)
+            if _stack_menu_normals:
+                _paste_one_normal(_stack_menu_at)
+            else:
+                _paste_one(_stack_menu_at)
 
 
 ## Puts one operation on the clipboard, in the same format the whole-stack Copy uses.
@@ -2417,35 +2541,52 @@ func _on_save_stack() -> void:
     if _stack_view.is_empty():
         _set_status("There is nothing in the stack to save.")
         return
+    _stack_dialog_normals = false
+    _stack_save_dialog.title = "Save Operation Stack"
+    _stack_save_dialog.current_file = "operations.json"
     _stack_save_dialog.popup_centered_ratio(0.6)
 
 
 func _on_stack_save_chosen(path: String) -> void:
+    var normals := _stack_dialog_normals
+    var records := _normal_records() if normals else _stack_records()
     var file := FileAccess.open(path, FileAccess.WRITE)
     if file == null:
-        _set_status("Could not write %s." % path.get_file())
+        _report_stack_status(normals, "Could not write %s." % path.get_file())
         return
     # Indented, unlike the clipboard's copy: this one lands somewhere a person may open
     # it and read it.
-    file.store_string(SettingsIO.stack_to_text(_stack_records(), "\t"))
+    file.store_string(SettingsIO.stack_to_text(records, "\t"))
     file.close()
-    _set_status("Saved %s to %s." % [
-        _operation_count(_stack_view.stages().size()), path.get_file(),
-    ])
+    var count := _generator_count(records.size()) if normals else _operation_count(records.size())
+    _report_stack_status(normals, "Saved %s to %s." % [count, path.get_file()])
 
 
 func _on_load_stack() -> void:
+    _stack_dialog_normals = false
+    _stack_load_dialog.title = "Load Operation Stack"
     _stack_load_dialog.popup_centered_ratio(0.6)
 
 
-## Puts the stack in the chosen file in place of this one.
+## Puts the stack in the chosen file in place of whichever one asked for it.
 func _on_stack_load_chosen(path: String) -> void:
+    var normals := _stack_dialog_normals
     var file := FileAccess.open(path, FileAccess.READ)
     if file == null:
-        _set_status("Could not read %s." % path.get_file())
+        _report_stack_status(normals, "Could not read %s." % path.get_file())
         return
     var text := file.get_as_text()
     file.close()
+
+    if normals:
+        var layers := _normals_from_text(text)
+        if layers.is_empty():
+            _set_packing_status("Found no normal map generators in %s." % path.get_file())
+            return
+        _replace_normals(layers)
+        _set_packing_status("Loaded %s from %s."
+                % [_generator_count(layers.size()), path.get_file()])
+        return
 
     var stages := _stages_from_text(text)
     if stages.is_empty():
@@ -2455,6 +2596,14 @@ func _on_stack_load_chosen(path: String) -> void:
     _set_status("Loaded %s from %s." % [
         _operation_count(stages.size()), path.get_file(),
     ])
+
+
+## Says it on whichever tab asked, since the two have status lines of their own.
+func _report_stack_status(normals: bool, text: String) -> void:
+    if normals:
+        _set_packing_status(text)
+    else:
+        _set_status(text)
 
 
 ## Puts [param stages] in place of whatever the stack holds now.
@@ -3392,6 +3541,9 @@ func _on_setting_changed() -> void:
         # The note under the dropdown is the one part of this form that is not a setting,
         # so nothing else would notice the mode had moved.
         _refresh_packing_note()
+        # This tab writes to a file of its own rather than to any image's sidecar, so
+        # _schedule_autosave above did nothing for it.
+        _schedule_export_save()
         # Only when the sheet itself would come out different. Create Lookup Table is
         # answered at save time out of a plan already made, and repacking for it would cost
         # a run of every open image's stack to arrive back at the same pixels.
@@ -3836,14 +3988,33 @@ func _schedule_packing_normals() -> void:
     # Null while the dock is being built, exactly as the packing timer is.
     if _mode != Mode.PACKING or _shutting_down or _packing_normal_debounce == null:
         return
-    # The network is seconds rather than milliseconds, so it stands down from following a
-    # setting the way the other three do. Refresh is what runs it, the way it is for an
-    # upscale too big to preview.
-    if _packing != null and _packing.sanitise_normals(_packing.get_settings().normals) \
-            == IWPacking.NormalMode.NEURAL:
+    # The network is seconds rather than milliseconds, so a stack with one switched on stands
+    # down from following a setting the way the others do. Refresh is what runs it, the way
+    # it is for an upscale too big to preview.
+    if _normals_need_network():
         _set_packing_status("Normals changed. Press Refresh to run the network.")
         return
     _packing_normal_debounce.start()
+
+
+## Whether anything is asking for a normal map at all.
+func _normals_wanted() -> bool:
+    if _packing == null:
+        return false
+    for layer: IWNormalLayer in _packing.normal_layers:
+        if layer.enabled:
+            return true
+    return false
+
+
+## Whether anything in the stack that is switched on runs the network.
+func _normals_need_network() -> bool:
+    if _packing == null:
+        return false
+    for layer: IWNormalLayer in _packing.normal_layers:
+        if layer.enabled and layer.get_operation_id() == &"normal_neural":
+            return true
+    return false
 
 
 ## Works the normal map out for the sheet on screen, or drops it when normals are off.
@@ -3855,7 +4026,7 @@ func _rebuild_packing_normals() -> void:
         _packing_normal_image = _packing.build_normal_map(_packing_image, _packing_rects)
         # Only the network can fail for a reason the user can do something about — a folder
         # holding no model, or one it could not read. The other three either make a map or
-        # were switched off.
+        # were switched off, and an empty stack is not a failure at all.
         var why: String = _packing.normal_error
         if _packing_normal_image == null and not why.is_empty():
             _set_packing_status("No normal map: %s" % why)
@@ -3881,20 +4052,346 @@ func _on_show_normals_toggled(pressed: bool) -> void:
     _update_preview_texture()
 
 
-## The settings that decide what the normal map looks like, as one string.
+func _on_green_down_toggled(pressed: bool) -> void:
+    if _refreshing or _packing == null:
+        return
+    _packing.get_settings().normal_green_down = pressed
+    _on_setting_changed()
+
+
+## Puts the tick where the setting is, for a rebuilt dock or a loaded config.
+func _refresh_green_toggle() -> void:
+    if _packing_green_toggle == null or _packing == null:
+        return
+    _packing_green_toggle.set_pressed_no_signal(_packing.get_settings().normal_green_down)
+
+
+# --- The normal map stack -----------------------------------------------
+
+## Fills one generator's card, the same way [method _build_entry_form] fills an operation's.
+##
+## [b][member IWNormalLayer.is_first] is written here rather than by the stack view.[/b] A
+## layer knows nothing about where in the stack it sits, and the schema it hands back depends
+## on that: the one at the top has nothing above it to combine with, so it is asked for its
+## own settings alone.
+func _build_normal_form(layer: IWNormalLayer, box: VBoxContainer, entry: Control,
+        uid: int) -> void:
+    layer.is_first = _normal_stack.stages().find(layer) == 0
+    SettingsBuilder.build(layer, box, func() -> void: entry.setting_changed.emit(entry),
+            _fold_state, "normal%d" % uid)
+
+
+## Points [IWPacking] at whatever the stack now holds.
+##
+## The layers live on the operation rather than in the view, because that is what makes a
+## map. This is the one seam between the two, and it is called from everything that changes
+## the stack.
+func _sync_normal_layers() -> void:
+    if _packing == null or _normal_stack == null:
+        return
+    _packing.normal_layers = _normal_stack.stages()
+
+
+## A generator was added, removed, reordered or ticked.
+##
+## Nothing is rebuilt here. Every path that changes the order rebuilds before it announces,
+## and [method _build_normal_form] reads which card is first off the stack as it stands at
+## that moment — so the combine rows have already moved to the right card by the time this
+## runs. Ticking one changes no order at all.
+func _on_normal_stack_changed() -> void:
+    _sync_normal_layers()
+    if _refreshing:
+        return
+    _schedule_export_save()
+    _schedule_packing_normals()
+
+
+func _on_normal_setting_changed() -> void:
+    if _refreshing:
+        return
+    for entry: Control in _normal_stack.entries():
+        SettingsBuilder.refresh_visibility(entry.stage, entry.settings_box())
+    _schedule_export_save()
+    if _packing_normal_signature() != _packing_normal_key:
+        _schedule_packing_normals()
+
+
+## Worth saving and nothing else, the way a fold on the operation stack is: it changes no
+## pixels, so it must not rebuild the map.
+func _on_normal_fold_changed() -> void:
+    if _refreshing:
+        return
+    _schedule_export_save()
+
+
+func _on_normal_entries_rebuilt() -> void:
+    _sync_normal_layers()
+
+
+## The stack in the codec's record shape, which is what both the clipboard and the export
+## config take.
+func _normal_records() -> Array:
+    var records := []
+    for layer: IWNormalLayer in _normal_stack.stages():
+        records.append({
+            "id": layer.get_operation_id(),
+            "enabled": layer.enabled,
+            "folded": layer.folded,
+            "settings": layer.get_settings(),
+        })
+    return records
+
+
+## Generator id to script.
+##
+## Built from every generator rather than only the offered ones, so a config written by a
+## build that had the network still opens with the model folder somebody typed into it.
+func _normal_registry() -> Dictionary:
+    var registry := {}
+    for script_path: String in normal_generator_scripts():
+        var script: Script = load(script_path)
+        if script == null:
+            continue
+        var probe: IWOperation = script.new()
+        registry[probe.get_operation_id()] = script
+    return registry
+
+
+## The generators [param records] describes, live and ready to go into the stack.
+func _normals_from_records(records: Array) -> Array:
+    var registry := _normal_registry()
+    var layers := []
+    for record: Dictionary in records:
+        var script: Variant = registry.get(record["id"])
+        if not (script is Script):
+            continue
+        var layer: IWNormalLayer = (script as Script).new()
+        layer.set_settings(record["settings"])
+        layer.enabled = bool(record["enabled"])
+        layer.folded = bool(record.get("folded", false))
+        layers.append(layer)
+    return layers
+
+
+## The generators [param text] describes, or an empty Array when it describes none.
+func _normals_from_text(text: String) -> Array:
+    return _normals_from_records(SettingsIO.stack_from_text(text, _normal_registry()))
+
+
+## Puts [param layers] in place of whatever the stack holds now.
+##
+## Replaces rather than merges, for the reason [method _replace_stack] gives.
+func _replace_normals(layers: Array) -> void:
+    _refreshing = true
+    _normal_stack.set_stages(layers)
+    _refreshing = false
+    _on_normal_stack_changed()
+
+
+func _generator_count(count: int) -> String:
+    return "1 generator" if count == 1 else "%d generators" % count
+
+
+func _on_copy_normals() -> void:
+    var records := _normal_records()
+    if records.is_empty():
+        _set_packing_status("There is nothing in the normal map stack to copy.")
+        return
+    DisplayServer.clipboard_set(SettingsIO.stack_to_text(records))
+    _set_packing_status("Copied %s to the clipboard." % _generator_count(records.size()))
+
+
+func _on_paste_normals() -> void:
+    var layers := _normals_from_text(DisplayServer.clipboard_get())
+    if layers.is_empty():
+        _set_packing_status("Found no normal map generators on the clipboard.")
+        return
+    _replace_normals(layers)
+    _set_packing_status("Pasted %s over the normal map stack." % _generator_count(layers.size()))
+
+
+func _on_save_normals() -> void:
+    if _normal_stack.is_empty():
+        _set_packing_status("There is nothing in the normal map stack to save.")
+        return
+    _stack_dialog_normals = true
+    _stack_save_dialog.title = "Save Normal Map Stack"
+    _stack_save_dialog.current_file = "normals.json"
+    _stack_save_dialog.popup_centered_ratio(0.6)
+
+
+func _on_load_normals() -> void:
+    _stack_dialog_normals = true
+    _stack_load_dialog.title = "Load Normal Map Stack"
+    _stack_load_dialog.popup_centered_ratio(0.6)
+
+
+func _on_reset_normals() -> void:
+    _normal_reset_dialog.popup_centered()
+
+
+## Empties the stack. The default is nothing, because a sheet with no normal map is the
+## ordinary case and the layers to add depend entirely on the art.
+func _reset_normals() -> void:
+    _replace_normals([])
+    _set_packing_status("Cleared the normal map stack.")
+
+
+## The right-click menu over the normals stack, on the same terms the operations one uses.
+func _on_normal_menu(index: int, at: int) -> void:
+    _stack_menu_index = index
+    _stack_menu_at = at
+    _stack_menu_normals = true
+
+    _stack_menu.clear()
+    if index >= 0:
+        _stack_menu.add_item("Copy", MENU_COPY)
+    if _normals_from_text(DisplayServer.clipboard_get()).size() == 1:
+        var label := "Paste"
+        if index >= 0:
+            label = "Paste Above" if at == index else "Paste Below"
+        _stack_menu.add_item(label, MENU_PASTE)
+    if _stack_menu.item_count == 0:
+        return
+
+    _stack_menu.reset_size()
+    _stack_menu.position = DisplayServer.mouse_get_position()
+    _stack_menu.popup()
+
+
+## Puts one generator on the clipboard, in the same format the whole-stack Copy uses.
+func _copy_one_normal(index: int) -> void:
+    var layers: Array = _normal_stack.stages()
+    if index < 0 or index >= layers.size():
+        return
+    var layer: IWNormalLayer = layers[index]
+    DisplayServer.clipboard_set(SettingsIO.stack_to_text([{
+        "id": layer.get_operation_id(),
+        "enabled": layer.enabled,
+        "folded": layer.folded,
+        "settings": layer.get_settings(),
+    }]))
+    _set_packing_status("Copied %s." % layer.get_operation_name())
+
+
+func _paste_one_normal(at: int) -> void:
+    var layers := _normals_from_text(DisplayServer.clipboard_get())
+    if layers.size() != 1:
+        _set_packing_status("The clipboard no longer holds a single generator.")
+        return
+    # Announces, so the sync, the save and the rebuild all follow from it.
+    _normal_stack.insert_stage(layers[0], at)
+    _set_packing_status("Pasted %s." % layers[0].get_operation_name())
+
+
+# --- The Export tab's own settings file ---------------------------------
+
+## Reads back whatever this batch of images was last exported with, if anything.
+##
+## Called from [method _refresh_file_list], which is the one place every change to the list
+## goes through — and the key is what is in the list, so any change to it means a different
+## file. Nothing found leaves the tab exactly as it was, which is what makes building a stack
+## before adding the images still work.
+func _load_export_config() -> void:
+    if _packing == null:
+        return
+    var path := IWPacking.export_config_path(_sources)
+    if path == _export_config_path:
+        return
+    # The outgoing batch's pending write goes out before the key changes under it.
+    _flush_export_save()
+    _export_config_path = path
+    if path.is_empty():
+        return
+
+    var registry := _normal_registry()
+    registry[_packing.get_operation_id()] = load(PACKING_SCRIPT)
+    var records := SettingsIO.load_stack_from(path, registry)
+    if records.is_empty():
+        return
+
+    # Held across the form rebuild as well as the stack swap: the controls being made are
+    # given the values that just arrived, and every one of those is an edit as far as the
+    # handlers are concerned.
+    _refreshing = true
+    var layers := []
+    for record: Dictionary in records:
+        if record["id"] == _packing.get_operation_id():
+            _packing.set_settings(record["settings"])
+            continue
+        layers.append(record)
+    _normal_stack.set_stages(_normals_from_records(layers))
+    # The form is showing the old settings object and the toggles the old values, so both
+    # are pointed at what just arrived.
+    _build_packing()
+    _refreshing = false
+
+    _sync_normal_layers()
+    _schedule_packing()
+
+
+## The Export tab as the codec's records: the sheet settings first, then the generators.
+##
+## The sheet block rides along as a stage with an id of its own rather than as a field beside
+## the list, so the whole file is one shape the existing encoder already writes.
+func _export_records() -> Array:
+    var records := [{
+        "id": _packing.get_operation_id(),
+        "enabled": true,
+        "folded": false,
+        "settings": _packing.get_settings(),
+    }]
+    records.append_array(_normal_records())
+    return records
+
+
+func _schedule_export_save() -> void:
+    if _shutting_down or _export_save == null or _export_config_path.is_empty():
+        return
+    _export_save.start()
+
+
+func _flush_export_save() -> void:
+    if _export_save != null:
+        _export_save.stop()
+    if _packing == null or _export_config_path.is_empty():
+        return
+    var error := SettingsIO.save_stack_to(_export_config_path, _export_records())
+    if error == OK:
+        _export_save_failed = false
+        return
+    # Said once per file rather than on every write, the way the sidecar's failures are:
+    # a folder that cannot be written to will not start being able to.
+    if _export_save_failed:
+        return
+    _export_save_failed = true
+    if error == ERR_FILE_CORRUPT:
+        _set_packing_status("Cannot save export settings: %s was written by something else."
+                % _export_config_path.get_file())
+    else:
+        _set_packing_status("Could not write %s." % _export_config_path.get_file())
+
+
+## What decides what the normal map looks like, as one string.
 ##
 ## Deliberately no overlap with [method _packing_sheet_signature]: not one of these changes a
 ## pixel of the sheet, and repacking for any of them would cost a run of every open image's
 ## stack to arrive back at exactly the same sprites.
+##
+## [b]The fold is deliberately left out.[/b] It is saved beside the settings but it changes
+## no pixels, and putting it in here would rebuild the map every time a card was folded away.
 func _packing_normal_signature() -> String:
     if _packing == null:
         return ""
-    var settings := _packing.get_settings()
-    return "%d/%.3f/%d/%d/%.3f/%.3f/%d/%.3f/%s/%s" % [settings.normals,
-            settings.normal_strength, settings.normal_roll_off, settings.normal_curve,
-            settings.normal_color_tolerance, settings.normal_coarse,
-            settings.normal_coarse_size, settings.normal_fine, settings.normal_green_down,
-            settings.normal_model_dir]
+    var parts := []
+    for layer: IWNormalLayer in _packing.normal_layers:
+        var how: NormalLayerSettings = layer.get_settings()
+        parts.append({
+            "id": String(layer.get_operation_id()),
+            "enabled": layer.enabled,
+            "settings": SettingsIO.to_dict(how),
+        })
+    return "%s/%s" % [_packing.get_settings().normal_green_down, JSON.stringify(parts)]
 
 
 ## The settings that decide what the sheet looks like, as one string.
@@ -4354,8 +4851,9 @@ func _write_packed_sheet(destination: String) -> void:
             return
         written.append(table)
 
-    if settings != null and _packing.sanitise_normals(settings.normals) \
-            != IWPacking.NormalMode.DISABLED:
+    # Asked of the stack rather than of a setting: a generator switched off is one that
+    # contributes nothing, and a stack of nothing but those writes no map at all.
+    if _packing != null and _normals_wanted():
         var map := _write_normal_map(destination)
         if map.is_empty():
             _report_sheet_written(written, "the normal map")

@@ -72,6 +72,31 @@ void scharr_at(const float *field, int64_t at, int64_t stride, double &r_gx, dou
     r_gy = (3.0 * (a20 - a00) + 10.0 * (a21 - a01) + 3.0 * (a22 - a02)) / 32.0;
 }
 
+// The smallest z a packed normal is read back with.
+//
+// The slope is z divided into x and y, so a pixel that has been written facing all the way
+// over is a division by nothing. Nothing this addon generates gets there, but a map loaded
+// from somewhere else can.
+constexpr double MIN_Z = 0.001;
+
+// A packed normal read back out as a direction.
+void unpack_normal(const uint8_t *px, double &r_x, double &r_y, double &r_z) {
+    r_x = px[0] / 255.0 * 2.0 - 1.0;
+    r_y = px[1] / 255.0 * 2.0 - 1.0;
+    r_z = iw::maxf(px[2] / 255.0 * 2.0 - 1.0, MIN_Z);
+}
+
+// A direction written back as a colour, renormalised on the way. Alpha is left alone.
+void pack_direction(double x, double y, double z, uint8_t *out) {
+    const double length = iw::maxf(std::sqrt(x * x + y * y + z * z), MIN_Z);
+    out[0] = static_cast<uint8_t>(
+            iw::roundi(iw::clampf(x / length * 0.5 + 0.5, 0.0, 1.0) * 255.0));
+    out[1] = static_cast<uint8_t>(
+            iw::roundi(iw::clampf(y / length * 0.5 + 0.5, 0.0, 1.0) * 255.0));
+    out[2] = static_cast<uint8_t>(
+            iw::roundi(iw::clampf(z / length * 0.5 + 0.5, 0.0, 1.0) * 255.0));
+}
+
 // The largest of the three channel differences, each 0 to 1.
 //
 // The largest rather than the sum, so three differences too small to see cannot add up to
@@ -366,6 +391,112 @@ Ref<Image> IWStageKernels::normal_from_brightness(
                 pack_normal(dhdx, dhdy, green_down, dst + (row + x) * 4);
             }
         }
+    }
+
+    return Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, out);
+}
+
+Ref<Image> IWStageKernels::combine_normals(
+        const Ref<Image> &base,
+        const Ref<Image> &detail,
+        const PackedInt32Array &rects,
+        int64_t mode,
+        double strength) {
+    ERR_FAIL_COND_V(base.is_null(), Ref<Image>());
+    if (detail.is_null() || base->is_empty() || detail->is_empty() || rects.is_empty()) {
+        return base;
+    }
+
+    const int64_t width = base->get_width();
+    const int64_t height = base->get_height();
+    // Two maps of different sizes describe different sheets, and there is no answer to what
+    // merging them would mean. The base is what the stack had, so it is what carries on.
+    if (detail->get_width() != width || detail->get_height() != height) {
+        return base;
+    }
+
+    const PackedByteArray under = sheet_bytes(base);
+    const PackedByteArray over = sheet_bytes(detail);
+
+    // Started as a copy of the base, so the space between sprites keeps whatever it had
+    // there and the alpha comes through untouched.
+    PackedByteArray out = under;
+    uint8_t *dst = out.ptrw();
+    const uint8_t *lower = under.ptr();
+    const uint8_t *upper = over.ptr();
+
+    const bool reorients = mode == 1;
+    const int32_t *rect_ptr = rects.ptr();
+    for (int64_t n = 0; n + 3 < rects.size(); n += 4) {
+        int64_t rx = 0;
+        int64_t ry = 0;
+        int64_t rw = 0;
+        int64_t rh = 0;
+        if (!rect_at(rect_ptr, n, width, height, rx, ry, rw, rh)) {
+            continue;
+        }
+
+        for (int64_t y = 0; y < rh; y++) {
+            const int64_t row = (ry + y) * width + rx;
+            for (int64_t x = 0; x < rw; x++) {
+                const int64_t at = (row + x) * 4;
+                double bx = 0.0;
+                double by = 0.0;
+                double bz = 0.0;
+                unpack_normal(lower + at, bx, by, bz);
+                double dx = 0.0;
+                double dy = 0.0;
+                double dz = 0.0;
+                unpack_normal(upper + at, dx, dy, dz);
+
+                // The detail as a slope, dialled down by the strength. Done before either
+                // mode runs, which is what makes a strength of zero mean "the base exactly"
+                // in both of them rather than in only one.
+                const double sx = dx / dz * strength;
+                const double sy = dy / dz * strength;
+
+                if (reorients) {
+                    // The detail turned to face the way the base does, so it follows a
+                    // curve instead of lying flat across it.
+                    const double length = std::sqrt(sx * sx + sy * sy + 1.0);
+                    const double ux = -sx / length;
+                    const double uy = -sy / length;
+                    const double uz = 1.0 / length;
+                    const double tz = bz + 1.0;
+                    const double reach = (bx * ux + by * uy + tz * uz) / tz;
+                    pack_direction(bx * reach - ux, by * reach - uy, tz * reach - uz,
+                            dst + at);
+                } else {
+                    // Slopes added. See the header: the same answer as adding the two height
+                    // surfaces and working the normal out once.
+                    pack_direction(bx / bz + sx, by / bz + sy, 1.0, dst + at);
+                }
+            }
+        }
+    }
+
+    return Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, out);
+}
+
+Ref<Image> IWStageKernels::normal_flip_green(const Ref<Image> &map) {
+    ERR_FAIL_COND_V(map.is_null(), Ref<Image>());
+    if (map->is_empty()) {
+        return map;
+    }
+
+    const int64_t width = map->get_width();
+    const int64_t height = map->get_height();
+    PackedByteArray out = sheet_bytes(map);
+    uint8_t *dst = out.ptrw();
+
+    // [b]255 minus the byte is the exact answer rather than an approximation of it.[/b]
+    // Unpacking the value, negating it and packing it again lands on precisely this, because
+    // the two halves of the range sit a half step either side of zero rather than on it.
+    // That is also why a flat pixel comes back 127 rather than 128, which is a tilt of about
+    // a fifth of a degree.
+    const int64_t count = width * height;
+    for (int64_t i = 0; i < count; i++) {
+        dst[i * 4 + 1] = static_cast<uint8_t>(255 - dst[i * 4 + 1]);
     }
 
     return Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, out);

@@ -37,13 +37,18 @@ extends IWOperation
 ## sprite's number reads its rectangle in one fetch, instead of being told the layout some
 ## other way. See [method build_lookup_image] for the shape of it.
 ##
-## [b]A normal map can come off the same sheet.[/b] Set [member PackingSettings.normals] to
-## anything but Disabled and saving writes a third file, named the same with
-## [code]_normal.png[/code] on the end, holding which way each pixel of each sprite faces so
-## a 2D light has something to catch. Every sprite is worked out inside its own rectangle and
-## nowhere else, so nothing on the sheet can lean on whatever it was packed next to — see
-## [method build_normal_map]. The dock can show it in place of the sheet while it is being
-## tuned, which is the only way to tell whether the rounding is following the art.
+## [b]A normal map can come off the same sheet.[/b] Add anything to [member normal_layers]
+## and saving writes a third file, named the same with [code]_normal.png[/code] on the end,
+## holding which way each pixel of each sprite faces so a 2D light has something to catch.
+## Every sprite is worked out inside its own rectangle and nowhere else, so nothing on the
+## sheet can lean on whatever it was packed next to — see [method build_normal_map]. The dock
+## can show it in place of the sheet while it is being tuned, which is the only way to tell
+## whether the rounding is following the art.
+##
+## [b]The layers are a stack, not a choice.[/b] Each [IWNormalLayer] reads something different
+## about the sprite — its outline, its colours, its colour boundaries — and each builds on
+## what the ones above it made rather than replacing them, so the shape a rounded rim gives a
+## sprite and the texture its paint holds can both be in the same map.
 
 ## How the sprites are arranged.
 ##
@@ -86,58 +91,6 @@ const MODE_DESCRIPTIONS := [
     "Fills rows without sorting, so the sprites stay in the order they were found — image by image, and within an image top to bottom. Packs worst, and is the only mode where the order out means something.",
 ]
 
-## How a normal map is worked out for the sheet, if at all.
-##
-## The three that work differ in what they read. Round Edges reads the sprite's outline,
-## Brightness reads its colours, and Color Regions reads both — so they fail in different
-## places, and the art decides which is right rather than one being better than the others.
-enum NormalMode {
-    ## No normal map is written.
-    DISABLED,
-    ## Rounded off from the outline inwards, knowing nothing about what is drawn inside.
-    ROUND_EDGES,
-    ## Light and dark read as high and low.
-    BRIGHTNESS,
-    ## Rounded off from the outline and from every colour boundary inside it.
-    COLOR_REGIONS,
-    ## Handed to a trained network. Needs a model brought along; see
-    ## [member PackingSettings.normal_model_dir].
-    ##
-    ## [b]Last deliberately.[/b] It is the only mode that can be missing, and dropping the
-    ## last entry off the dropdown leaves every other index where it was.
-    NEURAL,
-}
-
-## Dropdown labels, in enum order.
-const NORMAL_LABELS := ["Disabled", "Round Edges", "Brightness", "Color Regions", "Neural"]
-
-## What each normal mode does, in enum order, for the dock to show under the dropdown.
-##
-## Kept here beside the enum for the same reason [constant MODE_DESCRIPTIONS] is: a mode
-## cannot be added without the line that explains it.
-const NORMAL_DESCRIPTIONS := [
-    "No normal map is written.",
-    "Rounds every sprite off from its outline inwards, so a flat shape reads as one that has been carved. Knows nothing about what is drawn inside the sprite, so the whole of it lifts as one lump.",
-    "Reads the sprite's own light and dark as high and low. Picks up line work and texture, and is fooled by anything painted dark that was never meant to sit low.",
-    "Rounds off from the outline and from every colour boundary inside it, so each flat area of colour lifts on its own. Made for cel-shaded art, and turns to mush on anything dithered.",
-    "Hands each sprite to a trained network. Needs a model you have converted and pointed at yourself, and is slow enough that the preview waits for Refresh.",
-]
-
-## The shape of the roll-off, from the outline inwards.
-enum NormalCurve {
-    ## A quarter circle. Steep at the rim and flat in the middle, the usual carved look.
-    ROUND,
-    ## Eased at both ends, so there is no crease where the rounding starts.
-    SOFT,
-    ## One constant slope: a flat chamfer.
-    STRAIGHT,
-    ## Curved the other way, gentle at the rim and steepening inwards, like a bowl.
-    HOLLOW,
-}
-
-## Dropdown labels, in enum order.
-const NORMAL_CURVE_LABELS := ["Round", "Soft", "Straight", "Hollow"]
-
 ## What goes on the end of the normal map's name, extension included.
 const NORMAL_SUFFIX := "_normal.png"
 
@@ -163,17 +116,17 @@ const LUT_SUFFIX := "_lut.res"
 
 var settings: PackingSettings
 
-## The network the Neural mode runs, held open across a run so a 13 MB model is not read
-## again for every sheet. Null in a build without ncnn. See [method _normal_net].
-var _net: RefCounted
-
-## Which folder [member _net] currently has open, so a changed one is noticed.
-var _open_model_dir := ""
+## The normal map generators, in the order they run. See [method build_normal_map].
+##
+## Held here rather than in the dock for the same reason [member settings] is: this is what
+## a normal map is made out of, and the dock is only where it is edited. An empty stack, or
+## one with nothing switched on, means no normal map is written at all.
+var normal_layers: Array = []
 
 ## Why the last normal map could not be made, or empty when it could.
 ##
 ## [b]Deliberately not exported.[/b] An observation about one run rather than a setting, the
-## way [member RemoveMinimumAreaSettings.removed_bounds] is — and the only mode that can
+## way [member RemoveMinimumAreaSettings.removed_bounds] is — and the only layer that can
 ## fail for a reason worth reading is the one that depends on a file the user brought.
 var normal_error := ""
 
@@ -210,10 +163,54 @@ func get_output_suffix() -> String:
     return "_packed"
 
 
-## Held once for the session, like [Rename]'s: a sheet size and an arrangement describe the
+## Held once for the batch, like [Rename]'s: a sheet size and an arrangement describe the
 ## batch, and one that changed with whichever file was highlighted would mean nothing.
+##
+## [b]This does not mean they are not saved.[/b] They go to a file of their own named for
+## the batch rather than into any one image's sidecar; see [method export_config_path].
 func settings_are_per_image() -> bool:
     return false
+
+
+## The codec, for the one constant [method export_config_path] needs off it. Preloaded
+## rather than named, because that file claims no class name of its own.
+const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
+
+## What goes on the front of the file this tab's settings are saved to.
+const EXPORT_CONFIG_PREFIX := "export_"
+
+## How much of the batch's fingerprint goes into that name, in characters.
+##
+## Sixteen hexadecimal characters is sixty-four bits. Two different sets of images landing
+## on the same name would mean one opening with the other's settings, and at sixty-four bits
+## that will not happen to anybody.
+const EXPORT_CONFIG_KEY_LENGTH := 16
+
+
+## Where this batch's export settings live: beside the images, named for which images they
+## are.
+##
+## The Export tab describes a whole list of files rather than any one of them, so it has no
+## image to put a sidecar next to. It gets a file of its own instead, keyed on what is in the
+## list, so a batch you come back to comes back with the sheet size and the normal map
+## generators you left it with.
+##
+## [b]Keyed on the file names sorted, not on the full paths.[/b] Moving the folder keeps the
+## match, and the order the files were added in is not part of what the settings describe.
+##
+## A different set of images is a different key and so a different file — adding one image to
+## a batch does not find the config the batch had without it. The old file is left where it
+## is rather than cleaned up, so putting the list back finds it again.
+static func export_config_path(sources: PackedStringArray) -> String:
+    if sources.is_empty():
+        return ""
+    var names := []
+    for path in sources:
+        names.append(path.get_file())
+    names.sort()
+    var key := "\n".join(names).sha256_text().substr(0, EXPORT_CONFIG_KEY_LENGTH)
+    return sources[0].get_base_dir().path_join("%s%s%s"
+            % [EXPORT_CONFIG_PREFIX, key, SettingsIO.SIDECAR_SUFFIX])
 
 
 ## False, because this does not turn one image into another — it turns a list of them into
@@ -262,143 +259,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "type": SettingType.BOOL,
             "tooltip": "Writes a second file beside the sheet holding where every sprite landed on\nit, named the same with %s on the end.\n\nIt is a %d-wide texture with one pixel per sprite, in the order the sprites\nwere found. That pixel's red, green, blue and alpha are the sprite's left,\ntop, width and height on the sheet, in pixels — so a shader handed a sprite\nnumber can read its rectangle in one fetch.\n\nSprite n is at x = n %% %d, y = n / %d. The file is only written when the\nsheet is saved." % [LUT_SUFFIX, LUT_WIDTH, LUT_WIDTH, LUT_WIDTH],
         },
-        {
-            "property": &"normals",
-            "label": "Normals",
-            "type": SettingType.ENUM,
-            "options": normal_labels(),
-            "tooltip": "How a normal map is worked out for the packed sheet.\n\nDisabled writes nothing. Any other mode writes the map as a file beside the\nsheet, named the same with %s on the end, and only when the sheet is saved.\n\nEvery sprite is worked out inside its own rectangle, so none of them can lean\non whatever they were packed next to." % NORMAL_SUFFIX,
-        },
-        {
-            "property": &"normal_strength",
-            "label": "Strength",
-            "type": SettingType.FLOAT,
-            "min": 0.0,
-            "max": 2.0,
-            "step": 0.01,
-            "shown_when": &"normals",
-            "shown_values": [NormalMode.ROUND_EDGES, NormalMode.COLOR_REGIONS],
-            "tooltip": "How far the rounding tips the surface over.\n\nMeasured against the roll-off distance rather than in pixels, so the slope stays\nthe same when that distance is dragged. Past about 1 the rim turns over far\nenough to face away from the light.",
-        },
-        {
-            "property": &"normal_roll_off",
-            "label": "Roll-off",
-            "type": SettingType.INT,
-            "min": 1,
-            "max": 64,
-            "step": 1,
-            "shown_when": &"normals",
-            "shown_values": [NormalMode.ROUND_EDGES, NormalMode.COLOR_REGIONS],
-            "tooltip": "How far in from the outline the rounding reaches, in pixels.\n\nPast this the sprite is flat. Small numbers read as a carved rim on a flat\nobject; numbers approaching half the sprite read as one rounded lump.",
-        },
-        {
-            "property": &"normal_curve",
-            "label": "Curve",
-            "type": SettingType.ENUM,
-            "options": NORMAL_CURVE_LABELS,
-            "shown_when": &"normals",
-            "shown_values": [NormalMode.ROUND_EDGES, NormalMode.COLOR_REGIONS],
-            "tooltip": "The shape the rounding takes from the outline inwards.\n\nRound is a quarter circle and the usual choice. Soft eases at both ends so\nthere is no crease where the rounding starts. Straight is a flat chamfer.\nHollow curves the other way, like the inside of a bowl.",
-        },
-        {
-            "property": &"normal_color_tolerance",
-            "label": "Color Tolerance",
-            "type": SettingType.FLOAT,
-            "min": 0.0,
-            "max": 1.0,
-            "step": 0.01,
-            "shown_when": &"normals",
-            "shown_values": [NormalMode.COLOR_REGIONS],
-            "tooltip": "How far apart two neighbouring colours have to be before the boundary between\nthem is rounded off too.\n\nToo low and every speck of dithering counts as a boundary, which leaves the map\nflat — run Smooth Color over the images first if that happens. Too high and only\nthe outline is left.",
-        },
-        {
-            "property": &"normal_coarse",
-            "label": "Coarse Detail",
-            "type": SettingType.FLOAT,
-            "min": 0.0,
-            "max": 16.0,
-            "step": 0.05,
-            "shown_when": &"normals",
-            "shown_values": [NormalMode.BRIGHTNESS],
-            "tooltip": "How much of the sprite's overall shading becomes shape.\n\nThis is the half that gives a sprite its large form. At zero the pass is skipped\nand only fine detail is left.\n\nThe useful numbers here run to several rather than to fractions: even a hard\npainted edge only changes brightness a little from one pixel to the next.",
-        },
-        {
-            "property": &"normal_coarse_size",
-            "label": "Coarse Size",
-            "type": SettingType.INT,
-            "min": 1,
-            "max": 32,
-            "step": 1,
-            "shown_when": &"normals",
-            "shown_values": [NormalMode.BRIGHTNESS],
-            "tooltip": "How far the coarse pass looks to decide what counts as overall shading, in\npixels.\n\nRoughly the size of the smallest thing it will still treat as form rather than\nas detail.",
-        },
-        {
-            "property": &"normal_fine",
-            "label": "Fine Detail",
-            "type": SettingType.FLOAT,
-            "min": 0.0,
-            "max": 16.0,
-            "step": 0.05,
-            "shown_when": &"normals",
-            "shown_values": [NormalMode.BRIGHTNESS],
-            "tooltip": "How much of the sprite's line work and texture becomes shape.\n\nRead from the colours as they are rather than from a blur, so it picks up single\npixels. At zero the pass is skipped.\n\nOn the same scale as Coarse Detail.",
-        },
-        {
-            "property": &"normal_green_down",
-            "label": "Green Points Down",
-            "type": SettingType.BOOL,
-            "shown_when": &"normals",
-            "shown_values": [NormalMode.ROUND_EDGES, NormalMode.BRIGHTNESS,
-                    NormalMode.COLOR_REGIONS, NormalMode.NEURAL],
-            "tooltip": "Flips the green channel, which is the one thing two engines never agree on.\n\nOff is what Godot wants. On is what DirectX and most of the tools written\naround it want. Get it wrong and everything lights from the wrong side up.",
-        },
-        {
-            "property": &"normal_model_dir",
-            "label": "Model Folder",
-            "type": SettingType.STRING,
-            "shown_when": &"normals",
-            "shown_values": [NormalMode.NEURAL],
-            "tooltip": "The folder holding the converted model, as a path.\n\nNo model ships with this addon. Convert one to ncnn's format yourself and put\nthe .param and .bin in a folder, then paste the path here — any pair will do,\nsince nothing here knows what your model is called.\n\nUntil then this mode is offered but writes nothing, and says why.",
-        },
     ]
-
-
-## The dropdown labels, less the modes this build cannot offer.
-##
-## Neural is dropped when the wrapper was left out of the build, which is the ordinary state
-## of a checkout that has not run [code]tools/build_ncnn.py[/code]. Because it is the last
-## entry, dropping it leaves every other index exactly where it was — so a settings file
-## written by a build that had it still means the same thing here.
-##
-## [b]Not dropped for the want of a model.[/b] The folder is named on a setting that only
-## shows while Neural is picked, so a mode that hid itself until a model was found could
-## never be given one.
-func normal_labels() -> Array:
-    if normal_mode_offered():
-        return NORMAL_LABELS
-    return NORMAL_LABELS.slice(0, NORMAL_LABELS.size() - 1)
-
-
-## Whether this build has the network wrapper at all.
-func normal_mode_offered() -> bool:
-    return ClassDB.class_exists(&"IWNormalNet")
-
-
-## Whether the neural mode has everything it needs to actually run.
-func normal_model_available() -> bool:
-    var net := _normal_net()
-    return net != null and net.has_model(settings.normal_model_dir)
-
-
-## The wrapper, made once and held. Null in a build without ncnn.
-##
-## Reached by name rather than named in source, for the reason [Upscale] gives: a class this
-## build may not have would take the whole addon down at parse time.
-func _normal_net() -> RefCounted:
-    if _net == null and normal_mode_offered():
-        _net = ClassDB.instantiate(&"IWNormalNet")
-    return _net
 
 
 ## [param mode] pulled back into range, for a value that came from a hand-edited file
@@ -410,30 +271,6 @@ static func sanitise_mode(mode: int) -> int:
 ## What [param mode] does, in a couple of sentences.
 static func describe_mode(mode: int) -> String:
     return MODE_DESCRIPTIONS[sanitise_mode(mode)]
-
-
-## [param mode] pulled back into range, and back to Disabled when it is one this build cannot
-## run at all.
-##
-## A missing model is not that: Neural stays selected without one, so the folder can still be
-## named and the reason shown. What it cannot do is produce a map, and
-## [method build_normal_map] says so.
-func sanitise_normals(mode: int) -> int:
-    if mode < 0 or mode >= NORMAL_LABELS.size():
-        return NormalMode.DISABLED
-    if mode == NormalMode.NEURAL and not normal_mode_offered():
-        return NormalMode.DISABLED
-    return mode
-
-
-## What [param mode] does, in a couple of sentences.
-func describe_normals(mode: int) -> String:
-    return NORMAL_DESCRIPTIONS[sanitise_normals(mode)]
-
-
-## [param curve] pulled back into range, for a value that came from a hand-edited file.
-static func sanitise_curve(curve: int) -> int:
-    return curve if curve >= 0 and curve < NORMAL_CURVE_LABELS.size() else NormalCurve.ROUND
 
 
 # --- The packing --------------------------------------------------------
@@ -758,44 +595,55 @@ static func normal_path_for(sheet_path: String) -> String:
     return sheet_path.get_basename() + NORMAL_SUFFIX
 
 
-## The normal map for a finished sheet, or null when normals are switched off.
+## The normal map for a finished sheet, or null when nothing is generating one.
 ##
 ## [param rects] is where every sprite landed, one [Rect2i] each in the order they were
 ## found — the same array the lookup table is built from.
 ##
 ## [b]Worked out from the finished sheet rather than sprite by sprite on the way in.[/b]
 ## The sheet and the rectangles are both already in hand once a packing has run, so changing
-## the strength costs one pass over pixels that exist rather than a run of every open image's
+## a strength costs one pass over pixels that exist rather than a run of every open image's
 ## stack to arrive back at the same sprites. It is also what makes the dock's preview of this
 ## affordable at all.
 ##
 ## Every sprite is worked out inside its own rectangle and nowhere else, which is what stops
 ## one leaning on whatever it was packed next to. The space between them is left flat.
+##
+## [b]Each layer builds on what the ones above it left.[/b] The first one switched on is the
+## base and its own combine settings mean nothing; every one after it is merged in the way
+## its card says. A layer that cannot make a map is stepped over rather than failing the
+## stack, and says why through [member normal_error].
+##
+## [b]Green is flipped once, here, rather than by each layer.[/b] Every generator writes
+## green pointing up, so combining never has to reason about which way round its inputs were
+## written.
 func build_normal_map(sheet: Image, rects: Array) -> Image:
     normal_error = ""
-    var mode := sanitise_normals(settings.normals)
-    if mode == NormalMode.DISABLED or sheet == null or sheet.is_empty():
+    if sheet == null or sheet.is_empty():
         return null
     var flat := _flat_rects(rects)
     if flat.is_empty():
         return null
-    match mode:
-        NormalMode.BRIGHTNESS:
-            return IWStageKernels.normal_from_brightness(sheet, flat,
-                    settings.normal_coarse_size, settings.normal_coarse,
-                    settings.normal_fine, settings.normal_green_down)
-        NormalMode.COLOR_REGIONS:
-            return IWStageKernels.normal_from_shape(sheet, flat, settings.normal_roll_off,
-                    sanitise_curve(settings.normal_curve), settings.normal_strength,
-                    settings.normal_color_tolerance, settings.normal_green_down)
-        NormalMode.NEURAL:
-            return _neural_normal_map(sheet, flat)
-        _:
-            # Round Edges is the shape kernel with the colour test switched off, which a
-            # tolerance below zero is what says.
-            return IWStageKernels.normal_from_shape(sheet, flat, settings.normal_roll_off,
-                    sanitise_curve(settings.normal_curve), settings.normal_strength,
-                    -1.0, settings.normal_green_down)
+
+    var out: Image = null
+    for layer: IWNormalLayer in normal_layers:
+        if not layer.enabled:
+            continue
+        var map := layer.generate(sheet, flat)
+        if map == null:
+            if not layer.last_error.is_empty():
+                normal_error = layer.last_error
+            continue
+        if out == null:
+            out = map
+        else:
+            var how: NormalLayerSettings = layer.get_settings()
+            out = IWStageKernels.combine_normals(out, map, flat, how.combine_mode,
+                    how.combine_strength)
+
+    if out != null and settings.normal_green_down:
+        out = IWStageKernels.normal_flip_green(out)
+    return out
 
 
 ## The rectangles flattened to x, y, w, h per sprite, which is the shape the kernels take.
@@ -812,27 +660,3 @@ func _flat_rects(rects: Array) -> PackedInt32Array:
         flat[i * 4 + 2] = rect.size.x
         flat[i * 4 + 3] = rect.size.y
     return flat
-
-
-## The map the network makes, or null with [member normal_error] set to why not.
-##
-## The model is opened once and left open — reading it again per sheet would cost more than
-## the run does. A changed folder is what reopens it.
-func _neural_normal_map(sheet: Image, flat: PackedInt32Array) -> Image:
-    normal_error = ""
-    var net := _normal_net()
-    if net == null:
-        normal_error = "This build has no network to run. See tools/build_ncnn.py."
-        return null
-
-    if not net.is_open() or _open_model_dir != settings.normal_model_dir:
-        net.close()
-        _open_model_dir = settings.normal_model_dir
-        if net.open(settings.normal_model_dir) != OK:
-            normal_error = net.get_last_error()
-            return null
-
-    var map: Image = net.process(sheet, flat, settings.normal_green_down)
-    if map == null:
-        normal_error = net.get_last_error()
-    return map
