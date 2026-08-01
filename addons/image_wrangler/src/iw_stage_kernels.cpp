@@ -112,7 +112,8 @@ void IWStageKernels::_bind_methods() {
             D_METHOD("remove_minimum_area", "ctx", "min_area"),
             &IWStageKernels::remove_minimum_area);
     ClassDB::bind_static_method("IWStageKernels",
-            D_METHOD("exclude_tiles", "ctx", "points", "active", "mode"),
+            D_METHOD("exclude_tiles", "ctx", "points", "active", "mode",
+                    "alpha_threshold"),
             &IWStageKernels::exclude_tiles);
 }
 

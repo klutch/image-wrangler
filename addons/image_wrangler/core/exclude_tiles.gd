@@ -8,7 +8,9 @@ extends IWStackOperation
 ## the odd frame that came out wrong, or the six you actually wanted out of forty.
 ##
 ## [b]A tile here is a sprite there.[/b] The labelling is the one Packing lifts its sprites
-## with, so anything held back is exactly one sprite that would have gone on the sheet.
+## with, so anything held back is exactly one sprite that would have gone on the sheet —
+## until [member ExcludeTilesSettings.alpha_threshold] is moved off the half the packer
+## uses, which is the one thing here that can part the two.
 ##
 ## [b]Every tile gets an outline, not only the chosen ones.[/b] A tile this removes is no
 ## longer in the picture to be clicked, so the outline is what you click instead. Under
@@ -85,6 +87,15 @@ func get_settings_schema() -> Array[Dictionary]:
             "type": SettingType.ENUM,
             "options": SELECTION_LABELS,
             "tooltip": "What happens to the tiles you pick.\n\nExclude Selected removes the ones you picked and lets the rest through.\nInclude Selected does the opposite and keeps only those.\n\nEvery tile is outlined either way, including the ones that have been removed,\nso a tile is always there to be clicked again. The ones on their way out are\ndrawn faded.",
+        },
+        {
+            "property": &"alpha_threshold",
+            "label": "Alpha Threshold",
+            "type": SettingType.FLOAT,
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.01,
+            "tooltip": "How solid a pixel has to be to count as part of a tile rather than as the soft\nedge round one.\n\nHalf is what the packer uses, so at half a tile here is exactly a sprite there.\nRaise it to split a shape its faint pixels are holding together, lower it to\njoin shapes that only their edges touch. A fully clear pixel is never part of a\ntile, however low this goes.\n\nMoving it changes which tiles exist, so a pick can land on a different one.",
         },
         {
             "property": &"hidden_opacity",
@@ -200,7 +211,8 @@ func process_context(ctx: IWPipelineContext) -> void:
         active.append(1 if pick.enabled else 0)
 
     var report := IWStageKernels.exclude_tiles(
-            ctx, points, active, sanitise_mode(settings.mode))
+            ctx, points, active, sanitise_mode(settings.mode),
+            clampf(settings.alpha_threshold, 0.0, 1.0))
     _absorb(report)
     if not report_progress(0.8):
         return

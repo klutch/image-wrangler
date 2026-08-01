@@ -10,6 +10,13 @@ extends Resource
 ## Which of [enum ExcludeTiles.TileSelection] is in force.
 @export var mode: int = 0
 
+## How solid a pixel has to be to count as part of a tile rather than as fringe round one.
+##
+## Half is what Packing uses, so at half a tile here is exactly a sprite there. Raise it to
+## split a shape its soft pixels are holding together; lower it to join shapes that only
+## their fringes touch.
+@export var alpha_threshold: float = 0.5
+
 ## How strongly a held-back tile is laid back over the preview, from clear to solid.
 ##
 ## Only asked for under Include Selected, where nearly everything is held back and the
@@ -86,5 +93,6 @@ func pick_on(tile: int) -> int:
 func duplicate_for_new_image() -> ExcludeTilesSettings:
     var copy := ExcludeTilesSettings.new()
     copy.mode = mode
+    copy.alpha_threshold = alpha_threshold
     copy.hidden_opacity = hidden_opacity
     return copy

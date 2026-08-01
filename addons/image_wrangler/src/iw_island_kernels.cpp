@@ -210,8 +210,9 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
 
 // ExcludeTiles.process_context.
 //
-// [b]The tiles are the packer's sprites.[/b] iw::label_islands unchanged, so anything held
-// back here is exactly one sprite Packing would have lifted out.
+// [b]The tiles are the packer's sprites.[/b] iw::label_islands, so at the threshold both
+// take by default anything held back here is exactly one sprite Packing would have lifted
+// out. That is what the caller gives up by moving `alpha_threshold`.
 //
 // [b]Labelled before anything is removed.[/b] That is what keeps the picks stable: a tile
 // this took out is still in the alpha handed to the next run, so the point that chose it
@@ -226,13 +227,15 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
 //
 // `points` is x,y interleaved, one pair per pick. `active` is one byte per pick, zero for
 // one that is switched off; empty or short means the rest count. `mode` is 0 to remove
-// what was picked and 1 to remove everything else. Returns the rectangle of every tile
-// found under "bounds", and under "picked" which tile each point landed on, or -1.
-// "hidden" and "hidden_rect" carry a picture of what was taken, for the preview to ghost
-// back in.
+// what was picked and 1 to remove everything else. `alpha_threshold` is how solid a pixel
+// has to be to count as part of a tile rather than as fringe round one, and moving it off
+// iw::SOLID_ALPHA is what parts this stage's tiles from Packing's sprites. Returns the
+// rectangle of every tile found under "bounds", and under "picked" which tile each point
+// landed on, or -1. "hidden" and "hidden_rect" carry a picture of what was taken, for the
+// preview to ghost back in.
 Dictionary IWStageKernels::exclude_tiles(
         const Ref<IWPipelineContext> &ctx, const PackedInt32Array &points,
-        const PackedByteArray &active, int64_t mode) {
+        const PackedByteArray &active, int64_t mode, double alpha_threshold) {
     Dictionary out;
     ERR_FAIL_COND_V(ctx.is_null(), out);
     out["bounds"] = PackedInt32Array();
@@ -249,7 +252,8 @@ Dictionary IWStageKernels::exclude_tiles(
 
     const int64_t width = ctx->width;
     const int64_t height = ctx->height;
-    const iw::Islands found = iw::label_islands(visible.ptr(), width, height);
+    const iw::Islands found = iw::label_islands(
+            visible.ptr(), width, height, alpha_threshold);
     const int64_t count = found.count();
 
     // A tile is its rectangle grown by TILE_MARGIN. Keying above this leaves a halo of
