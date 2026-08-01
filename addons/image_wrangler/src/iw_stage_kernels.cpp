@@ -112,8 +112,8 @@ void IWStageKernels::_bind_methods() {
             D_METHOD("remove_minimum_area", "ctx", "min_area"),
             &IWStageKernels::remove_minimum_area);
     ClassDB::bind_static_method("IWStageKernels",
-            D_METHOD("select_tiles", "ctx", "points", "mode"),
-            &IWStageKernels::select_tiles);
+            D_METHOD("exclude_tiles", "ctx", "points", "active", "mode"),
+            &IWStageKernels::exclude_tiles);
 }
 
 // Rasterises this stage's shapes and folds them into whatever is already declared.

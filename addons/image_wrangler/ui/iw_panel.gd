@@ -10,7 +10,7 @@ const ColorList := preload("res://addons/image_wrangler/ui/iw_color_list.gd")
 const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd")
 const HSVList := preload("res://addons/image_wrangler/ui/iw_hsv_list.gd")
 const BrushList := preload("res://addons/image_wrangler/ui/iw_brush_list.gd")
-const TileSelectorList := preload("res://addons/image_wrangler/ui/iw_tile_selector.gd")
+const ExcludeTilesList := preload("res://addons/image_wrangler/ui/iw_exclude_tiles.gd")
 const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
 const StackView := preload("res://addons/image_wrangler/ui/iw_stack_view.gd")
 const HistoryView := preload("res://addons/image_wrangler/ui/iw_history_view.gd")
@@ -42,7 +42,7 @@ const OPERATIONS := [
     {"script": "res://addons/image_wrangler/core/smooth_blocks.gd", "icon": &"Grid"},
     {"script": "res://addons/image_wrangler/core/smooth_color.gd", "icon": &"Color"},
     {"script": "res://addons/image_wrangler/core/smooth_halos.gd", "icon": &"Gradient"},
-    {"script": "res://addons/image_wrangler/core/tile_selector.gd", "icon": &"ListSelect"},
+    {"script": "res://addons/image_wrangler/core/exclude_tiles.gd", "icon": &"ListSelect"},
 ]
 
 
@@ -1883,8 +1883,8 @@ func _bind_pick_control(control: Control) -> void:
         brush.draw_toggled.connect(_on_pick_toggled.bind(brush))
         brush.strokes_changed.connect(_on_setting_changed)
         brush.selection_changed.connect(_on_selection_changed.bind(brush))
-    elif control is TileSelectorList:
-        var tiles := control as TileSelectorList
+    elif control is ExcludeTilesList:
+        var tiles := control as ExcludeTilesList
         tiles.pick_toggled.connect(_on_pick_toggled.bind(tiles))
         tiles.tiles_changed.connect(_on_setting_changed)
         tiles.selection_changed.connect(_on_selection_changed.bind(tiles))
@@ -2758,7 +2758,7 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
     # Three of them want a rectangle — one takes the pixels inside it, one the colours,
     # one the area to recolour. A polygon is built corner by corner and wants neither.
     _preview.region_pick = source is IslandPicker or source is ColorList \
-            or source is HSVList or source is TileSelectorList
+            or source is HSVList or source is ExcludeTilesList
     # And the brush wants the whole drag rather than either end of it.
     _preview.stroke_pick = source is BrushList
     if source is BrushList:
@@ -2769,7 +2769,7 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
         _set_status("Click to place corners. Right-click or Escape closes the region.")
     elif source is HSVList:
         _set_status("Drag a rectangle in the preview to add it to the list.")
-    elif source is TileSelectorList:
+    elif source is ExcludeTilesList:
         _set_status("Click a tile to pick it, or drag over several. Clicking a picked one lets it go.")
     else:
         _set_status("Drag a region in the preview to add it to the list, or click one pixel.")
@@ -2806,7 +2806,7 @@ func _on_region_picked(region: Rect2i) -> void:
         _pick_color_region(region)
     elif _pick_target is HSVList:
         _pick_hsv_region(region)
-    elif _pick_target is TileSelectorList:
+    elif _pick_target is ExcludeTilesList:
         _pick_tiles(region)
 
 
@@ -2815,7 +2815,7 @@ func _on_region_picked(region: Rect2i) -> void:
 ## Toggling rather than adding, because a tile the operation has removed is not in the
 ## picture any more and clicking its outline again is the only way to get it back.
 func _pick_tiles(region: Rect2i) -> void:
-    var changed := (_pick_target as TileSelectorList).toggle_tiles(region)
+    var changed := (_pick_target as ExcludeTilesList).toggle_tiles(region)
     if changed <= 0:
         return
     _set_status("%d tile%s changed." % [changed, "" if changed == 1 else "s"])
@@ -3132,7 +3132,7 @@ func _region_owner(index: int) -> Array:
 ## switched off.
 ##
 ## A mark belonging to a stage that is not running has to read as not running, whatever the
-## row that owns it says about itself. Tile Selector needs this most, since its flag says
+## row that owns it says about itself. Exclude Tiles needs this most, since its flag says
 ## which tiles were picked rather than which are switched on and so carries no room for
 ## the answer.
 func _live_flags(flags: PackedByteArray, live: bool) -> PackedByteArray:
@@ -3163,7 +3163,7 @@ func _update_overlays() -> void:
     var brush_stroke: BrushStroke = null
 
     # Pictures of what an operation held back rather than removed outright, so a tile a
-    # Tile Selector is keeping off the sheet still reads as the thing it was.
+    # Exclude Tiles is keeping off the sheet still reads as the thing it was.
     var ghosts := []
     var ghost_regions := []
 
@@ -3254,9 +3254,9 @@ func _update_overlays() -> void:
             var stage: IWStackOperation = entry.stage
             if stage == null or not stage.enabled or (only != null and stage != only):
                 continue
-            if not (stage is TileSelector):
+            if not (stage is ExcludeTiles):
                 continue
-            var settings: TileSelectorSettings = stage.get_settings()
+            var settings: ExcludeTilesSettings = stage.get_settings()
             if settings == null or settings.hidden_image == null:
                 continue
             ghosts.append(settings.hidden_image)

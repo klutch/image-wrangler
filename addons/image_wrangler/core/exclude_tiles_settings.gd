@@ -1,13 +1,13 @@
-@tool
-class_name TileSelectorSettings
+﻿@tool
+class_name ExcludeTilesSettings
 extends Resource
 
-## Every tunable of [TileSelector].
+## Every tunable of [ExcludeTiles].
 
 ## The tiles the user chose, each as a point on one.
 @export var picks: Array[TilePick] = []
 
-## Which of [enum TileSelector.TileSelection] is in force.
+## Which of [enum ExcludeTiles.TileSelection] is in force.
 @export var mode: int = 0
 
 
@@ -33,20 +33,27 @@ var hidden_rect := Rect2i()
 ## picture and the outlines say the same thing.
 func survives(tile: int) -> bool:
     var picked := chose(tile)
-    return not picked if mode == TileSelector.TileSelection.EXCLUDE_SELECTED else picked
+    return not picked if mode == ExcludeTiles.TileSelection.EXCLUDE_SELECTED else picked
 
 
-## Whether the tile numbered [param tile] was chosen.
+## Whether the tile numbered [param tile] was chosen by a pick that is switched on.
+##
+## A switched-off pick still knows its tile, so this asks about the switch as well — it is
+## what [method survives] is read through, and a pick that is not acting must not change
+## what the preview says about the picture.
 func chose(tile: int) -> bool:
     if tile < 0:
         return false
     for pick in picks:
-        if pick != null and pick.tile == tile:
+        if pick != null and pick.enabled and pick.tile == tile:
             return true
     return false
 
 
 ## The pick sitting on tile [param tile], or -1.
+##
+## Switched off or not, because this is what clicking a tile is answered with: a tile
+## already in the list should let go of its pick rather than gain a second one.
 func pick_on(tile: int) -> int:
     if tile < 0:
         return -1
@@ -62,7 +69,7 @@ func pick_on(tile: int) -> int:
 ## The picks are points on one image, so they go rather than travelling: a tile at those
 ## coordinates in the next image is a different tile, and carrying them over would hold
 ## back something nobody chose.
-func duplicate_for_new_image() -> TileSelectorSettings:
-    var copy := TileSelectorSettings.new()
+func duplicate_for_new_image() -> ExcludeTilesSettings:
+    var copy := ExcludeTilesSettings.new()
     copy.mode = mode
     return copy

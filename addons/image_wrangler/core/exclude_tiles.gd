@@ -1,5 +1,5 @@
 @tool
-class_name TileSelector
+class_name ExcludeTiles
 extends IWStackOperation
 
 ## Holds back whole objects, by picking them off the preview.
@@ -37,19 +37,19 @@ enum TileSelection {
 
 const SELECTION_LABELS := ["Exclude Selected", "Include Selected"]
 
-var settings: TileSelectorSettings
+var settings: ExcludeTilesSettings
 
 
 func _init() -> void:
-    settings = TileSelectorSettings.new()
+    settings = ExcludeTilesSettings.new()
 
 
 func get_operation_name() -> String:
-    return "Tile Selector"
+    return "Exclude Tiles"
 
 
 func get_operation_id() -> StringName:
-    return &"tile_selector"
+    return &"exclude_tiles"
 
 
 func get_tint() -> Color:
@@ -61,15 +61,15 @@ func get_settings() -> Resource:
 
 
 func set_settings(new_settings: Resource) -> void:
-    var typed := new_settings as TileSelectorSettings
+    var typed := new_settings as ExcludeTilesSettings
     if typed == null:
-        push_error("Image Wrangler: TileSelector was handed settings of the wrong type.")
+        push_error("Image Wrangler: ExcludeTiles was handed settings of the wrong type.")
         return
     settings = typed
 
 
 func make_settings() -> Resource:
-    return TileSelectorSettings.new()
+    return ExcludeTilesSettings.new()
 
 
 ## Nothing. Choosing what goes on a sheet should not be the thing naming the file.
@@ -88,7 +88,7 @@ func get_settings_schema() -> Array[Dictionary]:
         },
         {
             "property": &"picks",
-            "type": SettingType.TILE_SELECTOR,
+            "type": SettingType.EXCLUDE_TILES,
             "tooltip": "The tiles you picked. Press Pick, then click one on the preview or drag a\nrectangle over several.\n\nA tile is one whole object, the same one the packer would lift out as a\nsprite. Picking stores the spot you clicked rather than the tile's number, so\nit keeps hold of the same tile when something above this changes.",
         },
     ]
@@ -115,13 +115,31 @@ func prerequisite_note(ctx: IWPipelineContext) -> String:
     return "Reading the source's own transparency."
 
 
+## What it wants outlined: one box round every tile this is holding back, so each ghosted
+## tile has an edge of its own rather than sharing one box with whatever else went.
+##
+## Read off [member ExcludeTilesSettings.found_bounds], so there is nothing to draw until a
+## run has found some tiles, and nothing again once this stage stops taking any.
+func marked_regions() -> Array[Rect2i]:
+    var out: Array[Rect2i] = []
+    if settings == null:
+        return out
+    for tile in settings.found_bounds.size():
+        if settings.survives(tile):
+            continue
+        var rect: Rect2i = settings.found_bounds[tile]
+        if rect.size.x > 0 and rect.size.y > 0:
+            out.append(rect)
+    return out
+
+
 ## Pulls the mode into range, which the schema cannot: it clamps numbers and this is a
 ## choice.
 func clamp_settings_to_schema(target: Resource = null) -> void:
     super(target)
     if target == null:
         target = get_settings()
-    var typed := target as TileSelectorSettings
+    var typed := target as ExcludeTilesSettings
     if typed != null:
         typed.mode = sanitise_mode(typed.mode)
 
@@ -134,7 +152,7 @@ static func sanitise_mode(mode: int) -> int:
 ##
 ## Positional, and abandoned when the counts disagree, the same way the island picker's is.
 func absorb_run_report(from: IWStackOperation) -> void:
-    var source := from as TileSelector
+    var source := from as ExcludeTiles
     if source == null or source.settings == null or settings == null:
         return
     settings.found_bounds = source.settings.found_bounds.duplicate()
@@ -162,14 +180,23 @@ func process_context(ctx: IWPipelineContext) -> void:
 
     # Flattened out of the Resources they are kept in, the way every stage hands its lists
     # down: reading a TilePick per pixel is a property lookup the kernel cannot afford.
+    #
+    # [b]Every pick goes down, switched off ones included[/b], with a second list saying
+    # which of them count. A switched-off pick still has to be told which tile it is
+    # sitting on — that is what keeps its row naming a real tile and what stops clicking
+    # that tile adding a second pick for it — and dropping it here would shift every pick
+    # after it out of step with what the kernel reports back.
     var points := PackedInt32Array()
+    var active := PackedByteArray()
     for pick in settings.picks:
         if pick == null:
             continue
         points.append(pick.point.x)
         points.append(pick.point.y)
+        active.append(1 if pick.enabled else 0)
 
-    var report := IWStageKernels.select_tiles(ctx, points, sanitise_mode(settings.mode))
+    var report := IWStageKernels.exclude_tiles(
+            ctx, points, active, sanitise_mode(settings.mode))
     _absorb(report)
     if not report_progress(0.8):
         return

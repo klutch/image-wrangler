@@ -221,7 +221,7 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
     return bounds;
 }
 
-// TileSelector.process_context.
+// ExcludeTiles.process_context.
 //
 // [b]The tiles are the packer's sprites.[/b] iw::label_islands unchanged, so anything held
 // back here is exactly one sprite Packing would have lifted out.
@@ -230,12 +230,21 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
 // this took out is still in the alpha handed to the next run, so the point that chose it
 // still lands on it and it still gets an outline to click.
 //
-// `points` is x,y interleaved, one pair per pick. `mode` is 0 to remove what was picked
-// and 1 to remove everything else. Returns the rectangle of every tile found under
-// "bounds", and under "picked" which tile each point landed on, or -1. "hidden" and
-// "hidden_rect" carry a picture of what was taken, for the preview to ghost back in.
-Dictionary IWStageKernels::select_tiles(
-        const Ref<IWPipelineContext> &ctx, const PackedInt32Array &points, int64_t mode) {
+// [b]A switched-off pick is resolved but does not choose.[/b] Every point is told which
+// tile it landed on, whether or not `active` says it counts, so the dock can keep naming
+// the tile under a pick the user has switched off and bring it back without a second
+// click. Dropping those points before the call would have been the other way to do it,
+// and it would have shifted every pick after them out of step with "picked".
+//
+// `points` is x,y interleaved, one pair per pick. `active` is one byte per pick, zero for
+// one that is switched off; empty or short means the rest count. `mode` is 0 to remove
+// what was picked and 1 to remove everything else. Returns the rectangle of every tile
+// found under "bounds", and under "picked" which tile each point landed on, or -1.
+// "hidden" and "hidden_rect" carry a picture of what was taken, for the preview to ghost
+// back in.
+Dictionary IWStageKernels::exclude_tiles(
+        const Ref<IWPipelineContext> &ctx, const PackedInt32Array &points,
+        const PackedByteArray &active, int64_t mode) {
     Dictionary out;
     ERR_FAIL_COND_V(ctx.is_null(), out);
     out["bounds"] = PackedInt32Array();
@@ -279,8 +288,15 @@ Dictionary IWStageKernels::select_tiles(
         return out;
     }
 
+    // Only the switched-on picks choose a tile. The rest have already been resolved above
+    // and reported, which is all they are for while they are off.
+    const int64_t active_count = active.size();
+    const uint8_t *active_ptr = active_count > 0 ? active.ptr() : nullptr;
     std::vector<uint8_t> chosen(static_cast<size_t>(count), 0);
     for (int64_t p = 0; p < pick_count; p++) {
+        if (active_ptr != nullptr && p < active_count && active_ptr[p] == 0) {
+            continue;
+        }
         if (picked_ptr[p] >= 0) {
             chosen[static_cast<size_t>(picked_ptr[p])] = 1;
         }

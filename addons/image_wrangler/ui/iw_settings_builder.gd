@@ -12,7 +12,7 @@ const ColorList := preload("res://addons/image_wrangler/ui/iw_color_list.gd")
 const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd")
 const HSVList := preload("res://addons/image_wrangler/ui/iw_hsv_list.gd")
 const BrushList := preload("res://addons/image_wrangler/ui/iw_brush_list.gd")
-const TileSelector := preload("res://addons/image_wrangler/ui/iw_tile_selector.gd")
+const ExcludeTilesList := preload("res://addons/image_wrangler/ui/iw_exclude_tiles.gd")
 
 ## Left indent applied to the contents of a named group.
 const GROUP_INDENT := 8
@@ -100,8 +100,8 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
                 control = _build_brush_list(operation, property)
             IWOperation.SettingType.READOUT:
                 control = _build_readout(operation, label, setting)
-            IWOperation.SettingType.TILE_SELECTOR:
-                control = _build_tile_selector(operation, property)
+            IWOperation.SettingType.EXCLUDE_TILES:
+                control = _build_exclude_tiles(operation, property)
             _:
                 control = _build_number(operation, property, label, setting, false, on_changed)
 
@@ -241,8 +241,8 @@ static func _build_brush_list(operation: IWOperation, property: StringName) -> C
 
 ## Left unwired here for the same reason the other five are: picking needs the
 ## preview, and only the dock can reach it.
-static func _build_tile_selector(operation: IWOperation, property: StringName) -> Control:
-    var list := TileSelector.new()
+static func _build_exclude_tiles(operation: IWOperation, property: StringName) -> Control:
+    var list := ExcludeTilesList.new()
     list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     list.setup(operation, property)
     return list

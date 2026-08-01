@@ -45,7 +45,7 @@ enum SettingType {
     READOUT,
     ## A list of whole objects the user picks off the preview. The property must hold
     ## an Array of [TilePick].
-    TILE_SELECTOR,
+    EXCLUDE_TILES,
 }
 
 

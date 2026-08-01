@@ -1,7 +1,7 @@
 @tool
 extends VBoxContainer
 
-## The Tile Selector's rows: a Pick button and one row per tile chosen.
+## The Exclude Tiles rows: a Pick button and one row per tile chosen.
 ##
 ## Modelled on [IWIslandPicker], and simpler in one way and stranger in another. Simpler
 ## because a pick carries nothing to tune — it is a point on a tile and that is all.
@@ -63,6 +63,7 @@ func _build() -> void:
     _list.configure(false)
     _list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _list.row_selected.connect(func(_index: int) -> void: selection_changed.emit())
+    _list.enabled_toggled.connect(_on_enabled_toggled)
     _list.remove_requested.connect(_remove_pick)
     add_child(_list)
 
@@ -192,10 +193,26 @@ func set_pick_active(enabled: bool) -> void:
 
 ## Resolved through the operation every time, so swapping the settings Resource for
 ## another image needs no re-pointing here.
-func _settings() -> TileSelectorSettings:
+func _settings() -> ExcludeTilesSettings:
     if _operation == null:
         return null
-    return _operation.get_settings() as TileSelectorSettings
+    return _operation.get_settings() as ExcludeTilesSettings
+
+
+## Switches one pick on or off, which is a change to the result and so asks for a run.
+##
+## The pick stays where it is either way. It keeps working out which tile it sits on while
+## switched off, so it can be brought back without being clicked again.
+func _on_enabled_toggled(index: int, on: bool) -> void:
+    var settings := _settings()
+    if settings == null or index < 0 or index >= settings.picks.size():
+        return
+    var pick: TilePick = settings.picks[index]
+    if pick == null or pick.enabled == on:
+        return
+    pick.enabled = on
+    _refresh()
+    tiles_changed.emit()
 
 
 func _remove_pick(index: int) -> void:
@@ -243,10 +260,12 @@ func _row_data(index: int, pick: TilePick) -> Dictionary:
             # The pick is still the user's even when the run found nothing under it, so
             # the row stays and says so rather than disappearing.
             text = "%d.  (%d, %d)   not found" % [index + 1, pick.point.x, pick.point.y]
+    # The tick is the pick's own switch, not whether the run found anything under it. A
+    # pick that landed on nothing says so in its text instead.
     return {
         "color": Color(0.55, 0.75, 1.0),
         "text": text,
-        "enabled": pick != null and pick.has_tile(),
+        "enabled": pick != null and pick.enabled,
     }
 
 
