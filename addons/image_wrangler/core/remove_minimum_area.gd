@@ -26,13 +26,6 @@ extends IWStackOperation
 
 var settings: RemoveMinimumAreaSettings
 
-## Where this stage removed something on the last run, one rectangle per shape it took.
-##
-## An observation about one run rather than part of what the stage is, so it is not on the
-## settings and never reaches the sidecar. It comes home from the copy that ran through
-## [method absorb_run_report].
-var removed_bounds: Array[Rect2i] = []
-
 
 func _init() -> void:
     settings = RemoveMinimumAreaSettings.new()
@@ -87,6 +80,13 @@ func get_settings_schema() -> Array[Dictionary]:
             "text_from": &"area_text",
             "tooltip": "What the size above works out to, which is what a shape is actually measured\nagainst.",
         },
+        {
+            "property": &"area_root",
+            "label": "Removed",
+            "type": SettingType.READOUT,
+            "text_from": &"removed_text",
+            "tooltip": "How many separate shapes the last run took out. Each one is outlined on the\npreview, so what disappeared can still be seen.",
+        },
     ]
 
 
@@ -114,14 +114,15 @@ func prerequisite_note(ctx: IWPipelineContext) -> String:
 
 ## What it wants outlined: the shapes it took, so what disappeared can still be seen.
 func marked_regions() -> Array[Rect2i]:
-    return removed_bounds
+    return settings.removed_bounds if settings != null else [] as Array[Rect2i]
 
 
 func absorb_run_report(from: IWStackOperation) -> void:
     var source := from as RemoveMinimumArea
-    if source == null:
+    if source == null or source.settings == null or settings == null:
         return
-    removed_bounds = source.removed_bounds.duplicate()
+    settings.removed_bounds = source.settings.removed_bounds.duplicate()
+    settings.has_run = source.settings.has_run
 
 
 ## [b]No [method IWPipelineContext.compute_coverage] afterwards[/b], for the reason
@@ -131,7 +132,8 @@ func absorb_run_report(from: IWStackOperation) -> void:
 ## erased. [method IWPipelineContext.rebuild_nearest] is still owed, so the hole bleeds its
 ## colour from what is left rather than from what has gone.
 func process_context(ctx: IWPipelineContext) -> void:
-    removed_bounds.clear()
+    settings.removed_bounds = []
+    settings.has_run = true
     if settings.area_root <= 0:
         return
     if not report_progress(0.05):
@@ -144,7 +146,7 @@ func process_context(ctx: IWPipelineContext) -> void:
     @warning_ignore("integer_division")
     var found := bounds.size() / 4
     for n in found:
-        removed_bounds.append(Rect2i(
+        settings.removed_bounds.append(Rect2i(
                 bounds[n * 4], bounds[n * 4 + 1], bounds[n * 4 + 2], bounds[n * 4 + 3]))
     if not report_progress(0.8):
         return

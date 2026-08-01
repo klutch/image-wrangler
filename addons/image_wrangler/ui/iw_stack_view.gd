@@ -32,6 +32,10 @@ signal stack_changed
 ## Emitted when a value inside one entry's form changed.
 signal setting_changed
 
+## Emitted when an entry is folded or unfolded, which is worth saving but changes nothing
+## about the picture.
+signal fold_changed
+
 ## Emitted after entries are rebuilt, so the dock can rewire what it cached about
 ## their controls.
 signal entries_rebuilt
@@ -368,14 +372,25 @@ func _on_pick(index: int) -> void:
 
 ## Appends [param stage] to the stack and rebuilds.
 func add_stage(stage: IWStackOperation) -> void:
-    _entries.append({"uid": _take_uid(), "stage": stage, "entry": null})
+    _entries.append(_record(stage))
     rebuild()
+
+
+## One row's bookkeeping, and the place a stage is given its colour.
+##
+## Handed out here rather than taken by the stage itself, because the dock builds a
+## throwaway copy of every stage on every run and a colour taken at construction would move
+## each time. The number belongs to the row, so it follows the stage as it is dragged.
+func _record(stage: IWStackOperation) -> Dictionary:
+    var uid := _take_uid()
+    if stage != null:
+        stage.tint = IWStackOperation.tint_for(uid)
+    return {"uid": uid, "stage": stage, "entry": null}
 
 
 ## Puts [param stage] into the stack at [param at], pushing whatever was there down.
 func insert_stage(stage: IWStackOperation, at: int) -> void:
-    _entries.insert(clampi(at, 0, _entries.size()),
-            {"uid": _take_uid(), "stage": stage, "entry": null})
+    _entries.insert(clampi(at, 0, _entries.size()), _record(stage))
     rebuild()
     stack_changed.emit()
 
@@ -403,7 +418,7 @@ func _on_entry_menu(entry: Control, above: bool) -> void:
 func set_stages(stages: Array) -> void:
     _entries.clear()
     for stage: IWStackOperation in stages:
-        _entries.append({"uid": _take_uid(), "stage": stage, "entry": null})
+        _entries.append(_record(stage))
     rebuild()
 
 
@@ -452,6 +467,7 @@ func rebuild() -> void:
         entry.reorder_requested.connect(_on_reorder)
         entry.enabled_toggled.connect(func(_e: Control, _on: bool) -> void: stack_changed.emit())
         entry.setting_changed.connect(func(_e: Control) -> void: setting_changed.emit())
+        entry.fold_changed.connect(func(_e: Control) -> void: fold_changed.emit())
         entry.menu_requested.connect(_on_entry_menu)
         record["entry"] = entry
         if form_builder.is_valid():

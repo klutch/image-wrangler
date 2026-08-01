@@ -49,33 +49,39 @@ var enabled := true
 ## inside them.
 var folded := false
 
-## How far round the colour wheel each stage steps from the one before it, and the one
-## strength they are all drawn at.
+## The colours a stage's marks are drawn in, ten hues evenly round the wheel.
 ##
-## The golden ratio's fractional part, the same walk the packed tiles take: going round a
-## circle by it never repeats and never bunches, so two stages added one after the other
-## cannot come out the same colour. Pale and bright, since these sit over the edges the
-## tool exists to judge.
-const TINT_HUE_STEP := 0.6180339887
-const TINT_SATURATION := 0.45
-const TINT_VALUE := 1.0
-
-## Which colour the next stage built takes.
-static var _tints_taken := 0
+## Written out rather than worked out, so a stage keeps the same colour from one run to the
+## next: anything rolled per instance changes every time the dock builds a throwaway copy
+## of the stack, which it does on every run.
+##
+## Each is a unit-length colour — the three channels squared add to one — so no hue arrives
+## brighter than another and none of them is washed out. Ten is enough that a stack has to
+## be ten deep before two share.
+const TINTS: Array[Color] = [
+    Color(1.000, 0.000, 0.000),
+    Color(0.857, 0.514, 0.000),
+    Color(0.625, 0.781, 0.000),
+    Color(0.196, 0.981, 0.000),
+    Color(0.000, 0.928, 0.371),
+    Color(0.000, 0.707, 0.707),
+    Color(0.000, 0.371, 0.928),
+    Color(0.196, 0.000, 0.981),
+    Color(0.625, 0.000, 0.781),
+    Color(0.857, 0.000, 0.514),
+]
 
 ## The colour this stage's marks are drawn in on the preview.
 ##
-## Taken when the stage is built and kept, so it follows the stage as it is dragged up and
-## down the stack and survives switching image and coming back. Not saved: it tells one
-## stage from another within a session, which is all it is for.
-var tint: Color = _take_tint()
+## Handed out by the stack when the entry is made, so it follows the stage as it is dragged
+## up and down and stays put across a run. White until then, which is what every mark used
+## to be — a stage running outside the dock has nothing to be told apart from.
+var tint := Color.WHITE
 
 
-## The next colour off the wheel.
-static func _take_tint() -> Color:
-    var hue := fmod(float(_tints_taken) * TINT_HUE_STEP, 1.0)
-    _tints_taken += 1
-    return Color.from_hsv(hue, TINT_SATURATION, TINT_VALUE)
+## The colour belonging to the entry numbered [param uid].
+static func tint_for(uid: int) -> Color:
+    return TINTS[absi(uid) % TINTS.size()]
 
 ## The pipeline running this stage, or null when it is running on its own.
 ##

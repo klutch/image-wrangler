@@ -30,6 +30,12 @@ signal reorder_requested(from_uid: int, to_uid: int, above: bool)
 ## Emitted when anything in the settings form changes.
 signal setting_changed(entry: Control)
 
+## Emitted when the entry is folded or unfolded.
+##
+## Its own signal rather than [signal setting_changed], because a fold changes no pixels:
+## it is worth saving, and it must not enter the undo history or start another run.
+signal fold_changed(entry: Control)
+
 ## Emitted on a right-click over this entry. [param above] is which half was clicked, the
 ## same rule a drop uses, so a paste lands where the pointer said rather than at the end.
 signal menu_requested(entry: Control, above: bool)
@@ -54,6 +60,13 @@ const HANDLE_WIDTH := 22
 const PANEL_LIGHTEN := 0.06
 const PANEL_RADIUS := 5
 const PANEL_PADDING := 4
+
+## How far the card is carried towards its operation's own colour.
+##
+## Half way, so the tie between a card and the marks it owns is obvious at a glance without
+## the column turning into ten flat blocks of colour. The marks themselves are drawn in the
+## colour undiluted, which is what keeps them readable over the art.
+const PANEL_TINT_MIX := 0.15
 
 ## The operation this entry stands for. Its settings are the live ones.
 var stage: IWStackOperation
@@ -142,8 +155,12 @@ func _apply_panel_style() -> void:
     if has_theme_color(&"base_color", &"Editor"):
         base = get_theme_color(&"base_color", &"Editor")
 
+    var lifted := base.lightened(PANEL_LIGHTEN)
+    if stage != null:
+        lifted = lifted.lerp(stage.tint, PANEL_TINT_MIX)
+
     var box := StyleBoxFlat.new()
-    box.bg_color = base.lightened(PANEL_LIGHTEN)
+    box.bg_color = lifted
     box.set_corner_radius_all(PANEL_RADIUS)
     box.set_content_margin_all(PANEL_PADDING)
     add_theme_stylebox_override(&"panel", box)
@@ -197,14 +214,13 @@ func _build() -> void:
     _title.focus_mode = Control.FOCUS_NONE
     _title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
     _title.tooltip_text = "Show or hide these settings."
-    # Written straight onto the operation, and nothing is emitted. A fold changes no
-    # pixels, so it must not enter the undo history or start another run — it rides the
-    # next save any real edit asks for.
+    # Written straight onto the operation, which is where the sidecar picks it up.
     _title.toggled.connect(func(pressed: bool) -> void:
         _body.visible = pressed
         if stage != null:
             stage.folded = not pressed
-        _apply_fold_arrow())
+        _apply_fold_arrow()
+        fold_changed.emit(self))
     _title.theme_changed.connect(_apply_fold_arrow)
     _title.gui_input.connect(_on_title_input)
     header.add_child(_title)

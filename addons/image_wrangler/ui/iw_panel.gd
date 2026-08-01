@@ -1335,6 +1335,7 @@ func _build_operation_column() -> Control:
     _stack_view.form_builder = _build_entry_form
     _stack_view.stack_changed.connect(_on_stack_changed)
     _stack_view.setting_changed.connect(_on_setting_changed)
+    _stack_view.fold_changed.connect(_on_fold_changed)
     _stack_view.entries_rebuilt.connect(_on_entries_rebuilt)
     _stack_view.copy_requested.connect(_on_copy_stack)
     _stack_view.paste_requested.connect(_on_paste_stack)
@@ -1699,7 +1700,7 @@ func _on_remove_pressed() -> void:
         _file_list.select(next)
         _on_file_selected(next)
     else:
-        _preview.set_image(null)
+        _blank_preview()
         _clear_settings_context()
         _set_status("No image selected.")
         _detail_label.text = ""
@@ -1720,11 +1721,29 @@ func _on_clear_pressed() -> void:
     _source_image = null
     _result_image = null
     _refresh_file_list()
-    _preview.set_image(null)
+    _blank_preview()
     _clear_settings_context()
     _set_status("No image selected.")
     _detail_label.text = ""
     _update_controls()
+
+
+## Leaves the preview showing nothing at all.
+##
+## Every channel, not only the picture. A packed sheet outlives the files it was made
+## from, since packing hangs on to what it built, and clearing the image alone would leave
+## it on screen with nothing behind it — and the marks would sit over the empty
+## checkerboard describing an image that has gone.
+func _blank_preview() -> void:
+    _forget_packed_sheet()
+    _upscale_image = null
+    _upscale_source = null
+    _preview.set_image(null)
+    _preview.set_original(null)
+    _preview.set_tile_bounds([])
+    _preview.set_markers([] as Array[Rect2i], -1)
+    _preview.set_polygons([], -1, -1)
+    _push_brush_overlay(null)
 
 
 func _on_file_selected(index: int) -> void:
@@ -1892,6 +1911,18 @@ func _on_stack_changed() -> void:
         _schedule_preview()
     else:
         _set_status("Stack changed. Press Refresh to update the preview.")
+
+
+## An entry was folded or unfolded.
+##
+## Written and nothing more. A fold moves no pixels, so it must not enter the undo history
+## or start another run — it only has to reach the sidecar, so the stack is still tidy when
+## the image is opened again.
+func _on_fold_changed() -> void:
+    if not _is_image_mode(_mode):
+        return
+    _store_stack(_current_path())
+    _schedule_autosave()
 
 
 ## Writes what the stack view now holds back into this image's saved stack.
@@ -3091,6 +3122,21 @@ func _region_owner(index: int) -> Array:
 ## into the joined list means nothing unless it is offset by whatever was drawn before
 ## its owner, and only one control's selection is shown at a time. See
 ## [member _overlay_owner].
+## A control's own on-and-off flags, with every one dropped when the entry holding it is
+## switched off.
+##
+## A mark belonging to a stage that is not running has to read as not running, whatever the
+## row that owns it says about itself. Tile Selector needs this most, since its flag says
+## which tiles were picked rather than which are switched on and so carries no room for
+## the answer.
+func _live_flags(flags: PackedByteArray, live: bool) -> PackedByteArray:
+    if live:
+        return flags
+    var out := PackedByteArray()
+    out.resize(flags.size())
+    return out
+
+
 func _update_overlays() -> void:
     var islands: Array[Rect2i] = []
     var island_flags := PackedByteArray()
@@ -3118,6 +3164,7 @@ func _update_overlays() -> void:
         for entry: Control in _stack_view.entries():
             var stage: IWStackOperation = entry.stage
             var tint := stage.tint if stage != null else Color.WHITE
+            var live := stage != null and stage.enabled
             for control: Control in entry.pick_controls():
                 if control is IslandPicker:
                     var picker := control as IslandPicker
@@ -3125,7 +3172,7 @@ func _update_overlays() -> void:
                     if picker == _overlay_owner and picker.selected_index() >= 0:
                         selected_island = islands.size() + picker.selected_index()
                     islands.append_array(own)
-                    island_flags.append_array(picker.get_enabled_flags())
+                    island_flags.append_array(_live_flags(picker.get_enabled_flags(), live))
                     island_flooded.append_array(picker.get_flooded_flags())
                     for _i in own.size():
                         island_tints.append(tint)
@@ -3139,7 +3186,7 @@ func _update_overlays() -> void:
                     if hsv == _overlay_owner and hsv.selected_index() >= 0:
                         selected_island = islands.size() + hsv.selected_index()
                     islands.append_array(own_rects)
-                    island_flags.append_array(hsv.get_enabled_flags())
+                    island_flags.append_array(_live_flags(hsv.get_enabled_flags(), live))
                     for _i in own_rects.size():
                         island_flooded.append(1)
                         island_tints.append(tint)
@@ -3153,7 +3200,7 @@ func _update_overlays() -> void:
                     if list.draft_index() >= 0:
                         draft_region = offset + list.draft_index()
                     regions.append_array(own_regions)
-                    region_flags.append_array(list.get_enabled_flags())
+                    region_flags.append_array(_live_flags(list.get_enabled_flags(), live))
                     for _i in own_regions.size():
                         region_tints.append(tint)
                 elif control is BrushList:
@@ -3450,6 +3497,10 @@ func _absorb_run_report(worker: IWOperation) -> void:
         return
     for i in live.size():
         (live[i] as IWStackOperation).absorb_run_report(pipeline.stages[i])
+    # A run is the only thing that moves a readout describing what the run found, and no
+    # setting changed, so nothing else would ask the forms to say it again.
+    for entry: Control in _stack_view.entries():
+        SettingsBuilder.refresh_visibility(entry.stage, entry.settings_box())
 
 
 ## What the status line calls the run: how many stages actually did anything.
