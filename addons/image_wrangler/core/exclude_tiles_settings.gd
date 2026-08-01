@@ -10,6 +10,22 @@ extends Resource
 ## Which of [enum ExcludeTiles.TileSelection] is in force.
 @export var mode: int = 0
 
+## How strongly a held-back tile is laid back over the preview, from clear to solid.
+##
+## Only asked for under Include Selected, where nearly everything is held back and the
+## faint default can leave too little of the picture to work against. Exclude Selected
+## keeps the preview's own strength.
+@export var hidden_opacity: float = 0.2
+
+
+## Whether Exclude Selected is the mode, which is what hides [member hidden_opacity].
+##
+## A property rather than a method because the form hides a control by reading one off
+## the settings.
+var excluding_selected: bool:
+    get:
+        return mode != ExcludeTiles.TileSelection.INCLUDE_SELECTED
+
 
 ## Every tile the last run found, in the order it found them.
 ##
@@ -70,4 +86,5 @@ func pick_on(tile: int) -> int:
 func duplicate_for_new_image() -> ExcludeTilesSettings:
     var copy := ExcludeTilesSettings.new()
     copy.mode = mode
+    copy.hidden_opacity = hidden_opacity
     return copy

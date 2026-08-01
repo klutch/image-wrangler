@@ -87,6 +87,16 @@ func get_settings_schema() -> Array[Dictionary]:
             "tooltip": "What happens to the tiles you pick.\n\nExclude Selected removes the ones you picked and lets the rest through.\nInclude Selected does the opposite and keeps only those.\n\nEvery tile is outlined either way, including the ones that have been removed,\nso a tile is always there to be clicked again. The ones on their way out are\ndrawn faded.",
         },
         {
+            "property": &"hidden_opacity",
+            "label": "Hidden Opacity",
+            "hidden_when": &"excluding_selected",
+            "type": SettingType.FLOAT,
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.01,
+            "tooltip": "How strongly the tiles on their way out are laid back over the preview.\n\nUnder Include Selected nearly every tile is held back, so how faint they are\ndecides whether the preview reads as the few tiles you kept or as the whole\nsheet. A preview setting only — it never reaches what gets written out.",
+        },
+        {
             "property": &"picks",
             "type": SettingType.EXCLUDE_TILES,
             "tooltip": "The tiles you picked. Press Pick, then click one on the preview or drag a\nrectangle over several.\n\nA tile is one whole object, the same one the packer would lift out as a\nsprite. Picking stores the spot you clicked rather than the tile's number, so\nit keeps hold of the same tile when something above this changes.",

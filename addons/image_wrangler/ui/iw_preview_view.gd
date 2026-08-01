@@ -88,7 +88,8 @@ const MARKER_ALPHA := 0.6
 const MARKER_SELECTED_ALPHA := 1.0
 const MARKER_DISABLED_ALPHA := 0.27
 
-## How much of a held-back tile is laid back over the result.
+## How much of a held-back tile is laid back over the result, where the operation that
+## held it back does not say.
 ##
 ## Faint enough that nothing here can be mistaken for part of the picture, and strong
 ## enough to say which tile it was rather than merely that something is missing.
@@ -398,10 +399,11 @@ var _marker_flooded := PackedByteArray()
 ## where an operation gave none, which falls back to white.
 var _marker_tints := PackedColorArray()
 
-## Pictures of what an operation held back, laid faintly over the result, and where each
-## one sits on the image.
+## Pictures of what an operation held back, laid faintly over the result, where each one
+## sits on the image, and how strongly each is laid over it.
 var _ghosts: Array[Texture2D] = []
 var _ghost_regions: Array[Rect2i] = []
+var _ghost_alphas := PackedFloat32Array()
 var _selected_marker := -1
 
 ## Where each packed tile sits on the sheet, in image coordinates, and the colour its
@@ -611,9 +613,15 @@ func set_markers(
 ##
 ## [param images] and [param regions] run alongside each other, one pair per operation with
 ## something to show. Pass empty arrays to clear them.
-func set_ghosts(images: Array, regions: Array) -> void:
+##
+## [param alphas] runs alongside them too, saying how strongly each is laid over the
+## result. Short or empty where an operation gave none, which falls back to
+## [constant GHOST_ALPHA].
+func set_ghosts(images: Array, regions: Array,
+        alphas := PackedFloat32Array()) -> void:
     _ghosts.clear()
     _ghost_regions.clear()
+    _ghost_alphas.clear()
     for i in mini(images.size(), regions.size()):
         var image: Image = images[i]
         var region: Rect2i = regions[i]
@@ -621,6 +629,7 @@ func set_ghosts(images: Array, regions: Array) -> void:
             continue
         _ghosts.append(ImageTexture.create_from_image(image))
         _ghost_regions.append(region)
+        _ghost_alphas.append(alphas[i] if i < alphas.size() else GHOST_ALPHA)
     if _canvas != null:
         _canvas.queue_redraw()
 
@@ -1471,9 +1480,12 @@ func _draw_ghosts() -> void:
     if not markers_visible:
         return
     for i in _ghosts.size():
+        var alpha: float = _ghost_alphas[i] if i < _ghost_alphas.size() else GHOST_ALPHA
+        if alpha <= 0.0:
+            continue
         _canvas.draw_texture_rect(
                 _ghosts[i], _image_rect(_ghost_regions[i]), false,
-                Color(1, 1, 1, GHOST_ALPHA))
+                Color(1, 1, 1, alpha))
 
 
 ## [b]A single picked pixel draws nothing at all until a run has reported.[/b] It used to

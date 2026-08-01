@@ -3166,6 +3166,7 @@ func _update_overlays() -> void:
     # Exclude Tiles is keeping off the sheet still reads as the thing it was.
     var ghosts := []
     var ghost_regions := []
+    var ghost_alphas := PackedFloat32Array()
 
     if _is_image_mode(_mode):
         # Walked entry by entry rather than straight down _pick_controls, which is the
@@ -3261,10 +3262,13 @@ func _update_overlays() -> void:
                 continue
             ghosts.append(settings.hidden_image)
             ghost_regions.append(settings.hidden_rect)
+            # Only Include Selected offers the slider, so only it gets to answer this.
+            ghost_alphas.append(PreviewView.GHOST_ALPHA if settings.excluding_selected
+                    else settings.hidden_opacity)
 
     _preview.set_markers(islands, selected_island, island_flags, island_flooded, island_tints)
     _preview.set_polygons(regions, selected_region, draft_region, region_flags, region_tints)
-    _preview.set_ghosts(ghosts, ghost_regions)
+    _preview.set_ghosts(ghosts, ghost_regions, ghost_alphas)
     _push_brush_overlay(brush_stroke)
 
 
