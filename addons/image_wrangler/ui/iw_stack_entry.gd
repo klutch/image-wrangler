@@ -40,9 +40,6 @@ signal fold_changed(entry: Control)
 ## same rule a drop uses, so a paste lands where the pointer said rather than at the end.
 signal menu_requested(entry: Control, above: bool)
 
-## Emitted when this entry is clicked, asking the stack to make it the selected one.
-signal selected_requested(entry: Control)
-
 ## Indent of the settings form under its header, matching what a folded group used.
 const INDENT := 8
 
@@ -359,20 +356,7 @@ func _apply_fold_arrow() -> void:
 
 ## Right-clicks anywhere on the card itself: the padding, the gaps, the note.
 func _gui_input(event: InputEvent) -> void:
-    _offer_select(event)
     _offer_menu(event, self)
-
-
-## A left press anywhere this hears about points the stack at this entry.
-##
-## Not accepted, so the press carries on to whatever it landed on: clicking the title still
-## folds, and clicking the handle still starts a drag. Selecting is a thing that happens as
-## well as the click rather than instead of it.
-func _offer_select(event: InputEvent) -> void:
-    var button := event as InputEventMouseButton
-    if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_LEFT:
-        return
-    selected_requested.emit(self)
 
 
 ## Right-clicks on the title, which is a [Button] and would otherwise swallow them.
@@ -381,7 +365,6 @@ func _offer_select(event: InputEvent) -> void:
 ## broken. The form below is deliberately not forwarded — a right-click on a slider
 ## belongs to the slider.
 func _on_title_input(event: InputEvent) -> void:
-    _offer_select(event)
     _offer_menu(event, _title)
 
 

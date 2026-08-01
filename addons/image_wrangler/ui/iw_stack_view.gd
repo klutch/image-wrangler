@@ -468,7 +468,6 @@ func rebuild() -> void:
         entry.setting_changed.connect(func(_e: Control) -> void: setting_changed.emit())
         entry.fold_changed.connect(func(_e: Control) -> void: fold_changed.emit())
         entry.menu_requested.connect(_on_entry_menu)
-        entry.selected_requested.connect(_on_entry_selected)
         record["entry"] = entry
         if form_builder.is_valid():
             form_builder.call(record["stage"], entry.settings_box(), entry, record["uid"])
@@ -478,6 +477,28 @@ func rebuild() -> void:
 
     _settle_selection()
     entries_rebuilt.emit()
+
+
+## A press anywhere inside an entry points the stack at it, whatever it landed on.
+##
+## Read here rather than on the entries, because a press on a slider, a list row or a
+## button never reaches the entry holding it — the control takes it, and every one of them
+## would have to be wired up again on every rebuild. This sees the press before any of them
+## do and only reads where it was, so nothing is taken away from whatever the click was
+## actually for.
+func _input(event: InputEvent) -> void:
+    var button := event as InputEventMouseButton
+    if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_LEFT:
+        return
+    for record: Dictionary in _entries:
+        var entry: Control = record["entry"]
+        if entry == null or not is_instance_valid(entry) or not entry.is_visible_in_tree():
+            continue
+        # Asked of the entry itself, so the position and the rectangle are in the same
+        # space however the dock is nested.
+        if entry.get_global_rect().has_point(entry.get_global_mouse_position()):
+            select_uid(record["uid"])
+            return
 
 
 ## Whether operations may be added at all.
@@ -531,13 +552,6 @@ func _paint_selection() -> void:
         var entry: Control = record["entry"]
         if entry != null and is_instance_valid(entry):
             entry.set_selected(record["uid"] == _selected_uid)
-
-
-func _on_entry_selected(entry: Control) -> void:
-    for record: Dictionary in _entries:
-        if record["entry"] == entry:
-            select_uid(record["uid"])
-            return
 
 
 ## Copies each row's fold back onto its operation, so a rebuild does not open them all.
