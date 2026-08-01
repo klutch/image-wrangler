@@ -226,6 +226,8 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
 // [b]A tile is its whole rectangle.[/b] Everything inside a doomed tile's box goes,
 // whatever its alpha, which is what the outlines and the picking already mean by a tile.
 // Erasing only the labelled pixels leaves the unlabelled fringe behind as a faint rim.
+// A pick is answered the same way, by the rectangle it lands in rather than by the pixel
+// under it, so the empty parts of a box count as the tile just as the outline says.
 //
 // [b]A switched-off pick is still resolved.[/b] Every point is told which tile it landed
 // on whether or not `active` counts it, so the dock keeps naming the tile under it.
@@ -233,7 +235,8 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
 // `points` is x,y interleaved, one pair per pick. `active` is one byte per pick, zero for
 // one that is switched off; empty or short means the rest count. `mode` is 0 to remove
 // what was picked and 1 to remove everything else. Returns the rectangle of every tile
-// found under "bounds", and under "picked" which tile each point landed on, or -1.
+// found under "bounds", and under "picked" which tile's rectangle each point landed in,
+// or -1.
 // "hidden" and "hidden_rect" carry a picture of what was taken, for the preview to ghost
 // back in.
 Dictionary IWStageKernels::exclude_tiles(
@@ -358,9 +361,14 @@ Dictionary IWStageKernels::exclude_tiles(
     }
     out["bounds"] = bounds;
 
-    // Which tile each pick landed on. Out-of-range points, and points on nothing, resolve
-    // to -1 and are reported as such rather than dropped — the row is still the user's and
-    // the dock says so by greying it.
+    // Which tile each pick landed in, by rectangle rather than by labelled pixel. The
+    // rectangle is what the preview outlines and what this stage takes, so a click anywhere
+    // inside one means that tile — including the gaps a shape leaves in its own box, which
+    // a diagonal or a joined pair has plenty of. No two rectangles overlap by now, so the
+    // first that contains the point is the only one that can.
+    //
+    // Points off the image, and points in no rectangle, resolve to -1 and are reported as
+    // such rather than dropped — the row is still the user's and the dock says so.
     PackedInt32Array picked;
     const int64_t pick_count = points.size() / 2;
     picked.resize(pick_count);
@@ -370,11 +378,16 @@ Dictionary IWStageKernels::exclude_tiles(
         const int64_t x = point_ptr[p * 2];
         const int64_t y = point_ptr[p * 2 + 1];
         picked_ptr[p] = -1;
-        if (x < 0 || y < 0 || x >= width || y >= height || count <= 0) {
+        if (x < 0 || y < 0 || x >= width || y >= height) {
             continue;
         }
-        const int32_t island = found.label[static_cast<size_t>(y * width + x)];
-        picked_ptr[p] = island >= 0 ? tile_of[static_cast<size_t>(island)] : -1;
+        for (int64_t n = 0; n < count; n++) {
+            if (x >= tile_min_x[n] && x <= tile_max_x[n]
+                    && y >= tile_min_y[n] && y <= tile_max_y[n]) {
+                picked_ptr[p] = static_cast<int32_t>(n);
+                break;
+            }
+        }
     }
     out["picked"] = picked;
 
