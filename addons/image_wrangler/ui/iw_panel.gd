@@ -3998,10 +3998,15 @@ func _schedule_packing_normals() -> void:
     # Null while the dock is being built, exactly as the packing timer is.
     if _mode != Mode.PACKING or _shutting_down or _packing_normal_debounce == null:
         return
-    # The network is seconds rather than milliseconds, so a stack with one switched on stands
-    # down from following a setting the way the others do. Refresh is what runs it, the way
-    # it is for an upscale too big to preview.
-    if _normals_need_network():
+    # The network is seconds rather than milliseconds, so a stack that would have to run one
+    # stands down from following a setting the way the others do. Refresh is what runs it,
+    # the way it is for an upscale too big to preview.
+    #
+    # [b]Only until it has run once.[/b] The map it makes is kept against the sheet it was
+    # made from, so once there is one to hand back every other layer goes on following its
+    # sliders — a Round Edges roll-off under a Neural layer is a pass over pixels that exist,
+    # whatever is above it.
+    if _packing != null and _packing.normals_need_run(_packing_image, _packing_rects):
         _set_packing_status("Normals changed. Press Refresh to run the network.")
         return
     _packing_normal_debounce.start()
@@ -4013,16 +4018,6 @@ func _normals_wanted() -> bool:
         return false
     for layer: IWNormalLayer in _packing.normal_layers:
         if layer.enabled:
-            return true
-    return false
-
-
-## Whether anything in the stack that is switched on runs the network.
-func _normals_need_network() -> bool:
-    if _packing == null:
-        return false
-    for layer: IWNormalLayer in _packing.normal_layers:
-        if layer.enabled and layer.get_operation_id() == &"normal_neural":
             return true
     return false
 

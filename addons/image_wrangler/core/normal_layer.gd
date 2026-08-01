@@ -77,6 +77,18 @@ func generate(_sheet: Image, _rects: PackedInt32Array) -> Image:
     return null
 
 
+## Whether making this layer's map would take long enough that the preview should wait to be
+## asked rather than following a setting.
+##
+## [code]false[/code] for the three that read the pixels directly: they are a pass over the
+## sheet, which is what the whole stack is worth putting on a debounce for. The one that runs
+## a network answers this against what it already has in hand — see
+## [method NormalNeural.is_expensive] — so a stack goes back to being live the moment there
+## is a map to reuse.
+func is_expensive(_sheet: Image, _rects: PackedInt32Array) -> bool:
+    return false
+
+
 ## The settings rows for this layer's card: how it joins the layer above, then its own.
 ##
 ## [b]Not overridden by the generators.[/b] They write [method own_schema] instead, so the

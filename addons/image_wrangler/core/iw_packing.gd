@@ -646,6 +646,26 @@ func build_normal_map(sheet: Image, rects: Array) -> Image:
     return out
 
 
+## Whether working the map out for [param sheet] now would mean waiting on something slow.
+##
+## True while a layer that runs a network has nothing in hand for this sheet, and false once
+## it has — so the dock can follow a slider again the moment the expensive part is done, and
+## a change to a layer below the network costs nothing but the pass it is worth.
+##
+## Asked of the stack rather than of the ids in it, so a second slow layer would be answered
+## by the same question rather than by another special case here.
+func normals_need_run(sheet: Image, rects: Array) -> bool:
+    if sheet == null or sheet.is_empty():
+        return false
+    var flat := _flat_rects(rects)
+    if flat.is_empty():
+        return false
+    for layer: IWNormalLayer in normal_layers:
+        if layer.enabled and layer.is_expensive(sheet, flat):
+            return true
+    return false
+
+
 ## The rectangles flattened to x, y, w, h per sprite, which is the shape the kernels take.
 ##
 ## A rectangle of no area is left in place rather than dropped, so what comes out is still

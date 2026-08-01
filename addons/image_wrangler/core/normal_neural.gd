@@ -4,10 +4,16 @@ extends IWNormalLayer
 
 ## Hands each sprite to a trained network.
 ##
-## Needs a model you have converted and pointed at yourself, and is slow enough that the
-## preview waits for Refresh rather than following a setting. Failures come back through
+## Needs a model you have converted and pointed at yourself, and takes seconds where the
+## other three take milliseconds. Failures come back through
 ## [member IWNormalLayer.last_error] rather than as an empty map with no explanation, since
 ## this is the one layer that can fail for a reason you can do something about.
+##
+## [b]The map it makes is kept and handed back again.[/b] Nothing below this layer in the
+## stack changes what the network would say — the sheet is the only thing it reads — so
+## dragging a Round Edges slider under it must not cost another pass. The map is worked out
+## once per sheet and reused until the sheet, the rectangles or the model folder move. See
+## [method generate] and [method is_expensive].
 
 const TINT := Color(0.78, 0.55, 1.0)
 
@@ -19,6 +25,18 @@ var _network: RefCounted
 
 ## Which folder [member _network] currently has open, so a changed one is noticed.
 var _open_model_dir := ""
+
+## The map the last run made, and what it was made from.
+##
+## [b]The sheet is held rather than named.[/b] Two sheets are the same sheet when they are
+## the same object, and holding the reference is what makes that test sound — an Image let
+## go of can have its identity handed to the next one allocated, and a map from the wrong
+## sheet is worse than a slow one. It costs the memory of one sheet, which is the same order
+## as the map beside it.
+var _made: Image
+var _made_from: Image
+var _made_rects := PackedInt32Array()
+var _made_dir := ""
 
 
 func _init() -> void:
@@ -100,10 +118,35 @@ func _net() -> RefCounted:
     return _network
 
 
+## Whether the map this layer has in hand still describes [param sheet].
+##
+## The network reads the sheet and nothing else, so those three are the whole of what could
+## make its answer wrong. A layer added, removed, reordered or retuned below this one does
+## not appear here, which is the point.
+func can_reuse(sheet: Image, rects: PackedInt32Array) -> bool:
+    return _made != null and _made_from == sheet and _made_rects == rects \
+            and _made_dir == resolved_model_dir()
+
+
+## True while the map would have to be worked out from scratch.
+##
+## What the dock reads to decide whether the preview may follow a setting or has to wait for
+## Refresh. False once there is a map to hand back, so everything downstream of this layer
+## goes back to being live.
+func is_expensive(sheet: Image, rects: PackedInt32Array) -> bool:
+    return not can_reuse(sheet, rects)
+
+
 ## The model is opened once and left open — reading it again per sheet would cost more than
 ## the run does. A changed folder is what reopens it.
+##
+## The map from the last run is handed straight back when it still describes the sheet; see
+## the class note.
 func generate(sheet: Image, rects: PackedInt32Array) -> Image:
     last_error = ""
+    if can_reuse(sheet, rects):
+        return _made
+
     var net := _net()
     if net == null:
         last_error = "This build has no network to run. See tools/build_ncnn.py."
@@ -120,6 +163,15 @@ func generate(sheet: Image, rects: PackedInt32Array) -> Image:
     var map: Image = net.process(sheet, rects, false)
     if map == null:
         last_error = net.get_last_error()
+        # What was made before is deliberately kept rather than thrown away. A folder typed
+        # wrong and then typed right again matches it once more, and the network does not
+        # have to run a second time to arrive back where it already was.
+        return null
+
+    _made = map
+    _made_from = sheet
+    _made_rects = rects
+    _made_dir = dir
     return map
 
 
