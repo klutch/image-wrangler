@@ -3163,7 +3163,7 @@ func _update_overlays() -> void:
         # colour comes from.
         for entry: Control in _stack_view.entries():
             var stage: IWStackOperation = entry.stage
-            var tint := stage.tint if stage != null else Color.WHITE
+            var tint := stage.get_tint() if stage != null else Color.WHITE
             var live := stage != null and stage.enabled
             for control: Control in entry.pick_controls():
                 if control is IslandPicker:
@@ -3226,7 +3226,7 @@ func _update_overlays() -> void:
             for _i in marked.size():
                 island_flags.append(1 if stage.enabled else 0)
                 island_flooded.append(1)
-                island_tints.append(stage.tint)
+                island_tints.append(stage.get_tint())
 
     _preview.set_markers(islands, selected_island, island_flags, island_flooded, island_tints)
     _preview.set_polygons(regions, selected_region, draft_region, region_flags, region_tints)

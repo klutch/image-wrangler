@@ -44,85 +44,97 @@ extends IWStackOperation
 ## neither undoes the other. [Denoise] moves colour rather than alpha and does not interact
 ## with it at all.
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(0.621, 0.784, 0.003)
+
+
 var settings: RemoveLinesSettings
 
 
 func _init() -> void:
-	settings = RemoveLinesSettings.new()
+    settings = RemoveLinesSettings.new()
 
 
 func get_operation_name() -> String:
-	return "Remove Lines"
+    return "Remove Lines"
 
 
 func get_operation_id() -> StringName:
-	return &"remove_lines"
+    return &"remove_lines"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:
-	return settings
+    return settings
 
 
 func set_settings(new_settings: Resource) -> void:
-	var typed := new_settings as RemoveLinesSettings
-	if typed == null:
-		push_error("Image Wrangler: RemoveLines was handed settings of the wrong type.")
-		return
-	settings = typed
+    var typed := new_settings as RemoveLinesSettings
+    if typed == null:
+        push_error("Image Wrangler: RemoveLines was handed settings of the wrong type.")
+        return
+    settings = typed
 
 
 func make_settings() -> Resource:
-	return RemoveLinesSettings.new()
+    return RemoveLinesSettings.new()
 
 
 ## Nothing, for the same reason [Denoise] names nothing: the pipeline takes its suffix
 ## from the first enabled stage that offers one, and a corrective stage that happens to
 ## sit at the top of a stack should not be the one naming the file.
 func get_output_suffix() -> String:
-	return ""
+    return ""
 
 
 func get_settings_schema() -> Array[Dictionary]:
-	return [
-		{
-			"property": &"thickness",
-			"label": "Thickness",
-			"type": SettingType.INT,
-			"min": 1,
-			"max": 16,
-			"step": 1,
-			"tooltip": "The widest structure that gets removed, in pixels. At 1 a one-pixel hairline\ngoes and a two-pixel line stays.\n\nMeasured in every direction, so a diagonal or a curve counts as much as a row\nor a column, and it makes no distinction between a line and a speck — anything\nthinner than this goes, however short it is.\n\nMeasured on the solid part of the shape, where alpha is at least a half. A\nshape that is wide but faint everywhere has no solid part, so it counts as thin\nand goes at any setting — unless it touches something that stayed, which brings\nit back with it.",
-		},
-		{
-			"property": &"detached_only",
-			"label": "Detached Only",
-			"type": SettingType.BOOL,
-			"tooltip": "Spares any shape that is thick enough somewhere, however thin the rest of it\ngets. A whisker hanging off a subject stays; a hairline lying beside it in the\ntransparency goes.\n\nThis is the usual job — debris that has nothing to do with the subject — and\nwhy it is on. Turn it off when the thin parts are themselves the problem, and\nevery run of pixels narrower than the thickness goes wherever it is, including\nthe fine detail on the subject's own edge.\n\nWith it off, a subject running off the edge of the image keeps its border: the\nsquare that measures it is allowed to sit inward. Only a structure genuinely\nthin in the image is removed there.",
-		},
-	]
+    return [
+        {
+            "property": &"thickness",
+            "label": "Thickness",
+            "type": SettingType.INT,
+            "min": 1,
+            "max": 16,
+            "step": 1,
+            "tooltip": "The widest structure that gets removed, in pixels. At 1 a one-pixel hairline\ngoes and a two-pixel line stays.\n\nMeasured in every direction, so a diagonal or a curve counts as much as a row\nor a column, and it makes no distinction between a line and a speck — anything\nthinner than this goes, however short it is.\n\nMeasured on the solid part of the shape, where alpha is at least a half. A\nshape that is wide but faint everywhere has no solid part, so it counts as thin\nand goes at any setting — unless it touches something that stayed, which brings\nit back with it.",
+        },
+        {
+            "property": &"detached_only",
+            "label": "Detached Only",
+            "type": SettingType.BOOL,
+            "tooltip": "Spares any shape that is thick enough somewhere, however thin the rest of it\ngets. A whisker hanging off a subject stays; a hairline lying beside it in the\ntransparency goes.\n\nThis is the usual job — debris that has nothing to do with the subject — and\nwhy it is on. Turn it off when the thin parts are themselves the problem, and\nevery run of pixels narrower than the thickness goes wherever it is, including\nthe fine detail on the subject's own edge.\n\nWith it off, a subject running off the edge of the image keeps its border: the\nsquare that measures it is allowed to sit inward. Only a structure genuinely\nthin in the image is removed there.",
+        },
+    ]
 
 
 ## Cheaper than the squeeze: four running-extreme sweeps and at most two floods, none of
 ## which cost anything per pixel that depends on the thickness.
 func stage_weight() -> float:
-	return 0.25
+    return 0.25
 
 
 ## Shape is not colour. See the class note.
 func needs_keying() -> bool:
-	return false
+    return false
 
 
 func establishes_keying() -> bool:
-	return false
+    return false
 
 
 ## Never an error, because there is no arrangement in which this cannot run — only one
 ## in which it is reading something the user may not have realised was there.
 func prerequisite_note(ctx: IWPipelineContext) -> String:
-	if ctx == null or ctx.has_keying or not ctx.coverage.is_empty():
-		return ""
-	return "Reading the source's own transparency."
+    if ctx == null or ctx.has_keying or not ctx.coverage.is_empty():
+        return ""
+    return "Reading the source's own transparency."
 
 
 ## [b]No [method IWPipelineContext.compute_coverage] afterwards, and that is the one
@@ -141,23 +153,23 @@ func prerequisite_note(ctx: IWPipelineContext) -> String:
 ## [method IWPipelineContext.rebuild_nearest] is still owed: the hole left behind has to
 ## bleed its colour from what is still there rather than from the line that is gone.
 func process_context(ctx: IWPipelineContext) -> void:
-	if settings.thickness <= 0:
-		return
-	if not report_progress(0.05):
-		return
+    if settings.thickness <= 0:
+        return
+    if not report_progress(0.05):
+        return
 
-	var touched := IWStageKernels.remove_lines(
-			ctx, settings.thickness, settings.detached_only)
-	if touched.is_empty():
-		report_progress(1.0)
-		return
-	if not report_progress(0.8):
-		return
+    var touched := IWStageKernels.remove_lines(
+            ctx, settings.thickness, settings.detached_only)
+    if touched.is_empty():
+        report_progress(1.0)
+        return
+    if not report_progress(0.8):
+        return
 
-	if ctx.has_classification():
-		# The regions have the last word over anything a pass decided. The kernel already
-		# refuses to erase a protected pixel, so this repairs nothing today — it is what
-		# keeps the mask honest if that ever stops being true.
-		ctx.apply_regions_to_mask()
-		ctx.rebuild_nearest()
-	report_progress(1.0)
+    if ctx.has_classification():
+        # The regions have the last word over anything a pass decided. The kernel already
+        # refuses to erase a protected pixel, so this repairs nothing today — it is what
+        # keeps the mask honest if that ever stops being true.
+        ctx.apply_regions_to_mask()
+        ctx.rebuild_nearest()
+    report_progress(1.0)

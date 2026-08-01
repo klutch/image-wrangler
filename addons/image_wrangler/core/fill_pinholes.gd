@@ -39,6 +39,14 @@ extends IWStackOperation
 ## stroke follows the silhouette and one drawn around a speck that is then filled leaves a
 ## ring floating in the middle of the subject.
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(0.383, 0.223, 0.896)
+
+
 var settings: FillPinholesSettings
 
 
@@ -52,6 +60,10 @@ func get_operation_name() -> String:
 
 func get_operation_id() -> StringName:
     return &"fill_pinholes"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:

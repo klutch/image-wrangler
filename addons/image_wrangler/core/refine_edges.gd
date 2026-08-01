@@ -33,6 +33,14 @@ extends IWStackOperation
 ## request: an edge that only needs its extremes pushed apart does not want
 ## smoothing first.
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(0.197, 0.001, 0.980)
+
+
 ## Regularisation for the guided filter. Small enough that it follows any real
 ## silhouette rather than averaging across it, large enough that a flat region does
 ## not divide by near-zero variance.
@@ -47,92 +55,96 @@ var settings: RefineEdgesSettings
 
 
 func _init() -> void:
-	settings = RefineEdgesSettings.new()
+    settings = RefineEdgesSettings.new()
 
 
 func get_operation_name() -> String:
-	return "Refine Edges"
+    return "Refine Edges"
 
 
 func get_operation_id() -> StringName:
-	return &"refine_edges"
+    return &"refine_edges"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:
-	return settings
+    return settings
 
 
 func set_settings(new_settings: Resource) -> void:
-	var typed := new_settings as RefineEdgesSettings
-	if typed == null:
-		push_error("Image Wrangler: RefineEdges was handed settings of the wrong type.")
-		return
-	settings = typed
+    var typed := new_settings as RefineEdgesSettings
+    if typed == null:
+        push_error("Image Wrangler: RefineEdges was handed settings of the wrong type.")
+        return
+    settings = typed
 
 
 func make_settings() -> Resource:
-	return RefineEdgesSettings.new()
+    return RefineEdgesSettings.new()
 
 
 func get_settings_schema() -> Array[Dictionary]:
-	return [
-		{
-			"property": &"refine_radius",
-			"label": "Refine Radius",
-			"type": SettingType.INT,
-			"min": 0,
-			"max": 16,
-			"step": 1,
-			"tooltip": "Window radius for the guided filter: roughly how far a ragged patch of alpha\nmay sit from a real edge and still be pulled onto it.\n\n0 switches the filter off and leaves the two clips below, which is worth\nhaving on its own — an edge that only needs its extremes pushed apart does\nnot want smoothing first.",
-		},
-		{
-			"property": &"alpha_floor",
-			"label": "Alpha Floor",
-			"type": SettingType.FLOAT,
-			"min": 0.0,
-			"max": 1.0,
-			"step": 0.01,
-			"tooltip": "Alpha at or below this is forced fully clear.\nApplied after the filter, so it also clears the faint ghosts that leaves where\nit smooths leftover background instead of removing it. Around 0.5 does that;\nthe cost is that genuinely faint edge pixels go with them.",
-		},
-		{
-			"property": &"alpha_ceiling",
-			"label": "Alpha Ceiling",
-			"type": SettingType.FLOAT,
-			"min": 0.0,
-			"max": 1.0,
-			"step": 0.01,
-			"tooltip": "Alpha at or above this is forced fully solid, with everything between the\nfloor and here stretched across the two. Bring it down towards the floor for\na harder cutoff, leave it at 1 for a soft one.",
-		},
-	]
+    return [
+        {
+            "property": &"refine_radius",
+            "label": "Refine Radius",
+            "type": SettingType.INT,
+            "min": 0,
+            "max": 16,
+            "step": 1,
+            "tooltip": "Window radius for the guided filter: roughly how far a ragged patch of alpha\nmay sit from a real edge and still be pulled onto it.\n\n0 switches the filter off and leaves the two clips below, which is worth\nhaving on its own — an edge that only needs its extremes pushed apart does\nnot want smoothing first.",
+        },
+        {
+            "property": &"alpha_floor",
+            "label": "Alpha Floor",
+            "type": SettingType.FLOAT,
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.01,
+            "tooltip": "Alpha at or below this is forced fully clear.\nApplied after the filter, so it also clears the faint ghosts that leaves where\nit smooths leftover background instead of removing it. Around 0.5 does that;\nthe cost is that genuinely faint edge pixels go with them.",
+        },
+        {
+            "property": &"alpha_ceiling",
+            "label": "Alpha Ceiling",
+            "type": SettingType.FLOAT,
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.01,
+            "tooltip": "Alpha at or above this is forced fully solid, with everything between the\nfloor and here stretched across the two. Bring it down towards the floor for\na harder cutoff, leave it at 1 for a soft one.",
+        },
+    ]
 
 
 func stage_weight() -> float:
-	return 0.30
+    return 0.30
 
 
 ## The filter's guide is the distance-from-key map, and the clip has nothing to
 ## clip until something has produced alpha.
 func prerequisite_note(ctx: IWPipelineContext) -> String:
-	if ctx != null and ctx.has_keying:
-		return ""
-	return "Needs a Remove Background above it."
+    if ctx != null and ctx.has_keying:
+        return ""
+    return "Needs a Remove Background above it."
 
 
 func process_context(ctx: IWPipelineContext) -> void:
-	if not ctx.has_keying or ctx.coverage.is_empty():
-		return
+    if not ctx.has_keying or ctx.coverage.is_empty():
+        return
 
-	var radius := settings.refine_radius
-	var alpha_floor := settings.alpha_floor
-	var alpha_ceiling := settings.alpha_ceiling
+    var radius := settings.refine_radius
+    var alpha_floor := settings.alpha_floor
+    var alpha_ceiling := settings.alpha_ceiling
 
-	# Both passes are native; what stays here is the decision about whether each runs at
-	# all, which is a question about the settings rather than about the pixels.
-	if radius > 0 and not ctx.key_dist.is_empty():
-		ctx.coverage = IWStageKernels.guided_refine(
-				ctx.coverage, ctx.key_dist, ctx.width, ctx.height, radius)
-	if not report_progress(0.8):
-		return
-	if alpha_floor > 0.0 or alpha_ceiling < 1.0:
-		IWStageKernels.clip_alpha(ctx, alpha_floor, alpha_ceiling)
-	report_progress(1.0)
+    # Both passes are native; what stays here is the decision about whether each runs at
+    # all, which is a question about the settings rather than about the pixels.
+    if radius > 0 and not ctx.key_dist.is_empty():
+        ctx.coverage = IWStageKernels.guided_refine(
+                ctx.coverage, ctx.key_dist, ctx.width, ctx.height, radius)
+    if not report_progress(0.8):
+        return
+    if alpha_floor > 0.0 or alpha_ceiling < 1.0:
+        IWStageKernels.clip_alpha(ctx, alpha_floor, alpha_ceiling)
+    report_progress(1.0)

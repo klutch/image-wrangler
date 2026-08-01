@@ -376,16 +376,9 @@ func add_stage(stage: IWStackOperation) -> void:
     rebuild()
 
 
-## One row's bookkeeping, and the place a stage is given its colour.
-##
-## Handed out here rather than taken by the stage itself, because the dock builds a
-## throwaway copy of every stage on every run and a colour taken at construction would move
-## each time. The number belongs to the row, so it follows the stage as it is dragged.
+## One row's bookkeeping.
 func _record(stage: IWStackOperation) -> Dictionary:
-    var uid := _take_uid()
-    if stage != null:
-        stage.tint = IWStackOperation.tint_for(uid)
-    return {"uid": uid, "stage": stage, "entry": null}
+    return {"uid": _take_uid(), "stage": stage, "entry": null}
 
 
 ## Puts [param stage] into the stack at [param at], pushing whatever was there down.

@@ -47,101 +47,113 @@ extends IWStackOperation
 ## this should never have got to measures as fully covered and keeps its alpha. That is
 ## what makes setting the reach generously cost work rather than pixels.
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(0.642, 0.186, 0.744)
+
+
 var settings: RemoveCreviceSettings
 
 
 func _init() -> void:
-	settings = RemoveCreviceSettings.new()
+    settings = RemoveCreviceSettings.new()
 
 
 func get_operation_name() -> String:
-	return "Remove Crevice"
+    return "Remove Crevice"
 
 
 func get_operation_id() -> StringName:
-	return &"remove_crevice"
+    return &"remove_crevice"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:
-	return settings
+    return settings
 
 
 func set_settings(new_settings: Resource) -> void:
-	var typed := new_settings as RemoveCreviceSettings
-	if typed == null:
-		push_error("Image Wrangler: RemoveCrevice was handed settings of the wrong type.")
-		return
-	settings = typed
+    var typed := new_settings as RemoveCreviceSettings
+    if typed == null:
+        push_error("Image Wrangler: RemoveCrevice was handed settings of the wrong type.")
+        return
+    settings = typed
 
 
 func make_settings() -> Resource:
-	return RemoveCreviceSettings.new()
+    return RemoveCreviceSettings.new()
 
 
 func get_settings_schema() -> Array[Dictionary]:
-	return [
-		{
-			"property": &"crevice_reach",
-			"label": "Crevice Reach",
-			"type": SettingType.INT,
-			"min": 0,
-			"max": 32,
-			"step": 1,
-			"tooltip": "How many near-background pixels one path may cross in total, so it needs\nto be at least as long as the constriction it has to get through.\n\nA total rather than a count that solid background resets, so the flood\ncannot stray, land on a stray highlight, and use that to buy its way\nfurther in.\n\nBudgets add up across stages: two of these in a row on the same settings\nreach exactly as far as one of them set to twice this, and cost more. Use\ntwo when you want them at different points in the stack or on different\ntolerances, not to reach further.",
-		},
-		{
-			"property": &"crevice_tolerance",
-			"label": "Crevice Tolerance",
-			"type": SettingType.FLOAT,
-			"min": 0.0,
-			"max": 1.0,
-			"step": 0.01,
-			"tooltip": "How much further than its own tolerance a color may stray to get through a\nsqueeze. Added to that tolerance rather than replacing it, so a color keyed\ntightly stays keyed tightly.\n\nOne number for every color in the Remove Background above, because this is\nnot a description of a background — it is how far a flood may leave one\nbehind to get somewhere.",
-		},
-	]
+    return [
+        {
+            "property": &"crevice_reach",
+            "label": "Crevice Reach",
+            "type": SettingType.INT,
+            "min": 0,
+            "max": 32,
+            "step": 1,
+            "tooltip": "How many near-background pixels one path may cross in total, so it needs\nto be at least as long as the constriction it has to get through.\n\nA total rather than a count that solid background resets, so the flood\ncannot stray, land on a stray highlight, and use that to buy its way\nfurther in.\n\nBudgets add up across stages: two of these in a row on the same settings\nreach exactly as far as one of them set to twice this, and cost more. Use\ntwo when you want them at different points in the stack or on different\ntolerances, not to reach further.",
+        },
+        {
+            "property": &"crevice_tolerance",
+            "label": "Crevice Tolerance",
+            "type": SettingType.FLOAT,
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.01,
+            "tooltip": "How much further than its own tolerance a color may stray to get through a\nsqueeze. Added to that tolerance rather than replacing it, so a color keyed\ntightly stays keyed tightly.\n\nOne number for every color in the Remove Background above, because this is\nnot a description of a background — it is how far a flood may leave one\nbehind to get somewhere.",
+        },
+    ]
 
 
 func stage_weight() -> float:
-	return 0.35
+    return 0.35
 
 
 ## There has to be a background before there is anywhere to squeeze from.
 func needs_keying() -> bool:
-	return true
+    return true
 
 
 func prerequisite_note(ctx: IWPipelineContext) -> String:
-	if ctx != null and ctx.has_classification():
-		return ""
-	return "Needs a Remove Background above it."
+    if ctx != null and ctx.has_classification():
+        return ""
+    return "Needs a Remove Background above it."
 
 
 func process_context(ctx: IWPipelineContext) -> void:
-	# Declared on the context before anything else, and assigned rather than widened:
-	# this stage says what the rule is for everything below it, and a second one of
-	# these further down says it again. Set even when the stage goes on to do nothing,
-	# so switching the reach to zero switches the rule off for the floods below too.
-	ctx.crevice_reach = settings.crevice_reach
-	ctx.crevice_tolerance = settings.crevice_tolerance
-	if settings.crevice_reach <= 0 or not ctx.has_classification():
-		return
-	if not report_progress(0.05):
-		return
+    # Declared on the context before anything else, and assigned rather than widened:
+    # this stage says what the rule is for everything below it, and a second one of
+    # these further down says it again. Set even when the stage goes on to do nothing,
+    # so switching the reach to zero switches the rule off for the floods below too.
+    ctx.crevice_reach = settings.crevice_reach
+    ctx.crevice_tolerance = settings.crevice_tolerance
+    if settings.crevice_reach <= 0 or not ctx.has_classification():
+        return
+    if not report_progress(0.05):
+        return
 
-	# The squeeze itself is native: it is one 4-connected flood asking
-	# [method IWPipelineContext.flood_key_for] about four neighbours of every pixel it
-	# pops, which is the shape this whole extension exists for.
-	var touched := IWStageKernels.squeeze(ctx)
-	if touched.is_empty():
-		report_progress(1.0)
-		return
-	if not report_progress(0.70):
-		return
+    # The squeeze itself is native: it is one 4-connected flood asking
+    # [method IWPipelineContext.flood_key_for] about four neighbours of every pixel it
+    # pops, which is the shape this whole extension exists for.
+    var touched := IWStageKernels.squeeze(ctx)
+    if touched.is_empty():
+        report_progress(1.0)
+        return
+    if not report_progress(0.70):
+        return
 
-	# The regions are re-applied because this moved pixels out of subject and a drawn
-	# or picked one has the last word over any flood; then the map naming the nearest
-	# subject pixel is stale, and the coverage that reads it with it.
-	ctx.apply_regions_to_mask()
-	ctx.rebuild_nearest()
-	ctx.compute_coverage(ctx.dilate(touched, ctx.search_radius))
-	report_progress(1.0)
+    # The regions are re-applied because this moved pixels out of subject and a drawn
+    # or picked one has the last word over any flood; then the map naming the nearest
+    # subject pixel is stale, and the coverage that reads it with it.
+    ctx.apply_regions_to_mask()
+    ctx.rebuild_nearest()
+    ctx.compute_coverage(ctx.dilate(touched, ctx.search_radius))
+    report_progress(1.0)

@@ -36,6 +36,14 @@ extends IWStackOperation
 ## the source pixels, so anything that has already measured them would be measuring
 ## colours that are gone.
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(0.918, 0.323, 0.230)
+
+
 var settings: RandomHSVTilesSettings
 
 
@@ -49,6 +57,10 @@ func get_operation_name() -> String:
 
 func get_operation_id() -> StringName:
     return &"random_hsv_tiles"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:

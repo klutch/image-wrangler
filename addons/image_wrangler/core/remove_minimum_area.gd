@@ -24,6 +24,14 @@ extends IWStackOperation
 ## [b]Order.[/b] Below whatever leaves the crumbs, which is usually the keying. Above
 ## [EdgeCleanup], since removing a shape changes the silhouette the stroke has to follow.
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(0.210, 0.397, 0.893)
+
+
 var settings: RemoveMinimumAreaSettings
 
 
@@ -37,6 +45,10 @@ func get_operation_name() -> String:
 
 func get_operation_id() -> StringName:
     return &"remove_minimum_area"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:

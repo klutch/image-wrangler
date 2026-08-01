@@ -49,39 +49,13 @@ var enabled := true
 ## inside them.
 var folded := false
 
-## The colours a stage's marks are drawn in, ten hues evenly round the wheel.
-##
-## Written out rather than worked out, so a stage keeps the same colour from one run to the
-## next: anything rolled per instance changes every time the dock builds a throwaway copy
-## of the stack, which it does on every run.
-##
-## Each is a unit-length colour — the three channels squared add to one — so no hue arrives
-## brighter than another and none of them is washed out. Ten is enough that a stack has to
-## be ten deep before two share.
-const TINTS: Array[Color] = [
-    Color(1.000, 0.000, 0.000),
-    Color(0.857, 0.514, 0.000),
-    Color(0.625, 0.781, 0.000),
-    Color(0.196, 0.981, 0.000),
-    Color(0.000, 0.928, 0.371),
-    Color(0.000, 0.707, 0.707),
-    Color(0.000, 0.371, 0.928),
-    Color(0.196, 0.000, 0.981),
-    Color(0.625, 0.000, 0.781),
-    Color(0.857, 0.000, 0.514),
-]
-
 ## The colour this stage's marks are drawn in on the preview.
 ##
-## Handed out by the stack when the entry is made, so it follows the stage as it is dragged
-## up and down and stays put across a run. White until then, which is what every mark used
-## to be — a stage running outside the dock has nothing to be told apart from.
-var tint := Color.WHITE
-
-
-## The colour belonging to the entry numbered [param uid].
-static func tint_for(uid: int) -> Color:
-    return TINTS[absi(uid) % TINTS.size()]
+## Each operation writes its own out as a [code]TINT[/code] constant, so a stage is the same
+## colour in every session and on every image. White here, which is what every mark used to
+## be, for anything that has not named one.
+func get_tint() -> Color:
+    return Color.WHITE
 
 ## The pipeline running this stage, or null when it is running on its own.
 ##

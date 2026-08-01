@@ -19,6 +19,14 @@ extends IWStackOperation
 ## the labelling happens before anything is removed, so a point goes on landing on its tile
 ## however the stack above changes.
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(0.196, 0.939, 0.284)
+
+
 ## What happens to the tiles that were picked.
 enum TileSelection {
     ## Everything goes through. What the operation does before anything is chosen.
@@ -44,6 +52,10 @@ func get_operation_name() -> String:
 
 func get_operation_id() -> StringName:
     return &"tile_selector"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:

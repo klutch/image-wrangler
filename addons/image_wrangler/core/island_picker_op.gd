@@ -37,6 +37,14 @@ extends IWStackOperation
 ## colour, so an island dropped on a white plate still crosses onto the green stem
 ## beside it. See [method IWPipelineContext.flood_key_for].
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(0.000, 0.548, 0.836)
+
+
 var settings: IslandPickerSettings
 
 
@@ -50,6 +58,10 @@ func get_operation_name() -> String:
 
 func get_operation_id() -> StringName:
     return &"island_picker"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:

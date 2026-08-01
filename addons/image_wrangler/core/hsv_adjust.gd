@@ -14,6 +14,14 @@ extends IWStackOperation
 ## Put it above [RemoveBackground]. It rewrites the source pixels, so anything that has
 ## already measured them would be measuring colours that are gone.
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(0.001, 0.238, 0.971)
+
+
 var settings: HSVAdjustSettings
 
 
@@ -27,6 +35,10 @@ func get_operation_name() -> String:
 
 func get_operation_id() -> StringName:
     return &"hsv_adjust"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:

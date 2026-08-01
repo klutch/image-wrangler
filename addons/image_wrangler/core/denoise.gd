@@ -39,35 +39,47 @@ extends IWStackOperation
 ## IWPipelineContext.nearest] say which pixels are subject rather than what colour they
 ## are, and denoising moves no pixel between those categories.
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(1.000, 0.000, 0.000)
+
+
 var settings: DenoiseSettings
 
 
 func _init() -> void:
-	settings = DenoiseSettings.new()
+    settings = DenoiseSettings.new()
 
 
 func get_operation_name() -> String:
-	return "Denoise"
+    return "Denoise"
 
 
 func get_operation_id() -> StringName:
-	return &"denoise"
+    return &"denoise"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:
-	return settings
+    return settings
 
 
 func set_settings(new_settings: Resource) -> void:
-	var typed := new_settings as DenoiseSettings
-	if typed == null:
-		push_error("Image Wrangler: Denoise was handed settings of the wrong type.")
-		return
-	settings = typed
+    var typed := new_settings as DenoiseSettings
+    if typed == null:
+        push_error("Image Wrangler: Denoise was handed settings of the wrong type.")
+        return
+    settings = typed
 
 
 func make_settings() -> Resource:
-	return DenoiseSettings.new()
+    return DenoiseSettings.new()
 
 
 ## Nothing, deliberately.
@@ -77,69 +89,69 @@ func make_settings() -> Resource:
 ## rename the output of every stack that has a Denoise in it. What comes out is still
 ## whatever the rest of the stack made of it, and should still be called that.
 func get_output_suffix() -> String:
-	return ""
+    return ""
 
 
 func get_settings_schema() -> Array[Dictionary]:
-	return [
-		{
-			"property": &"blend",
-			"label": "Amount",
-			"type": SettingType.FLOAT,
-			"min": 0.0,
-			"max": 1.0,
-			"step": 0.01,
-			"tooltip": "How much of the filtered result replaces the original.\n\nAt 1 the pixels below are entirely the filter's. Bring it down when the\nfilter is taking the tooth off drawn line art along with the grain — it is\ntrained on rendered images, and a drawn edge is not one.\n\nAt 0 the stage does nothing, which is also what switching the entry off\ndoes.",
-		},
-		{
-			"property": &"quality",
-			"label": "Quality",
-			"type": SettingType.ENUM,
-			"options": ["Fast", "Balanced", "High"],
-			"tooltip": "What the filter trades against how long it takes.\n\nHigh by default, because this stage is one you went and added rather than\none that was already there. Drop to Fast while dialling the rest of the\nstack in on a large sheet, then put it back before processing the batch —\nthe result is not the same image.",
-		},
-	]
+    return [
+        {
+            "property": &"blend",
+            "label": "Amount",
+            "type": SettingType.FLOAT,
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.01,
+            "tooltip": "How much of the filtered result replaces the original.\n\nAt 1 the pixels below are entirely the filter's. Bring it down when the\nfilter is taking the tooth off drawn line art along with the grain — it is\ntrained on rendered images, and a drawn edge is not one.\n\nAt 0 the stage does nothing, which is also what switching the entry off\ndoes.",
+        },
+        {
+            "property": &"quality",
+            "label": "Quality",
+            "type": SettingType.ENUM,
+            "options": ["Fast", "Balanced", "High"],
+            "tooltip": "What the filter trades against how long it takes.\n\nHigh by default, because this stage is one you went and added rather than\none that was already there. Drop to Fast while dialling the rest of the\nstack in on a large sheet, then put it back before processing the batch —\nthe result is not the same image.",
+        },
+    ]
 
 
 ## Not cheap, and not the most expensive thing in a stack: one pass over the image
 ## against a trained model, where the classification below it is a flood plus a
 ## nearest-subject map.
 func stage_weight() -> float:
-	return 0.8
+    return 0.8
 
 
 ## Nothing above it, and nothing below it either — it works on the source colours, which
 ## exist from the moment the run starts.
 func needs_keying() -> bool:
-	return false
+    return false
 
 
 func establishes_keying() -> bool:
-	return false
+    return false
 
 
 func process_context(ctx: IWPipelineContext) -> void:
-	# A coherent request for nothing, and worth catching here — the kernel would
-	# otherwise spend a device creation and a whole filter pass arriving at the identity.
-	if settings.blend <= 0.0:
-		return
-	if not report_progress(0.05):
-		return
+    # A coherent request for nothing, and worth catching here — the kernel would
+    # otherwise spend a device creation and a whole filter pass arriving at the identity.
+    if settings.blend <= 0.0:
+        return
+    if not report_progress(0.05):
+        return
 
-	# One call, and it cannot be interrupted — see the note in the kernel. The same
-	# bargain every other single-pass stage makes.
-	if not IWStageKernels.denoise(ctx, settings.quality, settings.blend):
-		return
+    # One call, and it cannot be interrupted — see the note in the kernel. The same
+    # bargain every other single-pass stage makes.
+    if not IWStageKernels.denoise(ctx, settings.quality, settings.blend):
+        return
 
-	# The one thing that has to be redone. key_dist is a per-pixel distance from the
-	# first key, measured off the colours just replaced, and ensure_key_dist is a no-op
-	# once the map exists — so left alone it would go on describing pixels that are no
-	# longer there, and nothing downstream could tell.
-	#
-	# Rebuilt rather than merely cleared, because an empty one is not neutral: RefineEdges
-	# tests for it and skips the guided filter entirely when it is missing. Both calls are
-	# no-ops before anything has keyed, which is the case where there is nothing to redo.
-	ctx.key_dist = PackedFloat32Array()
-	ctx.ensure_key_dist()
+    # The one thing that has to be redone. key_dist is a per-pixel distance from the
+    # first key, measured off the colours just replaced, and ensure_key_dist is a no-op
+    # once the map exists — so left alone it would go on describing pixels that are no
+    # longer there, and nothing downstream could tell.
+    #
+    # Rebuilt rather than merely cleared, because an empty one is not neutral: RefineEdges
+    # tests for it and skips the guided filter entirely when it is missing. Both calls are
+    # no-ops before anything has keyed, which is the case where there is nothing to redo.
+    ctx.key_dist = PackedFloat32Array()
+    ctx.ensure_key_dist()
 
-	report_progress(1.0)
+    report_progress(1.0)

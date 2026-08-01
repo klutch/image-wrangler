@@ -36,6 +36,14 @@ extends IWStackOperation
 ## has to: the stroke follows the silhouette that actually comes out, drawn shapes
 ## and all, rather than the one the keying alone would have given.
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(0.002, 1.000, 0.011)
+
+
 ## What the restoration counts as fully solid and fully clear.
 ##
 ## Deliberately not 1.0 and 0.0 exactly: alpha arriving here has been through a
@@ -92,6 +100,10 @@ func get_operation_name() -> String:
 
 func get_operation_id() -> StringName:
     return &"edge_cleanup"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:

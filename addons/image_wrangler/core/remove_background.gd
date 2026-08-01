@@ -85,121 +85,133 @@ extends IWStackOperation
 ## edge and outlining the result is [EdgeCleanup]. Placing a second one of these below
 ## another adds its colours to the keys already registered rather than starting again.
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(0.175, 0.707, 0.685)
+
+
 ## This operation's tunables. Swapped by the dock for the image on screen; see
 ## [RemoveBackgroundSettings].
 var settings: RemoveBackgroundSettings
 
 
 func _init() -> void:
-	settings = RemoveBackgroundSettings.new()
+    settings = RemoveBackgroundSettings.new()
 
 
 func get_operation_name() -> String:
-	return "Remove Background"
+    return "Remove Background"
 
 
 func get_operation_id() -> StringName:
-	return &"remove_background"
+    return &"remove_background"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:
-	return settings
+    return settings
 
 
 func set_settings(new_settings: Resource) -> void:
-	var typed := new_settings as RemoveBackgroundSettings
-	if typed == null:
-		push_error("Image Wrangler: RemoveBackground was handed settings of the wrong type.")
-		return
-	settings = typed
+    var typed := new_settings as RemoveBackgroundSettings
+    if typed == null:
+        push_error("Image Wrangler: RemoveBackground was handed settings of the wrong type.")
+        return
+    settings = typed
 
 
 func make_settings() -> Resource:
-	return RemoveBackgroundSettings.new()
+    return RemoveBackgroundSettings.new()
 
 
 func get_output_suffix() -> String:
-	return "_nobg"
+    return "_nobg"
 
 
 ## The stage that establishes the keys, so nothing has to be keyed above it.
 func needs_keying() -> bool:
-	return false
+    return false
 
 
 ## And the only one that does: the mask everything else builds on is made here.
 func establishes_keying() -> bool:
-	return true
+    return true
 
 
 ## Most of a run by a distance: the flood and the nearest-subject map between them
 ## are the bulk of the work whatever else is in the stack.
 func stage_weight() -> float:
-	return 1.0
+    return 1.0
 
 
 ## Convenience entry point for code that just wants the default behaviour.
 static func remove_background(source: Image, key := Color.WHITE) -> Image:
-	var operation := RemoveBackground.new()
-	operation.settings.remove_colors.set_only(key)
-	return operation.process_image(source)
+    var operation := RemoveBackground.new()
+    operation.settings.remove_colors.set_only(key)
+    return operation.process_image(source)
 
 
 func process_context(ctx: IWPipelineContext) -> void:
-	# What the final write needs to know. Owned here because the fringe removal and
-	# the bleed are both about the background this stage identified.
-	ctx.edge_width = maxi(ctx.edge_width, settings.edge_width)
-	ctx.bleed_radius = maxi(ctx.bleed_radius, settings.bleed_radius)
-	ctx.decontaminate = ctx.decontaminate or settings.decontaminate
-	ctx.search_radius = maxi(
-			maxi(ctx.bleed_radius, ctx.edge_width), IWPipelineContext.MIN_SEARCH_RADIUS)
+    # What the final write needs to know. Owned here because the fringe removal and
+    # the bleed are both about the background this stage identified.
+    ctx.edge_width = maxi(ctx.edge_width, settings.edge_width)
+    ctx.bleed_radius = maxi(ctx.bleed_radius, settings.bleed_radius)
+    ctx.decontaminate = ctx.decontaminate or settings.decontaminate
+    ctx.search_radius = maxi(
+            maxi(ctx.bleed_radius, ctx.edge_width), IWPipelineContext.MIN_SEARCH_RADIUS)
 
-	# Fractions along the way, for whatever is drawing the progress bar. Hand-set
-	# rather than evenly spaced, because the passes are nothing like equal: the flood
-	# and the nearest-subject map between them are most of the work, and a bar that
-	# pretended otherwise would crawl and then leap.
-	#
-	# Each is also where the run gives up if it has been asked to. Between them it
-	# cannot: a pass runs to its end once started, so how quickly a cancel takes hold
-	# is however long the longest pass has left.
-	if not report_progress(0.02):
-		return
+    # Fractions along the way, for whatever is drawing the progress bar. Hand-set
+    # rather than evenly spaced, because the passes are nothing like equal: the flood
+    # and the nearest-subject map between them are most of the work, and a bar that
+    # pretended otherwise would crawl and then leap.
+    #
+    # Each is also where the run gives up if it has been asked to. Between them it
+    # cannot: a pass runs to its end once started, so how quickly a cancel takes hold
+    # is however long the longest pass has left.
+    if not report_progress(0.02):
+        return
 
-	var first_key := _build_keys(ctx)
-	# No colours at all is a coherent request for no keying here — the stack may key
-	# elsewhere, or not at all, and the regions and the stroke owe this stage nothing.
-	if first_key < 0 and not ctx.has_keying:
-		return
-	if not report_progress(0.10):
-		return
+    var first_key := _build_keys(ctx)
+    # No colours at all is a coherent request for no keying here — the stack may key
+    # elsewhere, or not at all, and the regions and the stroke owe this stage nothing.
+    if first_key < 0 and not ctx.has_keying:
+        return
+    if not report_progress(0.10):
+        return
 
-	# The classification is native. It is the single most expensive thing in the stack —
-	# a border flood asking [method IWPipelineContext.flood_key_for] about four
-	# neighbours of every background pixel, then a band grown from all of it.
-	IWStageKernels.classify(ctx, settings.contiguous, settings.edge_width)
-	if not report_progress(0.48):
-		return
+    # The classification is native. It is the single most expensive thing in the stack —
+    # a border flood asking [method IWPipelineContext.flood_key_for] about four
+    # neighbours of every background pixel, then a band grown from all of it.
+    IWStageKernels.classify(ctx, settings.contiguous, settings.edge_width)
+    if not report_progress(0.48):
+        return
 
-	# Folded into the mask rather than into the alpha at the end, so that everything
-	# downstream treats these pixels correctly without being told about regions at
-	# all: coverage reads them off the mask, the nearest-subject map picks its bleed
-	# sources from it, and the final write follows.
-	#
-	# Applied after the classification for the same reason a cut is left hard — a band
-	# already grown into the region is overwritten rather than left as a soft rim
-	# inside a hard edge.
-	ctx.apply_regions_to_mask()
-	if not report_progress(0.62):
-		return
+    # Folded into the mask rather than into the alpha at the end, so that everything
+    # downstream treats these pixels correctly without being told about regions at
+    # all: coverage reads them off the mask, the nearest-subject map picks its bleed
+    # sources from it, and the final write follows.
+    #
+    # Applied after the classification for the same reason a cut is left hard — a band
+    # already grown into the region is overwritten rather than left as a soft rim
+    # inside a hard edge.
+    ctx.apply_regions_to_mask()
+    if not report_progress(0.62):
+        return
 
-	ctx.rebuild_nearest()
-	if not report_progress(0.75):
-		return
+    ctx.rebuild_nearest()
+    if not report_progress(0.75):
+        return
 
-	# Alpha is settled for the whole image here, because the refinement below is a
-	# neighbourhood operation and cannot run a pixel at a time.
-	ctx.compute_coverage(ctx.all_indices())
-	report_progress(1.0)
+    # Alpha is settled for the whole image here, because the refinement below is a
+    # neighbourhood operation and cannot run a pixel at a time.
+    ctx.compute_coverage(ctx.all_indices())
+    report_progress(1.0)
 
 
 ## Registers every colour of every enabled Remove Color as a key, and returns the index
@@ -213,27 +225,27 @@ func process_context(ctx: IWPipelineContext) -> void:
 ## colours instead of replacing the first's. The returned index is where this stage's
 ## own colours begin, which is what the border flood needs to know.
 func _build_keys(ctx: IWPipelineContext) -> int:
-	var first := -1
-	if settings.remove_colors == null:
-		return first
-	for entry in settings.remove_colors.entries:
-		if entry == null or not entry.enabled:
-			continue
-		for sample in entry.samples:
-			if sample == null:
-				continue
-			var index := ctx.add_key(sample.color, sample.color_tolerance, false)
-			if first < 0:
-				first = index
-	return first
+    var first := -1
+    if settings.remove_colors == null:
+        return first
+    for entry in settings.remove_colors.entries:
+        if entry == null or not entry.enabled:
+            continue
+        for sample in entry.samples:
+            if sample == null:
+                continue
+            var index := ctx.add_key(sample.color, sample.color_tolerance, false)
+            if first < 0:
+                first = index
+    return first
 
 
 func get_settings_schema() -> Array[Dictionary]:
-	return [
-		{
-			"property": &"remove_colors",
-			"type": SettingType.COLOR_LIST,
-			"tooltip": "The background colors to key out, each with its own tolerance.
+    return [
+        {
+            "property": &"remove_colors",
+            "type": SettingType.COLOR_LIST,
+            "tooltip": "The background colors to key out, each with its own tolerance.
 Drag a region over the preview to take every color in it, click for a
 single pixel, or add one and set it by hand. An image with two flat
 backgrounds needs two entries: one tolerance loose enough for a speckled
@@ -247,51 +259,51 @@ Background walled off by opaque subject is never reached, whatever you
 list. Add an Island Picker for that instead.
 
 Where two entries could both claim a pixel, the higher one wins.",
-		},
-		{
-			"property": &"edge_width",
-			"label": "Edge Width",
-			"type": SettingType.INT,
-			"min": 0,
-			"max": 16,
-			"step": 1,
-			"tooltip": "How many pixels of antialiasing to rebuild around the subject.
+        },
+        {
+            "property": &"edge_width",
+            "label": "Edge Width",
+            "type": SettingType.INT,
+            "min": 0,
+            "max": 16,
+            "step": 1,
+            "tooltip": "How many pixels of antialiasing to rebuild around the subject.
 2 suits ordinary antialiasing. Raise it for soft edges, glows or
 drop shadows; set it to 0 for a hard-edged cutout.
 
 Remove Crevice and Island Picker take their band width from here too, so
 every edge in the image is matted to the same depth.",
-		},
-		{
-			"property": &"contiguous",
-			"label": "Only Outer Background",
-			"type": SettingType.BOOL,
-			"tooltip": "Flood fill inwards from the image border, so regions enclosed by the
+        },
+        {
+            "property": &"contiguous",
+            "label": "Only Outer Background",
+            "type": SettingType.BOOL,
+            "tooltip": "Flood fill inwards from the image border, so regions enclosed by the
 subject (eyes, highlights, gaps in lettering) stay opaque.
 
 This is also what makes Remove Colors border-only: an entry seeds the flood
 where its color meets the border, and nowhere else. Turn it off and every
 listed color is removed wherever it appears — enclosed regions included.",
-		},
-		{
-			"property": &"decontaminate",
-			"label": "Remove Color Fringe",
-			"type": SettingType.BOOL,
-			"tooltip": "Un-blends the background color out of partially transparent pixels.
+        },
+        {
+            "property": &"decontaminate",
+            "label": "Remove Color Fringe",
+            "type": SettingType.BOOL,
+            "tooltip": "Un-blends the background color out of partially transparent pixels.
 This is what stops an outline appearing once the image is composited.",
-		},
-		{
-			"property": &"bleed_radius",
-			"label": "Color Bleed",
-			"type": SettingType.INT,
-			"min": 0,
-			"max": 64,
-			"step": 1,
-			"tooltip": "Pushes subject color into fully transparent pixels, in pixels.
+        },
+        {
+            "property": &"bleed_radius",
+            "label": "Color Bleed",
+            "type": SettingType.INT,
+            "min": 0,
+            "max": 64,
+            "step": 1,
+            "tooltip": "Pushes subject color into fully transparent pixels, in pixels.
 Texture filtering and mipmaps sample RGB even where alpha is zero, so
 without this the background can bleed back into the edge on screen.",
-		},
-	]
+        },
+    ]
 
 
 ## Pulls every Remove Color tolerance into range, on top of what the schema clamps.
@@ -303,16 +315,16 @@ without this the background can bleed back into the edge on screen.",
 ## [constant RemoveColorEntry.MAX_TOLERANCE] — the form and the processing silently
 ## disagreeing, which is the exact failure the base method exists to prevent.
 func clamp_settings_to_schema(target: Resource = null) -> void:
-	super(target)
-	if target == null:
-		target = get_settings()
-	var typed := target as RemoveBackgroundSettings
-	if typed == null:
-		return
-	if typed.remove_colors != null:
-		for entry in typed.remove_colors.entries:
-			if entry == null:
-				continue
-			for sample in entry.samples:
-				if sample != null:
-					sample.color_tolerance = clampf(sample.color_tolerance, 0.0, RemoveColorEntry.MAX_TOLERANCE)
+    super(target)
+    if target == null:
+        target = get_settings()
+    var typed := target as RemoveBackgroundSettings
+    if typed == null:
+        return
+    if typed.remove_colors != null:
+        for entry in typed.remove_colors.entries:
+            if entry == null:
+                continue
+            for sample in entry.samples:
+                if sample != null:
+                    sample.color_tolerance = clampf(sample.color_tolerance, 0.0, RemoveColorEntry.MAX_TOLERANCE)

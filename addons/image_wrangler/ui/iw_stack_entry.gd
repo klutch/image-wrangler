@@ -157,7 +157,7 @@ func _apply_panel_style() -> void:
 
     var lifted := base.lightened(PANEL_LIGHTEN)
     if stage != null:
-        lifted = lifted.lerp(stage.tint, PANEL_TINT_MIX)
+        lifted = lifted.lerp(stage.get_tint(), PANEL_TINT_MIX)
 
     var box := StyleBoxFlat.new()
     box.bg_color = lifted

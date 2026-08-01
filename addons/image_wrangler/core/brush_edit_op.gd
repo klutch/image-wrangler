@@ -40,6 +40,14 @@ extends IWStackOperation
 ## re-derives. Above [EdgeCleanup], because a stroke changes the silhouette the stroke
 ## drawn there has to follow.
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(0.826, 0.563, 0.008)
+
+
 var settings: BrushEditSettings
 
 
@@ -53,6 +61,10 @@ func get_operation_name() -> String:
 
 func get_operation_id() -> StringName:
     return &"brush_edit"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:

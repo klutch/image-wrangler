@@ -35,6 +35,14 @@ extends IWStackOperation
 ## bleed takes its colours from. Below, it overrules whatever alpha has been worked
 ## out by then. Either way what it settles can be settled again by anything under it.
 
+## The colour this operation's marks are drawn in on the preview.
+##
+## Written out rather than worked out, and its own rather than the stack's, so it is the
+## same colour every session. A unit-length colour, so no operation's marks arrive
+## brighter than another's.
+const TINT := Color(0.853, 0.094, 0.513)
+
+
 var settings: PolygonEditSettings
 
 
@@ -48,6 +56,10 @@ func get_operation_name() -> String:
 
 func get_operation_id() -> StringName:
     return &"polygon_edit"
+
+
+func get_tint() -> Color:
+    return TINT
 
 
 func get_settings() -> Resource:
