@@ -165,6 +165,13 @@ const PREVIEW_DEBOUNCE := 0.15
 ## spinner would otherwise start a batch run per pixel travelled.
 const PACKING_DEBOUNCE := 0.6
 
+## How long the Export tab waits after a change before working the normal map out again.
+##
+## Much shorter than [constant PACKING_DEBOUNCE], because this is one pass over pixels that
+## already exist rather than a run of every open image's stack — so a strength slider can
+## follow the mouse instead of catching up after it stops.
+const NORMAL_DEBOUNCE := 0.2
+
 ## How long the Upscale tab waits after a change before running the network again.
 ##
 ## The same as Packing's, and for the same reason — a spinner being dragged reports a change
@@ -275,6 +282,19 @@ var _packing_image: Image
 ## is written out of, and it is kept whether or not that switch is on — it is a few dozen
 ## rectangles, and holding it means ticking the box does not mean packing again.
 var _packing_rects: Array = []
+
+## The normal map for the sheet on screen, or null when normals are switched off.
+##
+## Held rather than worked out twice, so the preview and the write path cannot disagree about
+## what the map is.
+var _packing_normal_image: Image
+
+## What that map was worked out from, so a change to a setting it does not read costs
+## nothing. See [method _packing_normal_signature].
+var _packing_normal_key := ""
+
+## Whether the preview is showing the normal map in place of the sheet.
+var _showing_normals := false
 
 ## Whether a packing is running, so a change arriving mid-run cannot start a second on top
 ## of the first, and whether one asked for itself while that was true.
@@ -500,6 +520,10 @@ var _packing_status: Label
 ## Says what the selected packing mode does, sitting under the dropdown and above the rest
 ## of the form.
 var _packing_mode_note: Label
+## The same, for the normals dropdown further down the form.
+var _packing_normal_note: Label
+## Swaps the preview between the sheet and the normal map made from it.
+var _packing_normal_toggle: CheckBox
 var _upscale_box: VBoxContainer
 ## Says how the last upscale went, or why it could not run at all.
 var _upscale_status: Label
@@ -534,6 +558,7 @@ var _process_selected_button: Button
 var _process_all_button: Button
 var _debounce: Timer
 var _packing_debounce: Timer
+var _packing_normal_debounce: Timer
 var _upscale_debounce: Timer
 var _autosave: Timer
 var _open_dialog: FileDialog
@@ -727,32 +752,48 @@ func _build_packing() -> void:
     # and a line of prose is not one — it has no property to write and nothing to read
     # back, and giving the schema a way to say "and now some words" would be a new kind of
     # entry for every other operation to ignore.
-    if _packing_mode_note != null:
-        if _packing_mode_note.get_parent() != null:
-            _packing_mode_note.get_parent().remove_child(_packing_mode_note)
-        _packing_box.add_child(_packing_mode_note)
-        _packing_box.move_child(_packing_mode_note, _packing_note_index())
+    #
+    # The mode note goes first, so the search for the normals row sees the row it added and
+    # lands under that dropdown rather than one above it.
+    _place_packing_note(_packing_mode_note, &"mode")
+    _place_packing_note(_packing_normal_note, &"normals")
     _refresh_packing_note()
     _packing_sheet_key = _packing_sheet_signature()
+    _packing_normal_key = _packing_normal_signature()
+    _update_normal_toggle()
 
 
-## Where the mode note belongs: directly after whichever row carries the mode dropdown.
+## Puts [param note] directly under whichever row carries [param property].
+func _place_packing_note(note: Label, property: StringName) -> void:
+    if note == null:
+        return
+    if note.get_parent() != null:
+        note.get_parent().remove_child(note)
+    _packing_box.add_child(note)
+    _packing_box.move_child(note, _packing_note_index(property))
+
+
+## Where a note belongs: directly after whichever row carries [param property].
 ##
 ## Found rather than counted, so reordering the schema moves the note with it. Falls to the
-## top of the form if the dropdown cannot be found at all, which is the harmless place for
-## a line of prose to end up.
-func _packing_note_index() -> int:
+## top of the form if the row cannot be found at all, which is the harmless place for a line
+## of prose to end up.
+func _packing_note_index(property: StringName) -> int:
     for child in _packing_box.get_children():
         if child.has_meta(SettingsBuilder.META_PROPERTY) \
-                and child.get_meta(SettingsBuilder.META_PROPERTY) == &"mode":
+                and child.get_meta(SettingsBuilder.META_PROPERTY) == property:
             return child.get_index() + 1
     return 0
 
 
 func _refresh_packing_note() -> void:
-    if _packing_mode_note == null or _packing == null:
+    if _packing == null:
         return
-    _packing_mode_note.text = IWPacking.describe_mode(_packing.get_settings().mode)
+    var settings := _packing.get_settings()
+    if _packing_mode_note != null:
+        _packing_mode_note.text = IWPacking.describe_mode(settings.mode)
+    if _packing_normal_note != null:
+        _packing_normal_note.text = _packing.describe_normals(settings.normals)
 
 
 ## The third of these, for the tab that runs the network.
@@ -978,6 +1019,8 @@ func _forget_controls() -> void:
     _packing_box = null
     _packing_status = null
     _packing_mode_note = null
+    _packing_normal_note = null
+    _packing_normal_toggle = null
     _upscale_box = null
     _upscale_status = null
     _upscale_model_note = null
@@ -994,6 +1037,7 @@ func _forget_controls() -> void:
     _process_all_button = null
     _debounce = null
     _packing_debounce = null
+    _packing_normal_debounce = null
     _upscale_debounce = null
     _autosave = null
     _open_dialog = null
@@ -1034,6 +1078,12 @@ func _build_ui() -> void:
     _packing_debounce.wait_time = PACKING_DEBOUNCE
     _packing_debounce.timeout.connect(_run_packing_now)
     add_child(_packing_debounce)
+
+    _packing_normal_debounce = Timer.new()
+    _packing_normal_debounce.one_shot = true
+    _packing_normal_debounce.wait_time = NORMAL_DEBOUNCE
+    _packing_normal_debounce.timeout.connect(_rebuild_packing_normals)
+    add_child(_packing_normal_debounce)
 
     _upscale_debounce = Timer.new()
     _upscale_debounce.one_shot = true
@@ -1361,6 +1411,21 @@ func _build_operation_column() -> Control:
     _packing_mode_note = Label.new()
     _packing_mode_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     _packing_mode_note.modulate = Color(1, 1, 1, 0.6)
+
+    # The same for the normals dropdown, which needs one more than the packing mode does:
+    # the three that work read different things about the sprite, and the names alone do not
+    # say which suits the art in front of you.
+    _packing_normal_note = Label.new()
+    _packing_normal_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    _packing_normal_note.modulate = Color(1, 1, 1, 0.6)
+
+    # Outside _packing_box on purpose. The settings builder frees everything in that box
+    # every time it runs, and this has to outlive a rebuild of the form.
+    _packing_normal_toggle = CheckBox.new()
+    _packing_normal_toggle.text = "Show Normal Map"
+    _packing_normal_toggle.tooltip_text = "Shows the normal map in place of the sheet, so it can be tuned before it is\nwritten.\n\nThe fade slider brings the sheet back over it. The two line up pixel for pixel,\nwhich is the only way to tell whether the rounding is following the art."
+    _packing_normal_toggle.toggled.connect(_on_show_normals_toggled)
+    packing_column.add_child(_packing_normal_toggle)
 
     _packing_status = Label.new()
     _packing_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -3334,6 +3399,11 @@ func _on_setting_changed() -> void:
         if key != _packing_sheet_key:
             _packing_sheet_key = key
             _schedule_packing()
+        elif _packing_normal_signature() != _packing_normal_key:
+            # Only when nothing above it already asked for a repack, since a repack works the
+            # map out again anyway. This is a pass over pixels that exist, not a run of every
+            # open image's stack.
+            _schedule_packing_normals()
         return
     if _mode == Mode.UPSCALE:
         # A setting can be the one that changes what the form itself holds, and rebuilding
@@ -3676,7 +3746,9 @@ func _run_packing() -> void:
 
     _packing_image = sheet
     _packing_rects = rects
-    _update_preview_texture()
+    # A new sheet is new sprites in new places, so whatever map was held describes nothing
+    # that is on screen any more. This updates the preview itself.
+    _rebuild_packing_normals()
     _preview.fit_to_view()
     var settings := _packing.get_settings()
     var grown := ""
@@ -3749,9 +3821,67 @@ func _set_packing_status(text: String) -> void:
 
 
 ## Drops the sheet and the layout together, since one without the other is a trap.
+##
+## The normal map goes with them: it describes those sprites at those positions, and nothing
+## about it survives the sheet it was made from.
 func _forget_packed_sheet() -> void:
     _packing_image = null
     _packing_rects = []
+    _packing_normal_image = null
+    _packing_normal_key = ""
+
+
+## Asks for the normal map shortly, for a change that only the map reads.
+func _schedule_packing_normals() -> void:
+    # Null while the dock is being built, exactly as the packing timer is.
+    if _mode != Mode.PACKING or _shutting_down or _packing_normal_debounce == null:
+        return
+    _packing_normal_debounce.start()
+
+
+## Works the normal map out for the sheet on screen, or drops it when normals are off.
+func _rebuild_packing_normals() -> void:
+    _packing_normal_key = _packing_normal_signature()
+    if _packing == null or _packing_image == null:
+        _packing_normal_image = null
+    else:
+        _packing_normal_image = _packing.build_normal_map(_packing_image, _packing_rects)
+    _update_normal_toggle()
+    _update_preview_texture()
+
+
+## Shows the toggle only when there is a map to show, and drops the preview back to the sheet
+## when there is not — so it cannot be left looking at a map that is no longer made.
+func _update_normal_toggle() -> void:
+    if _packing_normal_toggle == null:
+        return
+    var offered := _packing_normal_image != null
+    _packing_normal_toggle.visible = offered
+    if not offered:
+        _showing_normals = false
+    # Written rather than read, so a rebuilt dock comes back showing what it was showing.
+    _packing_normal_toggle.set_pressed_no_signal(_showing_normals)
+
+
+func _on_show_normals_toggled(pressed: bool) -> void:
+    _showing_normals = pressed
+    _update_preview_texture()
+
+
+## The settings that decide what the normal map looks like, as one string.
+##
+## Deliberately no overlap with [method _packing_sheet_signature]: not one of these changes a
+## pixel of the sheet, and repacking for any of them would cost a run of every open image's
+## stack to arrive back at exactly the same sprites.
+func _packing_normal_signature() -> String:
+    if _packing == null:
+        return ""
+    var settings := _packing.get_settings()
+    return "%d/%.3f/%d/%d/%.3f/%.3f/%d/%.3f/%s/%s" % [settings.normals,
+            settings.normal_strength, settings.normal_roll_off, settings.normal_curve,
+            settings.normal_color_tolerance, settings.normal_coarse,
+            settings.normal_coarse_size, settings.normal_fine, settings.normal_green_down,
+            settings.normal_model_dir]
 
 
 ## The settings that decide what the sheet looks like, as one string.
@@ -3969,8 +4099,12 @@ func _update_preview_texture() -> void:
     # to bring back. Before the null test below, because a packing is worth looking at
     # whether or not a file happens to be highlighted.
     if _mode == Mode.PACKING:
-        _preview.set_image(_packing_image)
-        _preview.set_original(null)
+        # The normal map when it is being looked at, and the sheet underneath it rather than
+        # nothing — the two are the same size and line up pixel for pixel, so the fade slider
+        # answers the one question a normal map raises: is that rounding following the art.
+        var showing_map := _showing_normals and _packing_normal_image != null
+        _preview.set_image(_packing_normal_image if showing_map else _packing_image)
+        _preview.set_original(_packing_image if showing_map else null)
         # The rectangles the sheet was painted from, so the preview can say where one
         # sprite ends and the next begins — which is the one thing a packed sheet cannot be
         # read off itself.
@@ -4197,19 +4331,42 @@ func _write_packed_sheet(destination: String) -> void:
         _set_status("Could not write %s." % destination.get_file())
         return
 
-    var written := destination.get_file()
-    if _packing != null and _packing.get_settings().create_lookup_table:
+    var written := PackedStringArray([destination.get_file()])
+    var settings: PackingSettings = _packing.get_settings() if _packing != null else null
+
+    if settings != null and settings.create_lookup_table:
         var table := _write_lookup_table(destination)
         if table.is_empty():
-            # The sheet is on disk and is the thing that was asked for, so this reports the
-            # half that failed rather than pretending the whole write did.
-            _set_status("Saved %s, but could not write the lookup table." % written)
-            _set_packing_status("Saved %s, but could not write the lookup table." % written)
+            _report_sheet_written(written, "the lookup table")
             return
-        written = "%s and %s" % [written, table]
+        written.append(table)
 
-    _set_status("Saved %s." % written)
-    _set_packing_status("Saved %s." % written)
+    if settings != null and _packing.sanitise_normals(settings.normals) \
+            != IWPacking.NormalMode.DISABLED:
+        var map := _write_normal_map(destination)
+        if map.is_empty():
+            _report_sheet_written(written, "the normal map")
+            return
+        written.append(map)
+
+    _report_sheet_written(written, "")
+
+
+## Says what was written, and which of the extra files was not.
+##
+## The sheet is on disk and is the thing that was asked for, so a failure below it reports
+## the half that failed rather than pretending the whole write did. [param failed] empty
+## means everything asked for went out.
+func _report_sheet_written(written: PackedStringArray, failed: String) -> void:
+    var names := ", ".join(written.slice(0, written.size() - 1))
+    if not names.is_empty():
+        names = "%s and %s" % [names, written[written.size() - 1]]
+    else:
+        names = written[0]
+    var line := "Saved %s." % names if failed.is_empty() \
+            else "Saved %s, but could not write %s." % [names, failed]
+    _set_status(line)
+    _set_packing_status(line)
 
 
 ## Writes the lookup table beside the sheet, and returns what it was called — or an empty
@@ -4225,6 +4382,27 @@ func _write_lookup_table(sheet_path: String) -> String:
     var destination := IWPacking.lookup_path_for(sheet_path)
     var table := IWPacking.build_lookup_texture(_packing_rects)
     if ResourceSaver.save(table, destination) != OK:
+        return ""
+    return destination.get_file()
+
+
+## Writes the normal map beside the sheet, and returns what it was called — or an empty
+## string if it could not be written.
+##
+## [b]A PNG, where the lookup table is a resource.[/b] That one holds coordinates that have
+## to survive as floats; this is a picture, and every tool that reads a normal map reads one.
+##
+## Worked out here if the preview never did, so saving cannot depend on which way the preview
+## toggle happened to be left.
+func _write_normal_map(sheet_path: String) -> String:
+    if _packing == null or _packing_image == null:
+        return ""
+    if _packing_normal_image == null:
+        _rebuild_packing_normals()
+    if _packing_normal_image == null:
+        return ""
+    var destination := IWPacking.normal_path_for(sheet_path)
+    if _packing_normal_image.save_png(destination) != OK:
         return ""
     return destination.get_file()
 

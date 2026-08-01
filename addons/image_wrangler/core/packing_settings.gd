@@ -39,9 +39,56 @@ extends Resource
 
 ## Which normal map is generated alongside the sheet. See [enum IWPacking.NormalMode].
 ##
-## Disabled by default, and the only choice so far. It writes a file beside the sheet
-## rather than changing it, the way [member create_lookup_table] does.
+## Disabled by default, since a normal map is worth having only when something is going to
+## light the sheet. It writes a file beside the sheet rather than changing it, the way
+## [member create_lookup_table] does.
 @export var normals: int = 0
+
+## How far the rounding tips the surface over, against the roll-off distance.
+##
+## Measured that way rather than in pixels so the slope holds when [member normal_roll_off]
+## is dragged. Used by Round Edges and Color Regions.
+@export var normal_strength: float = 0.5
+
+## How far in from the outline the rounding reaches, in pixels.
+##
+## Past this the sprite is flat. Used by Round Edges and Color Regions.
+@export var normal_roll_off: int = 8
+
+## The shape the rounding takes. See [enum IWPacking.NormalCurve].
+@export var normal_curve: int = 0
+
+## How far apart two neighbouring colours have to be before the boundary between them is
+## rounded off as well as the outline.
+##
+## Nothing but Color Regions reads it, and it is the whole of what separates that mode from
+## Round Edges.
+@export var normal_color_tolerance: float = 0.15
+
+## How much of the sprite's overall shading becomes shape, and how far the pass looks to
+## decide what counts as overall rather than as detail.
+##
+## Zero strength skips the pass. Used by Brightness.
+@export var normal_coarse: float = 0.5
+@export var normal_coarse_size: int = 6
+
+## How much of the sprite's line work and texture becomes shape.
+##
+## Read from the colours as they are rather than from a blur, so it picks up single pixels.
+## Zero skips the pass. Used by Brightness.
+@export var normal_fine: float = 0.5
+
+## Whether green is written the way DirectX reads it rather than the way Godot does.
+##
+## Off is right for Godot. The one thing about a normal map that no two engines agree on,
+## and the only setting here every mode reads.
+@export var normal_green_down: bool = false
+
+## The folder holding the converted model the neural mode runs, as a path.
+##
+## No model ships with this addon, so this is empty until you convert one and say where it
+## went. The mode is not offered while it holds neither of the two files.
+@export var normal_model_dir: String = ""
 
 
 ## A copy that belongs to no image.

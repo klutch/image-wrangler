@@ -51,7 +51,7 @@ public:
     // edge that ramp describes. Returns a new RGBA8 image; `image` itself for an `amount`
     // of zero, which is the identity.
     //
-    // The one kernel here that is handed an Image rather than a context, because the thing
+    // One of the few kernels here handed an Image rather than a context, because the thing
     // it works on is a finished picture: what comes back off the network is pixels, not a
     // run in progress. See the note on the implementation for why the maths is a per-pixel
     // remap and not a filter.
@@ -342,6 +342,50 @@ public:
     static Dictionary exclude_tiles(
             const Ref<IWPipelineContext> &ctx, const PackedInt32Array &points,
             const PackedByteArray &active, int64_t mode);
+
+    // IWPacking's Round Edges and Color Regions: a normal map for a packed sheet, worked
+    // out from the shape of each sprite.
+    //
+    // Handed a sheet rather than a context because a packed sheet is a finished picture
+    // assembled out of many runs, and what tells one sprite from the next is the rectangle
+    // list rather than any labelling still in hand. `rects` is x, y, w, h per sprite, the
+    // same flattening the packer already keeps. Every sprite is worked out inside its own
+    // rectangle and nowhere else, which is what stops one leaning on whatever it was packed
+    // against.
+    //
+    // `roll_off` is how far in from the outline the rounding reaches, in pixels. `curve` is
+    // an IWPacking.NormalCurve index. `strength` is how far the surface tips over, measured
+    // against the roll-off so the slope holds when that is dragged.
+    //
+    // `color_tolerance` below zero rounds off the outline alone, which is Round Edges. At
+    // zero or above a colour boundary inside the sprite is rounded off too, and the number
+    // is how far apart two colours have to be to count as one — that, and nothing else, is
+    // Color Regions.
+    //
+    // Returns a new RGBA8 image the size of the sheet, flat wherever no sprite covers and
+    // carrying the sheet's own alpha throughout.
+    static Ref<Image> normal_from_shape(
+            const Ref<Image> &sheet,
+            const PackedInt32Array &rects,
+            int64_t roll_off,
+            int64_t curve,
+            double strength,
+            double color_tolerance,
+            bool green_down);
+
+    // IWPacking's Brightness: the same map, worked out from how light and dark the sprite's
+    // own colours are. Same rectangles and the same guarantee as normal_from_shape.
+    //
+    // Two scales added together. The fine one is a gradient of the brightness as it is and
+    // picks up line work; the coarse one is the same gradient over a mean `coarse_size`
+    // pixels across and picks up the large form. Either strength at zero skips that pass.
+    static Ref<Image> normal_from_brightness(
+            const Ref<Image> &sheet,
+            const PackedInt32Array &rects,
+            int64_t coarse_size,
+            double coarse_strength,
+            double fine_strength,
+            bool green_down);
 };
 
 } // namespace godot

@@ -114,6 +114,15 @@ void IWStageKernels::_bind_methods() {
     ClassDB::bind_static_method("IWStageKernels",
             D_METHOD("exclude_tiles", "ctx", "points", "active", "mode"),
             &IWStageKernels::exclude_tiles);
+    // Defined in iw_normal_kernels.cpp; bound here so every entry point is in one list.
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("normal_from_shape", "sheet", "rects", "roll_off", "curve", "strength",
+                    "color_tolerance", "green_down"),
+            &IWStageKernels::normal_from_shape);
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("normal_from_brightness", "sheet", "rects", "coarse_size",
+                    "coarse_strength", "fine_strength", "green_down"),
+            &IWStageKernels::normal_from_brightness);
 }
 
 // Rasterises this stage's shapes and folds them into whatever is already declared.

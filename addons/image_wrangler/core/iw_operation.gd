@@ -172,6 +172,11 @@ func get_key_color_property() -> StringName:
 ## form while that property is true. For a setting the other one replaces outright
 ## — a colour picked by hand against one worked out from the image — showing both
 ## would mean showing one that does nothing.
+##
+## [code]shown_when[/code] is the other way round and takes any property, with
+## [code]shown_values[/code] listing what it has to equal for the entry to show. For
+## the settings that only one choice of a dropdown uses, so picking a mode leaves the
+## form holding what that mode actually reads.
 func get_settings_schema() -> Array[Dictionary]:
     return []
 

@@ -28,6 +28,14 @@ const META_PROPERTY := &"iw_property"
 ## in the same way.
 const META_HIDDEN_WHEN := &"iw_hidden_when"
 
+## Marks a control with the property it is shown against, and the values of that
+## property that keep it on screen.
+##
+## The other way round from [constant META_HIDDEN_WHEN], and it takes any property
+## rather than a bool, so one dropdown can decide which of several settings apply.
+const META_SHOWN_WHEN := &"iw_shown_when"
+const META_SHOWN_VALUES := &"iw_shown_values"
+
 ## Where a readout keeps the name of the settings method that produces its line.
 const META_TEXT_FROM := &"iw_text_from"
 
@@ -112,6 +120,10 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
         var hidden_when: StringName = setting.get("hidden_when", &"")
         if hidden_when != &"":
             control.set_meta(META_HIDDEN_WHEN, hidden_when)
+        var shown_when: StringName = setting.get("shown_when", &"")
+        if shown_when != &"":
+            control.set_meta(META_SHOWN_WHEN, shown_when)
+            control.set_meta(META_SHOWN_VALUES, setting.get("shown_values", []))
         control.tooltip_text = tooltip
         target.add_child(control)
 
@@ -403,7 +415,7 @@ static func refresh_values(operation: IWOperation, container: Node) -> void:
 
 
 ## Shows or hides the controls whose schema entry named a [code]hidden_when[/code]
-## property, against what that property now says.
+## or [code]shown_when[/code] property, against what that property now says.
 ##
 ## Separate from [method refresh_values] because it also has to run after an
 ## ordinary edit: ticking the box that hides a control is itself just a settings
@@ -421,6 +433,10 @@ static func _visibility_into(settings: Resource, node: Node) -> void:
         if child is Control and child.has_meta(META_HIDDEN_WHEN):
             var gate: StringName = child.get_meta(META_HIDDEN_WHEN)
             (child as Control).visible = not bool(settings.get(gate))
+        if child is Control and child.has_meta(META_SHOWN_WHEN):
+            var against: StringName = child.get_meta(META_SHOWN_WHEN)
+            var allowed: Array = child.get_meta(META_SHOWN_VALUES, [])
+            (child as Control).visible = allowed.has(settings.get(against))
         _visibility_into(settings, child)
 
 
