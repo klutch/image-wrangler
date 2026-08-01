@@ -29,15 +29,13 @@ const TINT := Color(0.196, 0.939, 0.284)
 
 ## What happens to the tiles that were picked.
 enum TileSelection {
-    ## Everything goes through. What the operation does before anything is chosen.
-    ALL,
     ## The picked tiles are removed and the rest go through.
     EXCLUDE_SELECTED,
     ## Only the picked tiles go through and the rest are removed.
     INCLUDE_SELECTED,
 }
 
-const SELECTION_LABELS := ["All", "Exclude Selected", "Include Selected"]
+const SELECTION_LABELS := ["Exclude Selected", "Include Selected"]
 
 var settings: TileSelectorSettings
 
@@ -86,7 +84,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "label": "Mode",
             "type": SettingType.ENUM,
             "options": SELECTION_LABELS,
-            "tooltip": "What happens to the tiles you pick.\n\nAll lets everything through, which is what this does before anything is\npicked. Exclude Selected removes the ones you picked. Include Selected keeps\nonly those and removes the rest.\n\nEvery tile is outlined whichever mode is in force, including the ones that\nhave been removed, so a tile is always there to be clicked again.",
+            "tooltip": "What happens to the tiles you pick.\n\nExclude Selected removes the ones you picked and lets the rest through.\nInclude Selected does the opposite and keeps only those.\n\nEvery tile is outlined either way, including the ones that have been removed,\nso a tile is always there to be clicked again. The ones on their way out are\ndrawn faded.",
         },
         {
             "property": &"picks",
@@ -129,7 +127,7 @@ func clamp_settings_to_schema(target: Resource = null) -> void:
 
 
 static func sanitise_mode(mode: int) -> int:
-    return mode if mode >= 0 and mode < SELECTION_LABELS.size() else TileSelection.ALL
+    return mode if mode >= 0 and mode < SELECTION_LABELS.size() else TileSelection.EXCLUDE_SELECTED
 
 
 ## Brings home what the run found: every tile, and which one each pick landed on.

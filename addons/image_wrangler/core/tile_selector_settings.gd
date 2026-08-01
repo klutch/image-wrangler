@@ -19,6 +19,15 @@ extends Resource
 var found_bounds: Array[Rect2i] = []
 
 
+## Whether the tile numbered [param tile] survives this operation.
+##
+## Which is what the preview draws at full strength: a tile on its way out is faded, so the
+## picture and the outlines say the same thing.
+func survives(tile: int) -> bool:
+    var picked := chose(tile)
+    return not picked if mode == TileSelector.TileSelection.EXCLUDE_SELECTED else picked
+
+
 ## Whether the tile numbered [param tile] was chosen.
 func chose(tile: int) -> bool:
     if tile < 0:

@@ -331,9 +331,9 @@ public:
 
     // TileSelector: keeps or removes whole tiles, by which ones the user picked.
     //
-    // `points` is x,y interleaved, one pair per pick. `mode` is 0 to keep everything, 1 to
-    // remove the picked tiles, 2 to remove everything else. Returns "bounds", the
-    // rectangle of every tile found, and "picked", which tile each point landed on or -1.
+    // `points` is x,y interleaved, one pair per pick. `mode` is 0 to remove the picked
+    // tiles and 1 to remove everything else. Returns "bounds", the rectangle of every tile
+    // found, and "picked", which tile each point landed on or -1.
     static Dictionary select_tiles(
             const Ref<IWPipelineContext> &ctx, const PackedInt32Array &points, int64_t mode);
 };

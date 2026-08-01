@@ -40,6 +40,9 @@ signal fold_changed(entry: Control)
 ## same rule a drop uses, so a paste lands where the pointer said rather than at the end.
 signal menu_requested(entry: Control, above: bool)
 
+## Emitted when this entry is clicked, asking the stack to make it the selected one.
+signal selected_requested(entry: Control)
+
 ## Indent of the settings form under its header, matching what a folded group used.
 const INDENT := 8
 
@@ -60,6 +63,13 @@ const HANDLE_WIDTH := 22
 const PANEL_LIGHTEN := 0.06
 const PANEL_RADIUS := 5
 const PANEL_PADDING := 4
+
+## The border drawn round the entry the stack is pointed at, and how thick it is.
+##
+## Yellow because nothing else in the dock is: every card already wears its operation's own
+## colour, so the mark saying which one is current has to be a colour none of them can be.
+const SELECTED_BORDER_COLOR := Color(1.0, 0.85, 0.15)
+const SELECTED_BORDER_WIDTH := 2
 
 ## How far the card is carried towards its operation's own colour.
 ##
@@ -92,6 +102,9 @@ var _drop_side := 0
 ## Set while the card's own colour is being assigned, so the theme change that
 ## assignment raises does not come straight back in.
 var _styling := false
+
+## Whether the stack is pointed at this entry.
+var _selected := false
 
 
 func setup(operation: IWStackOperation, entry_uid: int, folded: bool) -> void:
@@ -163,9 +176,24 @@ func _apply_panel_style() -> void:
     box.bg_color = lifted
     box.set_corner_radius_all(PANEL_RADIUS)
     box.set_content_margin_all(PANEL_PADDING)
+    if _selected:
+        box.set_border_width_all(SELECTED_BORDER_WIDTH)
+        box.border_color = SELECTED_BORDER_COLOR
     add_theme_stylebox_override(&"panel", box)
 
     _styling = false
+
+
+## Whether the stack is pointed at this entry, which is what the border says.
+func set_selected(value: bool) -> void:
+    if _selected == value:
+        return
+    _selected = value
+    _apply_panel_style()
+
+
+func is_selected() -> bool:
+    return _selected
 
 
 func _build() -> void:
@@ -331,7 +359,20 @@ func _apply_fold_arrow() -> void:
 
 ## Right-clicks anywhere on the card itself: the padding, the gaps, the note.
 func _gui_input(event: InputEvent) -> void:
+    _offer_select(event)
     _offer_menu(event, self)
+
+
+## A left press anywhere this hears about points the stack at this entry.
+##
+## Not accepted, so the press carries on to whatever it landed on: clicking the title still
+## folds, and clicking the handle still starts a drag. Selecting is a thing that happens as
+## well as the click rather than instead of it.
+func _offer_select(event: InputEvent) -> void:
+    var button := event as InputEventMouseButton
+    if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_LEFT:
+        return
+    selected_requested.emit(self)
 
 
 ## Right-clicks on the title, which is a [Button] and would otherwise swallow them.
@@ -340,6 +381,7 @@ func _gui_input(event: InputEvent) -> void:
 ## broken. The form below is deliberately not forwarded — a right-click on a slider
 ## belongs to the slider.
 func _on_title_input(event: InputEvent) -> void:
+    _offer_select(event)
     _offer_menu(event, _title)
 
 

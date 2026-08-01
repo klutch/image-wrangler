@@ -227,9 +227,9 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
 // this took out is still in the alpha handed to the next run, so the point that chose it
 // still lands on it and it still gets an outline to click.
 //
-// `points` is x,y interleaved, one pair per pick. `mode` is 0 to keep everything, 1 to
-// remove what was picked, 2 to remove everything else. Returns the rectangle of every
-// tile found under "bounds", and under "picked" which tile each point landed on, or -1.
+// `points` is x,y interleaved, one pair per pick. `mode` is 0 to remove what was picked
+// and 1 to remove everything else. Returns the rectangle of every tile found under
+// "bounds", and under "picked" which tile each point landed on, or -1.
 Dictionary IWStageKernels::select_tiles(
         const Ref<IWPipelineContext> &ctx, const PackedInt32Array &points, int64_t mode) {
     Dictionary out;
@@ -271,7 +271,7 @@ Dictionary IWStageKernels::select_tiles(
     }
     out["picked"] = picked;
 
-    if (count <= 0 || mode == 0) {
+    if (count <= 0) {
         return out;
     }
 
@@ -286,7 +286,7 @@ Dictionary IWStageKernels::select_tiles(
     std::vector<uint8_t> doomed(static_cast<size_t>(count), 0);
     bool any = false;
     for (int64_t n = 0; n < count; n++) {
-        const bool go = mode == 1 ? chosen[static_cast<size_t>(n)] != 0
+        const bool go = mode == 0 ? chosen[static_cast<size_t>(n)] != 0
                                   : chosen[static_cast<size_t>(n)] == 0;
         doomed[static_cast<size_t>(n)] = go ? 1 : 0;
         any = any || go;

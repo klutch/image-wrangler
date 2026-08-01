@@ -36,6 +36,9 @@ signal setting_changed
 ## about the picture.
 signal fold_changed
 
+## Emitted when the stack is pointed at a different entry.
+signal selection_changed
+
 ## Emitted after entries are rebuilt, so the dock can rewire what it cached about
 ## their controls.
 signal entries_rebuilt
@@ -69,8 +72,8 @@ signal menu_requested(index: int, at: int)
 ##
 ## One Dictionary per group of [code]{"name": String, "entries": Array}[/code], each entry
 ## [code]{"script": String, "icon": StringName}[/code]. Built by the dock; see
-## [code]IWPanel.OPERATION_GROUPS[/code] for what the grouping is and why.
-var operation_groups: Array = []
+## Every operation the dropdown offers, in order. See [code]IWPanel.OPERATIONS[/code].
+var operations: Array = []
 
 ## Called as [code]build(operation, container, on_changed, fold_state, key)[/code] to
 ## fill one entry's form. Supplied by the dock so this does not have to know about the
@@ -96,6 +99,12 @@ var _list: VBoxContainer
 var _tools: HBoxContainer
 var _scroll: ScrollContainer
 var _next_uid := 1
+
+## Which entry the stack is pointed at, or 0 for none.
+##
+## Kept as the row's own number rather than its position, so it survives a reorder and a
+## rebuild — the position is exactly what those change.
+var _selected_uid := 0
 
 ## The part of a pixel this frame's scroll did not add up to.
 ##
@@ -272,7 +281,7 @@ func _build() -> void:
     # showing, and adding a second Polygon Edit is an ordinary thing to want.
     _selector = OptionButton.new()
     _selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _selector.tooltip_text = "Add an operation to the bottom of the stack.\nDrag its handle afterwards to move it.\n\nPicking the one already showing adds another of it, which is what duplicates are for."
+    _selector.tooltip_text = "Add an operation to the bottom of the stack.\nDrag its header afterwards to move it.\n\nPicking the same one twice adds a second of it, which is what duplicates are for.\nDisabled while no image is open."
     _selector.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
     _selector.get_popup().index_pressed.connect(_on_pick)
     add_child(_selector)
@@ -316,50 +325,47 @@ func _build() -> void:
     _refresh_selector()
 
 
-## Fills the dropdown from [member operation_groups].
+## What the dropdown always shows, and what a pick of it means: nothing.
 ##
-## Every operation stays offered however many are already in the stack, because a
-## second one of anything is a legitimate thing to want.
+## The row the control displays is the row it thinks is chosen, so without a standing entry
+## the dropdown would sit there naming whichever operation was added last, as though that
+## one were somehow current. This is a button wearing a list's clothes.
+const ADD_PROMPT := "Add New Operation"
+
+
+## Fills the dropdown from [member operations].
 ##
-## [b]A separator carries a label and takes an index of its own.[/b] That second half is
-## the trap: item 3 of the dropdown is no longer operation 3, so anything reading meaning
-## off the index would now be reading the wrong operation. Nothing here does —
-## [method _on_pick] goes through the metadata, and a separator has none — but that is
-## worth saying out loud rather than leaving as luck.
+## Every operation stays offered however many are already in the stack, because a second
+## one of anything is a legitimate thing to want.
 func _refresh_selector() -> void:
     if _selector == null:
         return
     _selector.clear()
-    var first_operation := -1
-    for group: Dictionary in operation_groups:
-        _selector.add_separator(String(group.get("name", "")))
-        for entry: Dictionary in group.get("entries", []):
-            var path := String(entry.get("script", ""))
-            var script: Script = load(path)
-            if script == null:
-                continue
-            var probe: IWOperation = script.new()
-            var icon := ToolButton.theme_icon(_selector, entry.get("icon", &""))
-            if icon != null:
-                _selector.add_icon_item(icon, probe.get_operation_name())
-            else:
-                # Outside the editor there is no icon theme to borrow from, and a row with
-                # a name on it is still a row that works.
-                _selector.add_item(probe.get_operation_name())
-            _selector.set_item_metadata(_selector.item_count - 1, path)
-            if first_operation < 0:
-                first_operation = _selector.item_count - 1
-    # The first real row rather than index 0, which is now a heading. What is showing is
-    # only what a click would add, but a heading showing there would read as a broken list.
-    if first_operation >= 0:
-        _selector.selected = first_operation
+    _selector.add_item(ADD_PROMPT)
+    for entry: Dictionary in operations:
+        var path := String(entry.get("script", ""))
+        var script: Script = load(path)
+        if script == null:
+            continue
+        var probe: IWOperation = script.new()
+        var icon := ToolButton.theme_icon(_selector, entry.get("icon", &""))
+        if icon != null:
+            _selector.add_icon_item(icon, probe.get_operation_name())
+        else:
+            # Outside the editor there is no icon theme to borrow from, and a row with a
+            # name on it is still a row that works.
+            _selector.add_item(probe.get_operation_name())
+        _selector.set_item_metadata(_selector.item_count - 1, path)
+    _selector.selected = 0
 
 
-## Adds the operation at [param index]. Every pick arrives here, including a pick of the
-## one already showing.
+## Adds the operation at [param index], and goes back to showing the prompt.
 func _on_pick(index: int) -> void:
-    if _selector == null or index < 0 or index >= _selector.item_count:
+    if _selector == null or index <= 0 or index >= _selector.item_count:
         return
+    # Back before the work, so the dropdown is right again even if loading the script
+    # fails.
+    _selector.selected = 0
     var path: Variant = _selector.get_item_metadata(index)
     if not (path is String):
         return
@@ -462,6 +468,7 @@ func rebuild() -> void:
         entry.setting_changed.connect(func(_e: Control) -> void: setting_changed.emit())
         entry.fold_changed.connect(func(_e: Control) -> void: fold_changed.emit())
         entry.menu_requested.connect(_on_entry_menu)
+        entry.selected_requested.connect(_on_entry_selected)
         record["entry"] = entry
         if form_builder.is_valid():
             form_builder.call(record["stage"], entry.settings_box(), entry, record["uid"])
@@ -469,7 +476,68 @@ func rebuild() -> void:
         # controls over disabled, and there were none to disable until now.
         entry.refresh_enabled_state()
 
+    _settle_selection()
     entries_rebuilt.emit()
+
+
+## Whether operations may be added at all.
+##
+## Off when no image is open: an operation with nothing to act on is a row belonging to
+## nobody, and the stack is emptied at the same moment.
+func set_can_add(value: bool) -> void:
+    if _selector != null:
+        _selector.disabled = not value
+
+
+## Which operation the stack is pointed at, or null when it holds none.
+func selected_stage() -> IWStackOperation:
+    for record: Dictionary in _entries:
+        if record["uid"] == _selected_uid:
+            return record["stage"]
+    return null
+
+
+## Points the stack at the entry numbered [param uid].
+func select_uid(uid: int) -> void:
+    if _selected_uid == uid:
+        return
+    _selected_uid = uid
+    _paint_selection()
+    selection_changed.emit()
+
+
+## Keeps something selected whenever there is anything to select.
+##
+## The first entry when the one that was selected has gone, and nothing at all when the
+## stack is empty. Called after every rebuild, since that is when entries appear and
+## disappear.
+func _settle_selection() -> void:
+    var wanted := 0
+    for record: Dictionary in _entries:
+        if record["uid"] == _selected_uid:
+            wanted = _selected_uid
+            break
+    if wanted == 0 and not _entries.is_empty():
+        wanted = _entries[0]["uid"]
+    var moved := wanted != _selected_uid
+    _selected_uid = wanted
+    _paint_selection()
+    if moved:
+        selection_changed.emit()
+
+
+func _paint_selection() -> void:
+    for record: Dictionary in _entries:
+        var entry: Control = record["entry"]
+        if entry != null and is_instance_valid(entry):
+            entry.set_selected(record["uid"] == _selected_uid)
+
+
+func _on_entry_selected(entry: Control) -> void:
+    for record: Dictionary in _entries:
+        if record["entry"] == entry:
+            select_uid(record["uid"])
+            return
 
 
 ## Copies each row's fold back onto its operation, so a rebuild does not open them all.

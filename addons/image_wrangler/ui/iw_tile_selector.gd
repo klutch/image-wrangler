@@ -87,15 +87,16 @@ func get_islands() -> Array[Rect2i]:
     return settings.found_bounds.duplicate() if settings != null else [] as Array[Rect2i]
 
 
-## Which of those tiles were chosen, so the chosen ones draw at full strength and the rest
-## sit back. The same channel a switched-off island uses, saying the same sort of thing.
+## Which of those tiles survive, so the ones on their way out are faded. The same channel a
+## switched-off island uses, saying the same sort of thing — this is not acting on the
+## result any more.
 func get_enabled_flags() -> PackedByteArray:
     var out := PackedByteArray()
     var settings := _settings()
     if settings == null:
         return out
     for tile in settings.found_bounds.size():
-        out.append(1 if settings.chose(tile) else 0)
+        out.append(1 if settings.survives(tile) else 0)
     return out
 
 

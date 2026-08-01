@@ -18,101 +18,53 @@ const HistoryView := preload("res://addons/image_wrangler/ui/iw_history_view.gd"
 ## Every [IWStackOperation] the stack can hold, in the order the dropdown offers them.
 ## Add new stack operations here.
 ##
-## [b]Grouped by what the operation is for, and the groups run in the order a stack
-## usually does[/b] — repair the pixels, move the colour, take the background out, work on
-## the edge it left, correct by hand, tidy what is left. Fifteen operations in one flat
-## list is a list nobody reads to the end of; six short headings is a list you can aim at.
-##
-## Edges is the one group whose members sit at opposite ends of a real stack: Refine Edges
-## belongs directly under the keying and Edge Cleanup belongs at the very bottom. They are
-## together because the question that sends you looking for either of them is the same one,
-## and a menu is for finding things rather than for arranging them.
-##
-## Within a group the order is alphabetical, and deliberately so rather than by any notion
-## of importance: the groups already say what a thing is for, and past that the only
-## question left is "where is the one I am looking for".
+## Alphabetical by the name the operation gives itself, and nothing else. Headings used
+## to sort them by what they were for, which only helps if you already know which
+## heading a thing lives under — and by name is the one order you can aim at without
+## knowing anything.
 ##
 ## [code]icon[/code] names an entry in [code]ui/icons/[/code], which is a copy of the
 ## editor's own set. See [method IWToolButton.theme_icon].
-const OPERATION_GROUPS := [
-    {
-        "name": "Repair",
-        "entries": [
-            {"script": "res://addons/image_wrangler/core/denoise.gd", "icon": &"Blend"},
-            {"script": "res://addons/image_wrangler/core/smooth_blocks.gd", "icon": &"Grid"},
-            {"script": "res://addons/image_wrangler/core/smooth_color.gd", "icon": &"Color"},
-            {"script": "res://addons/image_wrangler/core/smooth_halos.gd", "icon": &"Gradient"},
-        ],
-    },
-    {
-        "name": "Color",
-        "entries": [
-            {"script": "res://addons/image_wrangler/core/hsv_adjust.gd", "icon": &"ColorPicker"},
-            {"script": "res://addons/image_wrangler/core/random_hsv_tiles.gd", "icon": &"RandomNumberGenerator"},
-        ],
-    },
-    {
-        "name": "Background",
-        "entries": [
-            {"script": "res://addons/image_wrangler/core/remove_background.gd", "icon": &"Eraser"},
-            {"script": "res://addons/image_wrangler/core/remove_crevice.gd", "icon": &"ToolTriangle"},
-        ],
-    },
-    {
-        "name": "Edges",
-        "entries": [
-            {"script": "res://addons/image_wrangler/core/edge_cleanup.gd", "icon": &"Path2D"},
-            {"script": "res://addons/image_wrangler/core/refine_edges.gd", "icon": &"CurveEdit"},
-        ],
-    },
-    {
-        "name": "By Hand",
-        "entries": [
-            {"script": "res://addons/image_wrangler/core/brush_edit_op.gd", "icon": &"Paint"},
-            {"script": "res://addons/image_wrangler/core/island_picker_op.gd", "icon": &"ColorPick"},
-            {"script": "res://addons/image_wrangler/core/polygon_edit_op.gd", "icon": &"Polygon2D"},
-            {"script": "res://addons/image_wrangler/core/tile_selector.gd", "icon": &"ListSelect"},
-        ],
-    },
-    {
-        "name": "Cleanup",
-        "entries": [
-            {"script": "res://addons/image_wrangler/core/fill_pinholes.gd", "icon": &"Bucket"},
-            {"script": "res://addons/image_wrangler/core/remove_lines.gd", "icon": &"Line2D"},
-            {"script": "res://addons/image_wrangler/core/remove_minimum_area.gd", "icon": &"GPUParticles2D"},
-        ],
-    },
+const OPERATIONS := [
+    {"script": "res://addons/image_wrangler/core/brush_edit_op.gd", "icon": &"Paint"},
+    {"script": "res://addons/image_wrangler/core/denoise.gd", "icon": &"Blend"},
+    {"script": "res://addons/image_wrangler/core/edge_cleanup.gd", "icon": &"Path2D"},
+    {"script": "res://addons/image_wrangler/core/fill_pinholes.gd", "icon": &"Bucket"},
+    {"script": "res://addons/image_wrangler/core/hsv_adjust.gd", "icon": &"ColorPicker"},
+    {"script": "res://addons/image_wrangler/core/island_picker_op.gd", "icon": &"ColorPick"},
+    {"script": "res://addons/image_wrangler/core/polygon_edit_op.gd", "icon": &"Polygon2D"},
+    {"script": "res://addons/image_wrangler/core/random_hsv_tiles.gd", "icon": &"RandomNumberGenerator"},
+    {"script": "res://addons/image_wrangler/core/refine_edges.gd", "icon": &"CurveEdit"},
+    {"script": "res://addons/image_wrangler/core/remove_background.gd", "icon": &"Eraser"},
+    {"script": "res://addons/image_wrangler/core/remove_crevice.gd", "icon": &"ToolTriangle"},
+    {"script": "res://addons/image_wrangler/core/remove_lines.gd", "icon": &"Line2D"},
+    {"script": "res://addons/image_wrangler/core/remove_minimum_area.gd", "icon": &"GPUParticles2D"},
+    {"script": "res://addons/image_wrangler/core/smooth_blocks.gd", "icon": &"Grid"},
+    {"script": "res://addons/image_wrangler/core/smooth_color.gd", "icon": &"Color"},
+    {"script": "res://addons/image_wrangler/core/smooth_halos.gd", "icon": &"Gradient"},
+    {"script": "res://addons/image_wrangler/core/tile_selector.gd", "icon": &"ListSelect"},
 ]
 
 
-## Every operation script, groups flattened away.
-##
-## For the two places that only need to know which operations exist — the registry a
-## sidecar is decoded against, and the sweep that names them — where the grouping is
-## nothing but noise.
+## Every operation script, for the places that only need to know which operations exist —
+## the registry a sidecar is decoded against, and the sweep that names them.
 static func operation_scripts() -> Array:
     var out := []
-    for group: Dictionary in OPERATION_GROUPS:
-        for entry: Dictionary in group["entries"]:
-            out.append(entry["script"])
+    for entry: Dictionary in OPERATIONS:
+        out.append(entry["script"])
     return out
 
-## What a fresh image's stack starts as.
+## What a fresh image's stack starts as, which is nothing.
 ##
-## [b]The one operation that is always the answer.[/b] Every other stage is a response to
-## something a particular image did — a nook the flood could not get into, an island the
-## border could not reach, an edge that came back harder than it went in — and an image
-## that did none of those things does not want the stage that fixes it. A default stack
-## that guessed at all of them started every image carrying work nobody had asked for,
-## and made the form a list of things to switch off rather than a list of things to
-## reach for.
+## Every stage is a response to something a particular image did — a nook the flood could
+## not get into, an island the border could not reach, an edge that came back harder than
+## it went in — and an image that did none of those things does not want the stage that
+## fixes it. Anything guessed at here starts every image carrying work nobody asked for,
+## and makes the form a list of things to switch off rather than a list to reach for.
 ##
-## It also makes the default honest about the one thing this addon does. Add what the
-## image turns out to need; the dropdown is right there, and the order the rest
-## want to go in is on their own entries.
-const DEFAULT_STACK := [
-    "res://addons/image_wrangler/core/remove_background.gd",
-]
+## Add what the image turns out to need; the dropdown is right there, and the order the
+## rest want to go in is on their own entries.
+const DEFAULT_STACK := []
 
 ## The file operation, which is not a stack operation and never will be: it does not
 ## touch pixels, and its settings describe the batch rather than any one image.
@@ -557,7 +509,22 @@ var _upscale_model_note: Label
 var _original_fade: HSlider
 var _zoom_select: OptionButton
 var _zoom_entry: LineEdit
-var _indicator_toggle: CheckBox
+var _indicator_choice: OptionButton
+
+## How much of the stack's marks are drawn.
+enum Indicators {
+    ## Every operation's, all at once.
+    ALL,
+    ## None at all, so the result can be judged on its own.
+    NONE,
+    ## Only the operation the stack is pointed at.
+    SELECTED,
+}
+
+const INDICATOR_LABELS := ["All", "None", "Selected"]
+
+## Which of those is in force.
+var _indicators := Indicators.ALL
 var _magenta_toggle: CheckBox
 var _refresh_button: Button
 var _remove_button: Button
@@ -944,7 +911,7 @@ func _rebuild_ui() -> void:
     var suffix := _suffix_edit.text
     var fade := _original_fade.value
     var zoom := _preview.get_zoom()
-    var indicators := _preview.markers_visible
+    var indicators := _indicators
     var magenta := _preview.magenta_background
     # Back into the store the rebuild reads it out of, so the new form comes up pointed
     # at the same operation instances rather than at fresh ones carrying defaults.
@@ -962,8 +929,9 @@ func _rebuild_ui() -> void:
     _build_packing()
     _build_upscale()
 
-    _preview.markers_visible = indicators
-    _indicator_toggle.set_pressed_no_signal(indicators)
+    _indicators = indicators
+    _preview.markers_visible = _indicators != Indicators.NONE
+    _indicator_choice.selected = _indicators
     _preview.magenta_background = magenta
     _magenta_toggle.set_pressed_no_signal(magenta)
     _apply_stack_for(path)
@@ -1016,7 +984,7 @@ func _forget_controls() -> void:
     _original_fade = null
     _zoom_select = null
     _zoom_entry = null
-    _indicator_toggle = null
+    _indicator_choice = null
     _magenta_toggle = null
     _refresh_button = null
     _remove_button = null
@@ -1082,11 +1050,16 @@ func _build_ui() -> void:
     add_child(_autosave)
 
 
-## Nothing is reprocessed: the overlays are drawn over the result rather than into it,
-## so this is a repaint and not a rerun.
-func _on_indicators_toggled(pressed: bool) -> void:
+## Nothing is reprocessed: the overlays are drawn over the result rather than into it, so
+## this is a repaint and not a rerun.
+##
+## None switches the whole overlay off at the preview; Selected leaves it on and lets
+## [method _update_overlays] hand over one operation's marks instead of the stack's.
+func _on_indicators_chosen(index: int) -> void:
+    _indicators = index if index >= 0 and index < INDICATOR_LABELS.size() else Indicators.ALL
     if _preview != null:
-        _preview.markers_visible = pressed
+        _preview.markers_visible = _indicators != Indicators.NONE
+    _update_overlays()
 
 
 ## Nothing is reprocessed either: the ground is drawn under the result rather than into
@@ -1179,12 +1152,18 @@ func _build_preview_column() -> Control:
     # but this is a switch you want in sight while judging an edge, not one to go
     # hunting for. The overlays sit right on top of what they describe, so getting
     # them out of the way has to be quick.
-    _indicator_toggle = CheckBox.new()
-    _indicator_toggle.text = "Show Indicators"
-    _indicator_toggle.tooltip_text = INDICATOR_TOOLTIP
-    _indicator_toggle.button_pressed = true
-    _indicator_toggle.toggled.connect(_on_indicators_toggled)
-    toolbar.add_child(_indicator_toggle)
+    var indicator_label := Label.new()
+    indicator_label.text = "Indicators"
+    indicator_label.tooltip_text = INDICATOR_TOOLTIP
+    toolbar.add_child(indicator_label)
+
+    _indicator_choice = OptionButton.new()
+    _indicator_choice.tooltip_text = INDICATOR_TOOLTIP
+    for label: String in INDICATOR_LABELS:
+        _indicator_choice.add_item(label)
+    _indicator_choice.selected = Indicators.ALL
+    _indicator_choice.item_selected.connect(_on_indicators_chosen)
+    toolbar.add_child(_indicator_choice)
 
     # Beside the indicator switch because the two are the same kind of control — neither
     # touches the result, both change what you are looking at while judging it. The second
@@ -1331,11 +1310,14 @@ func _build_operation_column() -> Control:
     _stack_view.name = "Operations"
     _stack_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _stack_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-    _stack_view.operation_groups = OPERATION_GROUPS
+    _stack_view.operations = OPERATIONS
     _stack_view.form_builder = _build_entry_form
     _stack_view.stack_changed.connect(_on_stack_changed)
     _stack_view.setting_changed.connect(_on_setting_changed)
     _stack_view.fold_changed.connect(_on_fold_changed)
+    # Only matters while the marks are showing one operation's worth, but redrawing when
+    # they are not costs a pass over an overlay nobody is looking at.
+    _stack_view.selection_changed.connect(_update_overlays)
     _stack_view.entries_rebuilt.connect(_on_entries_rebuilt)
     _stack_view.copy_requested.connect(_on_copy_stack)
     _stack_view.paste_requested.connect(_on_paste_stack)
@@ -1506,7 +1488,13 @@ func _build_output_section() -> Control:
     _suffix_edit.text_changed.connect(func(_text: String) -> void: _suffix_is_default = false)
     suffix_row.add_child(_suffix_edit)
 
+    # Side by side rather than stacked. They are the same kind of action on the same
+    # things, and a column of two full-width buttons reads as two unrelated decisions.
+    var save_row := HBoxContainer.new()
+    section.add_child(save_row)
+
     _process_selected_button = Button.new()
+    _process_selected_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _process_selected_button.text = "Save Current"
     _process_selected_button.tooltip_text = "Process the selected image and ask where to save it.
 
@@ -1515,9 +1503,10 @@ thing there is to save there — plus the lookup table beside it, if that
 switch is on. On Upscale it runs the image's operations and then the
 network, which is what the tab is showing."
     _process_selected_button.pressed.connect(_on_process_selected)
-    section.add_child(_process_selected_button)
+    save_row.add_child(_process_selected_button)
 
     _process_all_button = Button.new()
+    _process_all_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _process_all_button.text = "Save All"
     _process_all_button.tooltip_text = "Process every image in the list and ask for a folder to put them in.
 
@@ -1528,7 +1517,7 @@ On Upscale it runs every image through its own operations and then the
 network. That is the slow one: it holds the editor for as long as it
 takes, and it reports nothing until it is done."
     _process_all_button.pressed.connect(_on_process_all)
-    section.add_child(_process_all_button)
+    save_row.add_child(_process_all_button)
 
     return section
 
@@ -1701,7 +1690,7 @@ func _on_remove_pressed() -> void:
         _on_file_selected(next)
     else:
         _blank_preview()
-        _clear_settings_context()
+        _clear_stack()
         _set_status("No image selected.")
         _detail_label.text = ""
     _update_controls()
@@ -1722,7 +1711,7 @@ func _on_clear_pressed() -> void:
     _result_image = null
     _refresh_file_list()
     _blank_preview()
-    _clear_settings_context()
+    _clear_stack()
     _set_status("No image selected.")
     _detail_label.text = ""
     _update_controls()
@@ -1814,6 +1803,9 @@ func _apply_stack_for(path: String) -> void:
             stage.enabled = bool(record["enabled"])
             stages.append(stage)
     _stack_view.set_stages(stages)
+    # Measured against the list rather than against this one path, so the dropdown is dead
+    # from the moment the dock opens until the first image arrives.
+    _stack_view.set_can_add(not _sources.is_empty())
     _refreshing = false
 
     # The shadow has to describe this image before anything can be diffed against it, and
@@ -2686,6 +2678,19 @@ func _schedule_autosave() -> void:
 ## The dialled-in values stay put. They describe nothing now — the next image selected
 ## is resolved from its own sidecar or from the default stack, never from these — but
 ## blanking a form the moment a row is deselected would throw away work for no gain.
+## Empties the stack and stops anything being added to it.
+##
+## With no image open there is nothing for an operation to act on, and a stack sitting
+## there belongs to an image that is no longer in the list. Called alongside
+## [method _blank_preview], since the two say the same thing about the same moment.
+func _clear_stack() -> void:
+    _refreshing = true
+    _stack_view.set_stages([] as Array[IWStackOperation])
+    _stack_view.set_can_add(false)
+    _refreshing = false
+    _update_overlays()
+
+
 func _clear_settings_context() -> void:
     _refreshing = true
     for stage: IWStackOperation in _stack_view.stages():
@@ -3161,8 +3166,17 @@ func _update_overlays() -> void:
         # same order — both are built by going through the entries in turn — but this way
         # each control arrives with the operation it belongs to, and that is where the
         # colour comes from.
+        # Under Selected only the operation the stack is pointed at draws anything. The
+        # marks sit right on top of the edges being judged, and one operation's worth is
+        # often all there is room to read.
+        var only: IWStackOperation = null
+        if _indicators == Indicators.SELECTED:
+            only = _stack_view.selected_stage()
+
         for entry: Control in _stack_view.entries():
             var stage: IWStackOperation = entry.stage
+            if only != null and stage != only:
+                continue
             var tint := stage.get_tint() if stage != null else Color.WHITE
             var live := stage != null and stage.enabled
             for control: Control in entry.pick_controls():
@@ -3217,7 +3231,7 @@ func _update_overlays() -> void:
         # anything slipped in earlier moves the highlight onto somebody else's rectangle.
         for entry: Control in _stack_view.entries():
             var stage: IWStackOperation = entry.stage
-            if stage == null:
+            if stage == null or (only != null and stage != only):
                 continue
             var marked := stage.marked_regions()
             if marked.is_empty():
