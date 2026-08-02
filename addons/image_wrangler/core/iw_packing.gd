@@ -182,6 +182,9 @@ const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd"
 ## What goes on the front of the file this tab's settings are saved to.
 const EXPORT_CONFIG_PREFIX := "export_"
 
+## The folder every batch's export settings go to, inside the project's user data.
+const EXPORT_CONFIG_DIR := "user://image_wrangler/exports"
+
 ## How much of the batch's fingerprint goes into that name, in characters.
 ##
 ## Sixteen hexadecimal characters is sixty-four bits. Two different sets of images landing
@@ -190,8 +193,8 @@ const EXPORT_CONFIG_PREFIX := "export_"
 const EXPORT_CONFIG_KEY_LENGTH := 16
 
 
-## Where this batch's export settings live: beside the images, named for which images they
-## are.
+## Where this batch's export settings live: in [constant EXPORT_CONFIG_DIR], named for
+## which images they are.
 ##
 ## The Export tab describes a whole list of files rather than any one of them, so it has no
 ## image to put a sidecar next to. It gets a file of its own instead, keyed on what is in the
@@ -212,7 +215,7 @@ static func export_config_path(sources: PackedStringArray) -> String:
         names.append(path.get_file())
     names.sort()
     var key := "\n".join(names).sha256_text().substr(0, EXPORT_CONFIG_KEY_LENGTH)
-    return sources[0].get_base_dir().path_join("%s%s%s"
+    return EXPORT_CONFIG_DIR.path_join("%s%s%s"
             % [EXPORT_CONFIG_PREFIX, key, SettingsIO.SIDECAR_SUFFIX])
 
 

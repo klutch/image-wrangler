@@ -4596,6 +4596,8 @@ func _flush_export_save() -> void:
         _export_save.stop()
     if _packing == null or _export_config_path.is_empty():
         return
+    # The folder is inside user data rather than beside anything, so nothing else makes it.
+    DirAccess.make_dir_recursive_absolute(IWPacking.EXPORT_CONFIG_DIR)
     var error := SettingsIO.save_stack_to(_export_config_path, _export_records())
     if error == OK:
         _export_save_failed = false
