@@ -19,7 +19,7 @@ enum MatteSource {
 ##
 ## Beside the rest of the addon's gitignored third-party folders, and empty in a fresh
 ## checkout — no model ships here. Download Latest Model is what fills it.
-const MODEL_SUBDIR := "res://addons/image_wrangler/thirdparty/anime-seg"
+const MODEL_SUBDIR := "res://addons/image_wrangler/thirdparty/isnet-general"
 
 ## Where the converted model can be fetched from, and roughly what it weighs. Carried on
 ## the Model Folder schema entry; see [IWModelFolder].

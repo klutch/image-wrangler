@@ -149,17 +149,17 @@ several licences — the file lists which applies to what.
 
 Source: <https://github.com/KhronosGroup/glslang>
 
-## anime-segmentation trained model — Apache-2.0, not redistributed here
+## DIS isnet-general-use trained model — Apache-2.0, not redistributed here
 
-Copyright SkyTNT.
+Copyright Xuebin Qin and the DIS project contributors.
 
 What the Neural Remove Background stage runs. **No part of it ships with this addon**:
-the user downloads the converted model into `thirdparty/anime-seg/`, which is gitignored,
-and the addon stands down when the folder holds nothing. The archive carries the project's
-Apache-2.0 licence text beside the weights, and it stays with them.
+the user downloads the converted model into `thirdparty/isnet-general/`, which is
+gitignored, and the addon stands down when the folder holds nothing. The archive carries
+the project's Apache-2.0 licence text beside the weights, and it stays with them.
 
-Source: <https://github.com/SkyTNT/anime-segmentation>
-Weights: <https://huggingface.co/skytnt/anime-seg>
+Source: <https://github.com/xuebinqin/DIS>
+Weights: <https://github.com/danielgatis/rembg/releases/tag/v0.0.0> (`isnet-general-use.onnx`)
 
 ## godot-cpp — MIT
 

@@ -126,10 +126,11 @@ Error IWSegNet::open_with(const String &model_dir, bool force_cpu) {
         return ERR_INVALID_DATA;
     }
     input_blob = ins.front();
-    // The converted model has exactly one output — the exporter's own `mask`, an Interp
-    // to full size and a Sigmoid. front() rather than the normal net's back(), so a
-    // conversion that leaves a deep-supervision head behind still answers with the fused
-    // output, which comes first.
+    // The conversion recipe prunes the model to exactly one output before converting,
+    // and that is load-bearing: pnnx numbers outputs by graph topology, not by the order
+    // the ONNX declared them, so on a multi-head export front() lands on whichever head
+    // the graph reaches first — measured as a quarter-resolution one, which fails the
+    // shape check below. One output in the file makes front() the only answer there is.
     output_blob = outs.front();
 
     open_dir = model_dir;

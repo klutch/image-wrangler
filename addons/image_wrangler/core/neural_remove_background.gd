@@ -20,11 +20,12 @@ extends IWStackOperation
 ## can hand the alpha to the network's own answer instead, which survives busy backgrounds
 ## no single sampled colour describes, at the cost of edge sharpness and decontamination.
 ##
-## [b]One subject at a time.[/b] The model behind this is trained on single illustrated
-## characters, and that is the shape of picture it answers well. A sheet of many small
-## sprites usually comes back with nothing called subject at all — measured, not assumed —
-## and rather than key the whole image out on that answer, the stage stands down and the
-## Last Run readout says so. Cut a sheet up and feed it a sprite at a time instead.
+## The model behind this is IS-Net trained for general dichotomous segmentation, chosen
+## over the anime-specific one after a measured sweep: it clears every sprite on a dense
+## sprite sheet where that one answered nothing. Its one soft spot, also measured, is a
+## single very large subject filling most of the frame. Should the network ever call
+## nothing subject at all — its way of refusing a picture — the stage stands down rather
+## than key the whole image out, and the Last Run readout says so.
 ##
 ## Needs a model you have downloaded or converted yourself, and takes seconds where the
 ## rest of the stack takes milliseconds — so the preview waits for Refresh until the
@@ -243,7 +244,7 @@ func get_settings_schema() -> Array[Dictionary]:
             # archive is published; the button says so instead of fetching the wrong model.
             "download_url": NeuralRemoveBackgroundSettings.MODEL_URL,
             "download_bytes": NeuralRemoveBackgroundSettings.MODEL_BYTES,
-            "tooltip": "The folder holding the converted segmentation model.\n\nNo model ships with this addon. Convert SkyTNT's anime-seg to ncnn's format\nyourself and point this at the folder holding it — any .param with a .bin of\nthe same name beside it will do.\n\nUntil then this stage is offered but makes nothing, and says why.",
+            "tooltip": "The folder holding the converted segmentation model.\n\nNo model ships with this addon. Convert the DIS project's isnet-general-use\nto ncnn's format yourself and point this at the folder holding it — any\n.param with a .bin of the same name beside it will do; see the README in the\ndefault folder for the recipe.\n\nUntil then this stage is offered but makes nothing, and says why.",
         },
         {
             "property": &"threshold",
