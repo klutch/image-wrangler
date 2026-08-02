@@ -35,8 +35,9 @@ extends Resource
 
 ## Whether a lookup table is written beside the sheet when it is saved.
 ##
-## It is a second file, not a change to the sheet: one pixel per sprite, holding where that
-## sprite landed. See [IWPacking]'s class note for what is in it and how it is read.
+## It is a second file, not a change to the sheet: two pixels per sprite, holding where
+## that sprite landed and its pivot. See [IWPacking]'s class note for what is in it and how
+## it is read.
 ##
 ## On by default. A packed sheet is close to unusable without something naming where each
 ## sprite went, and the table costs a small file next to the sheet rather than anything in

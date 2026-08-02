@@ -31,11 +31,11 @@ extends IWOperation
 ##
 ## [b]The one thing a sheet cannot tell you is where anything on it went.[/b] Switch
 ## [member PackingSettings.create_lookup_table] on and saving writes a second file beside
-## the PNG, named the same with [code]_lut.res[/code] on the end — a texture holding one
-## pixel per sprite, in the order the sprites were found, whose red, green, blue and alpha
-## are that sprite's left, top, width and height on the sheet in pixels. A shader given the
-## sprite's number reads its rectangle in one fetch, instead of being told the layout some
-## other way. See [method build_lookup_image] for the shape of it.
+## the PNG, named the same with [code]_lut.res[/code] on the end — a texture holding two
+## pixels per sprite, in the order the sprites were found: the rectangle it landed in, then
+## its pivot. A shader given the sprite's number reads both in two fetches, instead of
+## being told the layout some other way. See [method build_lookup_image] for the shape of
+## it.
 ##
 ## [b]A normal map can come off the same sheet.[/b] Add anything to [member normal_layers]
 ## and saving writes a third file, named the same with [code]_normal.png[/code] on the end,
@@ -105,14 +105,6 @@ const MAX_SIZE := 16384
 
 ## The widest gap that can be asked for between sprites.
 const MAX_PADDING := 16
-
-## How wide the lookup table is, in pixels, whatever is in it.
-##
-## Fixed rather than fitted to the sprite count so the shader side is a constant it can
-## divide by rather than a number it has to be told. 256 rows the table over at a width
-## every GPU takes, and a row of it is 4 KB — small enough that a sheet of nine sprites
-## paying for the whole row is not worth a second thought.
-const LUT_WIDTH := 256
 
 ## What goes on the end of the lookup table's name, extension included.
 const LUT_SUFFIX := "_lut.res"
@@ -272,7 +264,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "property": &"create_lookup_table",
             "label": "Create Lookup Table",
             "type": SettingType.BOOL,
-            "tooltip": "Writes a second file beside the sheet holding where every sprite landed on\nit, named the same with %s on the end.\n\nIt is a %d-wide texture with one pixel per sprite, in the order the sprites\nwere found. That pixel's red, green, blue and alpha are the sprite's left,\ntop, width and height on the sheet, in pixels — so a shader handed a sprite\nnumber can read its rectangle in one fetch.\n\nSprite n is at x = n %% %d, y = n / %d. The file is only written when the\nsheet is saved." % [LUT_SUFFIX, LUT_WIDTH, LUT_WIDTH, LUT_WIDTH],
+            "tooltip": "Writes a second file beside the sheet holding where every sprite landed on\nit, named the same with %s on the end.\n\nIt is a texture with two pixels per sprite, in the order the sprites were\nfound. The first pixel is the sprite's rectangle: left, top, width, height\non the sheet, in pixels. The second is its pivot: where it sits, then a unit\nvector for which way it points — the middle of the rectangle pointing (0, 1)\nuntil a pivot is set.\n\nSprite n's first pixel is at x = (2n) %% width, y = (2n) / width, and the\nsecond is one to its right. Both sides are powers of two, grown width first\nas sprites are added — read the size with textureSize(). The file is only\nwritten when the sheet is saved." % LUT_SUFFIX,
         },
     ]
 
@@ -588,36 +580,56 @@ static func lookup_path_for(sheet_path: String) -> String:
     return sheet_path.get_basename() + LUT_SUFFIX
 
 
-## How big a table [param count] sprites needs.
+## How big a table [param count] sprites needs, at two pixels each.
 ##
-## [constant LUT_WIDTH] across always, and as many rows as that takes rounded up to a power
-## of two. Rounding wastes at most half a table's worth of empty pixels, which at 4 KB a row
-## is nothing, and buys a height a shader can shift by rather than divide by — and one that
-## stops changing every time a sprite is added or taken away.
+## Both sides powers of two, grown width first: when the table is full, the width doubles
+## while it equals the height and the height doubles otherwise, so it goes 2 x 1, 2 x 2,
+## 4 x 2, 4 x 4 and stays square or 2:1. The width is always even, which is what keeps a
+## sprite's two pixels on one row. The shader reads the size with
+## [code]textureSize()[/code] rather than being told it.
 static func lookup_size(count: int) -> Vector2i:
-    var rows: int = maxi(1, ceili(float(maxi(count, 1)) / float(LUT_WIDTH)))
-    return Vector2i(LUT_WIDTH, nearest_po2(rows))
+    var pixels := maxi(count * 2, 2)
+    var width := 2
+    var height := 1
+    while width * height < pixels:
+        if width == height:
+            width *= 2
+        else:
+            height *= 2
+    return Vector2i(width, height)
 
 
 ## The lookup table itself, from one [Rect2i] per sprite in the order they were found.
 ##
-## Sprite n is the pixel at [code](n % LUT_WIDTH, n / LUT_WIDTH)[/code], and its channels
-## are the rectangle: red and green the top-left corner, blue and alpha the size, all four
-## in sheet pixels rather than normalized — divide by [code]textureSize()[/code] in the
-## shader if UVs are what is wanted.
+## Sprite n owns pixels [code]2n[/code] and [code]2n + 1[/code], counted row by row: the
+## first is at [code]((2n) % width, (2n) / width)[/code] and the second sits directly to
+## its right. The first pixel is the rectangle — red and green the top-left corner, blue
+## and alpha the size. The second is the pivot: red and green where it sits, blue and
+## alpha a unit vector for which way it points. Everything is in sheet pixels rather than
+## normalized — divide by the sheet's size in the shader if UVs are what is wanted.
+##
+## Until the pivot editor exists, every pivot is the middle of its rectangle pointing
+## [code](0, 1)[/code].
 ##
 ## [b]RGBAF, so the numbers survive.[/b] A coordinate on a 2048-wide sheet needs more than
 ## the 256 steps a byte per channel gives, and full floats hold a whole pixel count exactly
-## with nothing to unpack at the other end. Pixels past the last sprite are left at zero,
-## which is a rectangle of no area and so cannot be mistaken for a sprite.
+## with nothing to unpack at the other end. A sprite that was not placed keeps both pixels
+## at zero — no area, and a pivot direction of no length — as does everything past the
+## last sprite.
 static func build_lookup_image(rects: Array) -> Image:
     var size := lookup_size(rects.size())
     var image := Image.create_empty(size.x, size.y, false, Image.FORMAT_RGBAF)
     for i in rects.size():
         var rect: Rect2i = rects[i]
+        if rect.size.x <= 0 or rect.size.y <= 0:
+            continue
+        var base := i * 2
         @warning_ignore("integer_division")
-        image.set_pixel(i % LUT_WIDTH, i / LUT_WIDTH,
+        var at := Vector2i(base % size.x, base / size.x)
+        image.set_pixel(at.x, at.y,
                 Color(rect.position.x, rect.position.y, rect.size.x, rect.size.y))
+        var pivot := Vector2(rect.position) + Vector2(rect.size) * 0.5
+        image.set_pixel(at.x + 1, at.y, Color(pivot.x, pivot.y, 0.0, 1.0))
     return image
 
 
