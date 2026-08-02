@@ -1,10 +1,6 @@
 <h1 align="center">Image Wrangler</h1>
 
 <p align="center">
-  <b>Cut subjects out of images and turn them into game-ready sheets, without leaving Godot.</b>
-</p>
-
-<p align="center">
   <img alt="Godot 4.7+" src="https://img.shields.io/badge/Godot-4.7%2B-0072B2?style=for-the-badge&logo=godotengine&logoColor=white">
   <img alt="GDExtension C++" src="https://img.shields.io/badge/GDExtension-C%2B%2B-E69F00?style=for-the-badge&logoColor=white">
   <img alt="Windows x86_64" src="https://img.shields.io/badge/Windows-x86__64-56B4E9?style=for-the-badge&logo=windows&logoColor=white">
@@ -56,12 +52,14 @@ baked in take the same path.
   <br>
   <em>Three AI-made flower sheets, backgrounds and all.</em>
 </p>
+<br/>
 
 <p align="center">
   <img src="workspace_modified.png" alt="The same sheet with the background removed">
   <br>
   <em>Background removed, edges kept soft, some regions corrected with the manual tools.</em>
 </p>
+<br/>
 
 <p align="center">
   <img src="workspace_packing.png" alt="114 sprites packed onto a single sheet">
@@ -139,7 +137,7 @@ made.
 | **Round Edges** | Rounds each sprite off from its outline inwards. The silhouette only, so a flat shape comes out looking carved. |
 | **Color Regions** | The same rounding, plus every colour boundary inside the sprite, so each flat area of colour lifts on its own. |
 | **Brightness** | Reads the sprite's own light and dark as high and low. Picks up line work and large form. |
-| **Neural** | Hands each sprite to a trained network. Needs a ncnn-compatible model. Tested using [klutch/deepbump-ncnn](https://github.com/klutch/deepbump-ncnn). |
+| **Neural** | Hands each sprite to a trained network. Needs a ncnn-compatible model. Tested using [deepbump-ncnn](https://github.com/klutch/deepbump-ncnn). |
 
 Four switches act on the whole map rather than one generator. **Green Points Down** flips
 the green channel for DirectX-style engines; off is what Godot wants. **Show Normal Map**
@@ -150,7 +148,7 @@ outermost rim with the shape found just inside it, as deep as **Inner Reach** sa
 > **Getting the Neural model.** Add a Neural generator and press **Download Latest Model**.
 > It fetches the model, about thirteen megabytes, and unpacks it into the folder named
 > above the button. It can also be downloaded by hand from
-> [klutch/deepbump-ncnn](https://github.com/klutch/deepbump-ncnn), with the folder pointed
+> [deepbump-ncnn](https://github.com/klutch/deepbump-ncnn), with the folder pointed
 > at wherever you put it.
 
 ### Upscale
