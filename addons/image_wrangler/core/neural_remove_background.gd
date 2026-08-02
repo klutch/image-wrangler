@@ -30,10 +30,11 @@ extends IWStackOperation
 ## than key the whole image out, and the Last Run readout says so.
 ##
 ## Needs a model you have downloaded or converted yourself, and takes seconds where the
-## rest of the stack takes milliseconds — so the preview waits for Refresh until the
-## network has run once. [b]The answer is kept[/b]: it depends on the source pixels and
-## the model folder and nothing else, so dragging Threshold or Edge Width re-runs only the
-## cheap half, and the second preview of the same image is instant. See [member _mask_cache].
+## rest of the stack takes milliseconds. The preview follows anyway — the editor stalls
+## behind the progress bar for those seconds, once. [b]The answer is kept[/b]: it depends
+## on the source pixels and the model folder and nothing else, so dragging Threshold or
+## Edge Width re-runs only the cheap half, and the second preview of the same image is
+## instant. See [member _mask_cache].
 
 ## The colour this operation's marks are drawn in on the preview.
 ##
@@ -156,17 +157,6 @@ func resolved_model_dir() -> String:
     return ProjectSettings.globalize_path(dir)
 
 
-## True while the network would have to run from scratch for [param source].
-##
-## What the dock reads to decide whether the preview may follow a setting or has to wait
-## for Refresh. False once the answer is in hand, so everything downstream of this stage
-## goes back to being live.
-func is_expensive(source: Image) -> bool:
-    if source == null:
-        return true
-    return not _mask_cache.has(_cache_key(source.get_data(), resolved_model_dir()))
-
-
 func prerequisite_note(_ctx: IWPipelineContext) -> String:
     if not is_offered():
         return "This build has no network to run. See tools/build_ncnn.py."
@@ -252,6 +242,8 @@ func get_settings_schema() -> Array[Dictionary]:
             # archive is published; the button says so instead of fetching the wrong model.
             "download_url": NeuralRemoveBackgroundSettings.MODEL_URL,
             "download_bytes": NeuralRemoveBackgroundSettings.MODEL_BYTES,
+            # No Refresh button on this card: the preview follows on its own.
+            "show_refresh": false,
             "tooltip": "The folder holding the converted segmentation model.\n\nNo model ships with this addon. Convert the DIS project's isnet-general-use\nto ncnn's format yourself and point this at the folder holding it — any\n.param with a .bin of the same name beside it will do; see the README in the\ndefault folder for the recipe.\n\nUntil then this stage is offered but makes nothing, and says why.",
         },
         {

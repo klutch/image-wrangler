@@ -3989,6 +3989,13 @@ func _start_preview() -> void:
 ## [member _preview_running] and cancels this one, and the answer is dropped if the dock
 ## left the tree while a stage was running.
 func _run_preview_here(worker: IWOperation, source: Image) -> void:
+    # The first stage can hold the thread for seconds — the network does — and the
+    # set_busy of a moment ago has not been painted yet. Resuming after the next draw
+    # guarantees the overlay is actually on screen before anything can stall. One frame,
+    # imperceptible when the stack is cheap.
+    await RenderingServer.frame_post_draw
+    if _shutting_down:
+        return
     var started := Time.get_ticks_msec()
     var result: Image
     if worker is IWPipeline:
@@ -4512,14 +4519,14 @@ func _on_download_done(message: String, ok: bool) -> void:
         _preview.set_busy(false)
     if _is_image_mode(_mode):
         # A model that has just arrived un-blocks whichever stage was waiting on it, which
-        # nothing else would notice — the setting did not move, what is behind it did. The
-        # stage is still expensive until it has run, so the preview is asked for rather
-        # than started.
+        # nothing else would notice — the setting did not move, what is behind it did.
+        _set_status(message)
         if ok:
             _refresh_notes()
-            _set_status("%s Press Refresh to run it." % message)
-        else:
-            _set_status(message)
+            if _auto_preview_allowed():
+                _schedule_preview()
+            else:
+                _set_status("%s Press Refresh to run it." % message)
         return
     _set_packing_status(message)
     if not ok:

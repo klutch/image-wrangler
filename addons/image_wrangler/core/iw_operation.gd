@@ -52,6 +52,8 @@ enum SettingType {
     ## where that model's archive lives and roughly what it weighs; left off, the control
     ## falls back to DeepBump's. A [code]download_url[/code] present but [i]empty[/i] means
     ## no archive is published yet, and the button says so instead of fetching.
+    ## [code]show_refresh[/code] false drops the row's own Refresh button, for a card
+    ## whose preview follows settings on its own.
     MODEL_FOLDER,
 }
 

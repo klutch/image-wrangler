@@ -83,6 +83,10 @@ var _label := "Model Folder"
 var _url := MODEL_URL
 var _bytes := ESTIMATED_DOWNLOAD_BYTES
 
+## Whether the row carries its own Refresh button. Off for a card whose preview follows
+## settings on its own, where the button would be a second way to do nothing new.
+var _show_refresh := true
+
 var _field: LineEdit
 var _browse: Button
 var _refresh_button: Button
@@ -120,6 +124,7 @@ func setup(operation: IWOperation, property: StringName, fallback := "",
     _label = String(setting.get("label", _label))
     _url = String(setting.get("download_url", _url))
     _bytes = int(setting.get("download_bytes", _bytes))
+    _show_refresh = bool(setting.get("show_refresh", _show_refresh))
     _settle()
     _build()
     refresh()
@@ -175,11 +180,12 @@ func _build() -> void:
     _warning.visible = false
     add_child(_warning)
 
-    _refresh_button = Button.new()
-    _refresh_button.text = "Refresh"
-    _refresh_button.tooltip_text = "Runs the export again now, network included."
-    _refresh_button.pressed.connect(func() -> void: refresh_requested.emit())
-    add_child(_refresh_button)
+    if _show_refresh:
+        _refresh_button = Button.new()
+        _refresh_button.text = "Refresh"
+        _refresh_button.tooltip_text = "Runs the export again now, network included."
+        _refresh_button.pressed.connect(func() -> void: refresh_requested.emit())
+        add_child(_refresh_button)
 
     _download = Button.new()
     _download.text = "Download Latest Model"
@@ -333,7 +339,8 @@ func _update_buttons() -> void:
     var live := _interactive and not _busy
     _field.editable = live
     _browse.disabled = not live
-    _refresh_button.disabled = not live
+    if _refresh_button != null:
+        _refresh_button.disabled = not live
     _download.disabled = not live or not _network_built() or _url.is_empty()
     _download.text = "Downloading..." if _busy else "Download Latest Model"
 
