@@ -1264,7 +1264,7 @@ func _build_source_column() -> Control:
     var add_button := Button.new()
     add_button.text = "Add"
     add_button.tooltip_text = "Add image files."
-    add_button.pressed.connect(func() -> void: _open_dialog.popup_centered_ratio(0.6))
+    add_button.pressed.connect(_on_add_pressed)
     header.add_child(add_button)
 
     _remove_button = Button.new()
@@ -1773,7 +1773,7 @@ func _build_dialogs() -> void:
     for extension: String in SUPPORTED_EXTENSIONS:
         patterns.append("*." + extension)
     _open_dialog.add_filter(", ".join(patterns), "Images")
-    _open_dialog.files_selected.connect(_add_sources)
+    _open_dialog.files_selected.connect(_on_files_chosen)
     add_child(_open_dialog)
 
     _output_dialog = FileDialog.new()
@@ -1885,8 +1885,28 @@ static func _is_supported(path: String) -> bool:
     return SUPPORTED_EXTENSIONS.has(path.get_extension().to_lower())
 
 
-func _add_sources(paths: PackedStringArray) -> void:
+## Opens the Add dialog where the last add came from, when that folder is still there.
+func _on_add_pressed() -> void:
+    var dir := IWAddonSettings.last_add_dir()
+    if not dir.is_empty():
+        _open_dialog.current_dir = dir
+    _open_dialog.popup_centered_ratio(0.6)
+
+
+## Takes what the dialog returned, and remembers the folder when something was actually added.
+##
+## Only this path remembers it. A drag from the FileSystem dock also adds images, but it names
+## somewhere inside the project rather than somewhere the user browsed to, and opening the
+## dialog there next time would be answering a question nobody asked.
+func _on_files_chosen(paths: PackedStringArray) -> void:
+    if _add_sources(paths) > 0:
+        IWAddonSettings.set_last_add_dir(String(paths[0]).get_base_dir())
+
+
+## Adds every supported path not already on the list. Returns how many arrived.
+func _add_sources(paths: PackedStringArray) -> int:
     var skipped := 0
+    var added := 0
     var first_new := -1
     for raw_path in paths:
         var path := String(raw_path)
@@ -1898,6 +1918,7 @@ func _add_sources(paths: PackedStringArray) -> void:
         if first_new < 0:
             first_new = _sources.size()
         _sources.append(path)
+        added += 1
 
     _refresh_file_list()
     if first_new >= 0 and _file_list.get_selected_items().is_empty():
@@ -1906,6 +1927,7 @@ func _add_sources(paths: PackedStringArray) -> void:
     elif skipped > 0:
         _set_status("Skipped %d unsupported file(s)." % skipped)
     _update_controls()
+    return added
 
 
 ## Rewrites the Images list, and asks for a packing.
