@@ -54,7 +54,6 @@ const OPERATIONS := [
 ## holds one keeps working and keeps saving. Only the way to add a new one is closed.
 const WITHHELD_OPERATIONS := [
     "res://addons/image_wrangler/core/refine_edges.gd",
-    "res://addons/image_wrangler/core/remove_background.gd",
 ]
 
 
