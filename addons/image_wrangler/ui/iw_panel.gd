@@ -729,6 +729,10 @@ func _ready() -> void:
 ## Ctrl+Z and Ctrl+Shift+Z walk this image's history, one step up or down the list the
 ## History tab shows.
 ##
+## Ctrl+C and Ctrl+V carry the whole stack, the same as the two toolbar buttons above it.
+## Only on the Operations tab and only with an image open, since neither means anything
+## without a stack to read or write.
+##
 ## Ctrl+Shift+R rebuilds the interface, which is a development affordance rather than
 ## a feature: see [method _rebuild_ui]. It takes a modifier so it cannot be hit by
 ## accident, and being scoped to the dock like the rest, it leaves the combination free
@@ -756,6 +760,24 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
     if key.echo:
         return
+
+    # The whole stack to and from the clipboard. Both are left unhandled when there is
+    # nothing for them to do — an empty stack to copy, or a clipboard holding no stack — so
+    # the keystroke stays free for whatever else wants it rather than being swallowed to do
+    # nothing. The History tab is deliberately not included: it is a record of edits, and
+    # pasting over the stack from there would be an edit arriving from a tab that only reads.
+    if key.ctrl_pressed and not key.shift_pressed and not key.alt_pressed \
+            and not key.meta_pressed and _mode == Mode.IMAGE \
+            and not _current_path().is_empty():
+        if key.keycode == KEY_C and not _stack_view.stages().is_empty():
+            accept_event()
+            _on_copy_stack()
+            return
+        # Pasted before the key is claimed, because whether there was anything to paste is
+        # the same question as whether this keystroke was ours.
+        if key.keycode == KEY_V and _paste_stack_from_clipboard():
+            accept_event()
+            return
 
     if key.keycode == KEY_R and key.ctrl_pressed and key.shift_pressed \
             and not key.alt_pressed and not key.meta_pressed:
@@ -2616,12 +2638,24 @@ func _on_copy_stack() -> void:
 
 ## Puts whatever stack is on the clipboard in place of this one.
 func _on_paste_stack() -> void:
+    if not _paste_stack_from_clipboard():
+        _set_status("Found no operation stack on the clipboard.")
+
+
+## The clipboard's stack in place of this one. Returns whether there was one to take.
+##
+## Split out from the button's handler so the Ctrl+V route can ask whether there is anything
+## to paste and do it in the same breath, rather than reading the clipboard twice.
+##
+## Goes through [method _replace_stack], so this is one recorded edit and Ctrl+Z puts the old
+## stack back.
+func _paste_stack_from_clipboard() -> bool:
     var stages := _stages_from_text(DisplayServer.clipboard_get())
     if stages.is_empty():
-        _set_status("Found no operation stack on the clipboard.")
-        return
+        return false
     _replace_stack(stages, "Paste stack")
     _set_status("Pasted %s over the stack." % _operation_count(stages.size()))
+    return true
 
 
 # --- The right-click menu over the stack --------------------------------
