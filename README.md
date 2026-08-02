@@ -38,7 +38,7 @@ same tools, same results.
 
 ![The original sheet loaded in the editor](workspace_original.png)
 
-**After** — background gone, edges kept soft, a few regions fixed by hand:
+**After** — background gone, edges kept soft, a few regions touched up with the manual tools:
 
 ![The same sheet with the background removed](workspace_modified.png)
 
@@ -51,52 +51,28 @@ same tools, same results.
 ## ✨ What it can do
 
 Operations are stacked. You add the ones an image actually needs, drag them into the order
-you want, and they run as one pass — so a stage never sees a half-finished image.
-
-### 🔵 Repair — fix the pixels before anything reads them
-
-| | Operation | What it does |
-|:--|:--|:--|
-| 🌫️ | **Denoise** | Runs Intel Open Image Denoise over the source. Lifts grain and JPEG mosquito noise while leaving edges where it found them. |
-| ▦ | **Smooth Blocks** | Flattens the 8×8 grid a JPEG leaves behind. |
-| 🎨 | **Smooth Color** | Flattens colour while leaving brightness alone, fixing colour smeared sideways past every edge. |
-| 〰️ | **Smooth Halos** | Flattens the faint ripples a JPEG leaves beside a hard edge. |
-
-### 🟠 Color — move the colours around
-
-| | Operation | What it does |
-|:--|:--|:--|
-| 🎚️ | **HSV Adjust** | Pick rectangles off the preview; each gets its own hue, saturation and value sliders. Regions may overlap. |
-| 🎲 | **Random HSV Tiles** | Finds every separate object on its own and gives each one a random colour. Forty flowers, forty palettes, one click. |
-
-### 🟣 Background — take the background out
-
-| | Operation | What it does |
-|:--|:--|:--|
-| 🧽 | **Remove Background** | The main event. Recovers real per-pixel coverage from an antialiased edge instead of thresholding it away, so the silhouette stays soft rather than fringed or jagged. |
-| 📐 | **Remove Crevice** | Squeezes background into nooks too narrow for the flood fill to have reached. |
-
-### 🟡 Edges — clean up the silhouette it left
-
-| | Operation | What it does |
-|:--|:--|:--|
-| 🪶 | **Refine Edges** | A guided filter that tidies the alpha while following the picture's own edges. No softening. |
-| ✏️ | **Edge Cleanup** | Restores antialiasing on an edge that came back hard, and can outline it. |
-
-### 🟢 By Hand — for what the maths can't name
+you want, and they run as one pass — so a stage never sees a half-finished image. The Add
+dropdown lists them all, alphabetically:
 
 | | Operation | What it does |
 |:--|:--|:--|
 | 🖌️ | **Brush Edit** | Paint alpha up or down along strokes dragged over the preview. |
+| 🌫️ | **Denoise** | Runs Intel Open Image Denoise over the source. Lifts grain and JPEG mosquito noise while leaving edges where it found them. |
+| ✏️ | **Edge Cleanup** | Restores antialiasing on an edge that came back hard, and can outline it. |
+| 🚫 | **Exclude Tiles** | Click whole objects to hold them back, or keep only the ones you clicked. The odd frame that came out wrong, or the six you wanted out of forty. |
+| 🪣 | **Fill Pinholes** | Closes small transparent specks inside a subject, painting each one to match its surroundings. |
+| 🎚️ | **HSV Adjustment** | Pick rectangles off the preview; each gets its own hue, saturation and value sliders. Regions may overlap. |
 | 🎯 | **Island Picker** | Click a region to remove or protect it, one at a time. For patches no colour rule can single out. |
 | 🔺 | **Polygon Edit** | Draw a shape and force it transparent or opaque, whatever's inside it. Good for watermarks and scan edges. |
-
-### 🔴 Cleanup — tidy what's left
-
-| | Operation | What it does |
-|:--|:--|:--|
-| 🪣 | **Fill Pinholes** | Closes small transparent specks inside a subject, painting each one to match its surroundings. |
+| 🎲 | **Random HSV Tiles** | Finds every separate object on its own and gives each one a random colour. Forty flowers, forty palettes, one click. |
+| 🪶 | **Refine Edges** | A guided filter that tidies the alpha while following the picture's own edges. No softening. |
+| 🧽 | **Remove Background** | The main event. Recovers real per-pixel coverage from an antialiased edge instead of thresholding it away, so the silhouette stays soft rather than fringed or jagged. |
+| 📐 | **Remove Crevice** | Squeezes background into nooks too narrow for the flood fill to have reached. |
 | ➖ | **Remove Lines** | Erases anything the silhouette is too thin to have earned — hairlines, scan borders, leftover grid rules, specks. |
+| 🧼 | **Remove Minimum Area** | Removes every separate shape smaller than a given area. The crumbs a keyer leaves behind are rarely thin — they are simply small. |
+| ▦ | **Smooth Blocks** | Flattens the 8×8 grid a JPEG leaves behind. |
+| 🎨 | **Smooth Color** | Flattens colour while leaving brightness alone, fixing colour smeared sideways past every edge. |
+| 〰️ | **Smooth Halos** | Flattens the faint ripples a JPEG leaves beside a hard edge. |
 
 ---
 
@@ -110,7 +86,7 @@ tabs beside the stack.
 Writes files out under new names, pixels untouched. Find-and-replace, a prefix, a base name,
 a zero-padded counter with your own start and step, and a choice of which end the number goes on.
 
-### 🧩 Packing
+### 🧩 Export
 
 Lifts every separate object out of **every open image** and lays them all onto one sheet.
 
@@ -121,7 +97,37 @@ Lifts every separate object out of **every open image** and lays them all onto o
 | 🟩 **Tight** | Each sprite dropped into the lowest gap that fits. Densest, least predictable. |
 | 🟪 **Original Order** | Rows again, but in the order sprites were found. The only mode where the output order means something. |
 
-The sheet can hold a size you've decided on, or double until everything fits.
+The sheet can hold a size you've decided on, or double until everything fits. Export
+settings are remembered per batch, so reopening the same images brings them back.
+
+**🗺️ Lookup table.** The one thing a sheet cannot tell you is where anything on it went.
+Switch **Create Lookup Table** on and saving writes a second file beside the PNG, named the
+same with `_lut.res` on the end — a texture holding two pixels per sprite, in the order the
+sprites were found: the rectangle it landed in, then its pivot. A shader given a sprite's
+number finds it in two fetches.
+
+**🗿 Normal maps.** A normal map can come off the same sheet, so 2D lights have something
+to catch. Add generators to the stack on the Export tab and saving writes a third file,
+named the same with `_normal.png` on the end. Each generator builds on what the ones above
+it made:
+
+| | Generator | What it reads |
+|:--|:--|:--|
+| 🫧 | **Round Edges** | Rounds every sprite off from its outline inwards. The silhouette and nothing else, so a flat shape comes out looking carved. |
+| 🧱 | **Color Regions** | The same rounding, plus every colour boundary inside the sprite — each flat area of colour lifts on its own. |
+| 💡 | **Brightness** | Reads the sprite's own light and dark as high and low. Picks up line work and the large form. |
+| 🧠 | **Neural** | Hands each sprite to a trained network. Needs a model, and only appears in builds made with the network wrapper. |
+
+**🧠 Getting the Neural model.** Add a **Neural** generator on the Export tab and press
+**Download Latest Model** — it fetches the model and unpacks it into the folder named above
+the button. Around thirteen megabytes. It can also be downloaded by hand from
+[klutch/deepbump-ncnn](https://github.com/klutch/deepbump-ncnn); point the folder at
+wherever you put it.
+
+A few switches act on the whole map rather than any one generator: **Green Points Down**
+flips the green channel for DirectX-style engines (off is what Godot wants), **Show Normal
+Map** previews the map in place of the sheet, and **Clean Edges** replaces each sprite's
+noisy outermost rim with the shape found just inside it, as deep as **Inner Reach** says.
 
 ### 🔍 Upscale
 
@@ -151,8 +157,11 @@ adjust — it works on the finished picture, so moving it doesn't run the networ
 
 - **👀 Live preview** — zoom from 1% to 1000%, wheel-zoom towards the cursor, drag to pan,
   fade the original back in over the result, and a magenta backdrop for spotting stray pixels.
-- **↩️ Undo history** — every edit made to an image's stack this session, in a list. Click one
-  to rewind to it.
+- **↩️ Undo history** — the History tab lists every edit made to an image's stack this
+  session. Click one to rewind to it.
+- **🗂️ List housekeeping** — Remove and Clear take images off the list without touching
+  disk; the red ✕ on each row deletes the file and its settings sidecar from disk, after
+  asking.
 - **💾 Settings sidecars** — each image's stack is saved next to it as `yourfile.iwc`, so
   reopening the project picks up where you left off. Older `yourfile_wrangler.json` sidecars
   are converted to the new form the first time their image is opened. Settings can also be
@@ -176,12 +185,12 @@ adjust — it works on the finished picture, so moving it doesn't run the networ
 - **Windows x86_64** — that's what the prebuilt binaries in `addons/image_wrangler/bin/` are for.
   Other platforms need a build from source (`scons` in the addon folder, with the `godot-cpp`
   submodule checked out).
-- **A Vulkan driver**, for the Upscale tab only. Without one it falls back to the processor
-  and takes roughly a hundred times as long; the tab says so when it does. Nothing else here
-  needs a GPU.
+- **A Vulkan driver**, for the Upscale tab and the Neural normal map generator only.
+  Without one they fall back to the processor and take roughly a hundred times as long;
+  the tab says so when it does. Nothing else here needs a GPU.
 
 Building the extension yourself needs one extra step before `scons`, because the inference
-library both upscalers run on ships as source rather than as binaries. That source is
+library the upscalers and the Neural generator run on ships as source rather than as binaries. That source is
 committed here, so a plain clone already has it — nothing to fetch:
 
 ```
@@ -190,7 +199,8 @@ python tools/build_ncnn.py     # once, needs CMake
 scons target=editor
 ```
 
-Skip it and everything still builds — the Upscale tab is simply left out and says what to run.
+Skip it and everything still builds — the Upscale tab says what to run, and the Neural
+normal map generator stays out of its dropdown. The other three generators need none of this.
 See [`thirdparty/waifu2x-ncnn-vulkan/README-vendored.md`](addons/image_wrangler/thirdparty/waifu2x-ncnn-vulkan/README-vendored.md)
 and [`thirdparty/realesrgan-ncnn-vulkan/README-vendored.md`](addons/image_wrangler/thirdparty/realesrgan-ncnn-vulkan/README-vendored.md).
 
