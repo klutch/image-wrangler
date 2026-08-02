@@ -121,6 +121,15 @@ const UPSCALE_SCRIPT := "res://addons/image_wrangler/core/upscale.gd"
 ## Extensions [method Image.load_from_file] can read.
 const SUPPORTED_EXTENSIONS := ["png", "jpg", "jpeg", "bmp", "tga", "webp"]
 
+## Side of the red delete cross drawn at the left of every Images row.
+const DELETE_ICON_SIZE := 12
+
+## How far from the row's left edge a click still counts as the cross. A little
+## wider than the icon itself, so the target is not pixel-hunting.
+const DELETE_HIT_WIDTH := DELETE_ICON_SIZE + 10
+
+const DELETE_ICON_COLOR := Color(0.85, 0.25, 0.25)
+
 ## Above this size the preview stops following settings changes, since every
 ## tweak would otherwise re-run the whole image and stall the editor. Refresh
 ## still runs it on demand.
@@ -504,6 +513,8 @@ var _autosave_path := ""
 var _autosave_failures := {}
 
 var _file_list: ItemList
+## The red cross drawn at the left of every Images row. Built once and shared.
+var _delete_icon: Texture2D
 var _preview: PreviewView
 
 ## Every picker or drawing control the stack's forms built, in stack order.
@@ -632,6 +643,10 @@ var _save_dialog: FileDialog
 var _save_source := ""
 var _overwrite_dialog: ConfirmationDialog
 var _removal_dialog: ConfirmationDialog
+var _delete_dialog: ConfirmationDialog
+## Which file the open delete dialog is about. A path rather than an index, so a
+## list edit while the dialog sits open cannot point the answer at the wrong file.
+var _pending_delete_path := ""
 ## Says a packing ran out of room. An AcceptDialog rather than a Confirmation: there is
 ## nothing to agree to, since the run has already stopped.
 var _packing_dialog: AcceptDialog
@@ -1267,7 +1282,11 @@ func _build_source_column() -> Control:
     _file_list = ItemList.new()
     _file_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
     _file_list.allow_reselect = true
+    _file_list.fixed_icon_size = Vector2i(DELETE_ICON_SIZE, DELETE_ICON_SIZE)
     _file_list.item_selected.connect(_on_file_selected)
+    # Clicks on the cross at the left of a row ask to delete that file from disk.
+    _file_list.item_clicked.connect(_on_file_item_clicked)
+    _delete_icon = _make_delete_icon()
     column.add_child(_file_list)
 
     var hint := Label.new()
@@ -1792,6 +1811,13 @@ func _build_dialogs() -> void:
     _removal_dialog.canceled.connect(func() -> void: _pending_removals.clear())
     add_child(_removal_dialog)
 
+    _delete_dialog = ConfirmationDialog.new()
+    _delete_dialog.title = "Delete File?"
+    _delete_dialog.ok_button_text = "Delete"
+    _delete_dialog.confirmed.connect(_on_delete_confirmed)
+    _delete_dialog.canceled.connect(func() -> void: _pending_delete_path = "")
+    add_child(_delete_dialog)
+
     _packing_dialog = AcceptDialog.new()
     _packing_dialog.title = "Not Enough Room"
     add_child(_packing_dialog)
@@ -1898,7 +1924,7 @@ func _refresh_file_list() -> void:
     var selected := _selected_index()
     _file_list.clear()
     for path in _sources:
-        var index := _file_list.add_item(path.get_file())
+        var index := _file_list.add_item(path.get_file(), _delete_icon)
         _file_list.set_item_tooltip(index, path)
     if selected >= 0 and selected < _file_list.item_count:
         _file_list.select(selected)
@@ -1910,12 +1936,17 @@ func _selected_index() -> int:
 
 
 func _on_remove_pressed() -> void:
-    var index := _selected_index()
-    if index < 0:
-        return
     # Its settings go with it, but its sidecar does not: the button's tooltip
     # promises the file is not touched, and a settings file beside the art is a
     # file. Re-adding the image loads it back.
+    _remove_entry(_selected_index())
+
+
+## Takes one image out of the list and moves the selection on. Only the list —
+## nothing on disk is touched here.
+func _remove_entry(index: int) -> void:
+    if index < 0 or index >= _sources.size():
+        return
     _flush_autosave()
     _stacks_by_path.erase(_sources[index])
     _sources.remove_at(index)
@@ -1932,6 +1963,60 @@ func _on_remove_pressed() -> void:
         _set_status("No image selected.")
         _detail_label.text = ""
     _update_controls()
+
+
+func _on_file_item_clicked(index: int, at_position: Vector2, mouse_button_index: int) -> void:
+    if mouse_button_index != MOUSE_BUTTON_LEFT or at_position.x > DELETE_HIT_WIDTH:
+        return
+    if index < 0 or index >= _sources.size():
+        return
+    _pending_delete_path = _sources[index]
+    _delete_dialog.dialog_text = ("Are you sure you want to permanently delete this file "
+            + "and its accompanying .iwc config file?\n\n" + _pending_delete_path.get_file())
+    _delete_dialog.popup_centered()
+
+
+## Deletes the confirmed file and its sidecars from disk, then drops it from the list.
+func _on_delete_confirmed() -> void:
+    var path := _pending_delete_path
+    _pending_delete_path = ""
+    var index := _sources.find(path)
+    if index < 0:
+        return
+    # The pending write goes out first; a flush after this would put the sidecar back.
+    _flush_autosave()
+    var targets := PackedStringArray([path])
+    for sidecar in SettingsIO.sidecar_paths(path):
+        if FileAccess.file_exists(sidecar):
+            targets.append(sidecar)
+    # The editor's import record for the image, or a stale one would be left behind.
+    if FileAccess.file_exists(path + ".import"):
+        targets.append(path + ".import")
+    var failed := PackedStringArray()
+    for target in targets:
+        if DirAccess.remove_absolute(ProjectSettings.globalize_path(target)) != OK:
+            failed.append(target.get_file())
+    _remove_entry(index)
+    if failed.is_empty():
+        _set_status("Deleted %s." % path.get_file())
+    else:
+        _set_status("Could not delete: %s" % ", ".join(failed))
+    EditorInterface.get_resource_filesystem().scan()
+
+
+## The red cross drawn at the left of every Images row: two diagonal strokes,
+## inset a pixel so the mark does not touch the row above or below.
+static func _make_delete_icon() -> Texture2D:
+    var image := Image.create_empty(DELETE_ICON_SIZE, DELETE_ICON_SIZE, false, Image.FORMAT_RGBA8)
+    var inset := 1
+    for i in range(inset, DELETE_ICON_SIZE - inset):
+        for thickness in 2:
+            var j := i - thickness
+            if j < inset or j >= DELETE_ICON_SIZE - inset:
+                continue
+            image.set_pixel(i, j, DELETE_ICON_COLOR)
+            image.set_pixel(i, DELETE_ICON_SIZE - 1 - j, DELETE_ICON_COLOR)
+    return ImageTexture.create_from_image(image)
 
 
 ## Empties the Images list. Like Remove, this only changes what the dock is
