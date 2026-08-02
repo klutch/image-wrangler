@@ -108,7 +108,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "min": 0.0,
             "max": 1.0,
             "step": 0.01,
-            "tooltip": "How much further than its own tolerance a color may stray to get through a\nsqueeze. Added to that tolerance rather than replacing it, so a color keyed\ntightly stays keyed tightly.\n\nOne number for every color in the Remove Background above, because this is\nnot a description of a background — it is how far a flood may leave one\nbehind to get somewhere.",
+            "tooltip": "How much further than its own tolerance a color may stray to get through a\nsqueeze. Added to that tolerance rather than replacing it, so a color keyed\ntightly stays keyed tightly.\n\nOne number for every color in the Matte Remove Background above, because this\nis not a description of a background — it is how far a flood may leave one\nbehind to get somewhere.",
         },
     ]
 
@@ -125,7 +125,7 @@ func needs_keying() -> bool:
 func prerequisite_note(ctx: IWPipelineContext) -> String:
     if ctx != null and ctx.has_classification():
         return ""
-    return "Needs a Remove Background above it."
+    return "Needs a stage above it that removes the background."
 
 
 func process_context(ctx: IWPipelineContext) -> void:

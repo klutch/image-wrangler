@@ -103,7 +103,7 @@ func _init() -> void:
 
 
 func get_operation_name() -> String:
-    return "Remove Background"
+    return "Matte Remove Background"
 
 
 func get_operation_id() -> StringName:
@@ -281,9 +281,10 @@ whichever asks for more is what every edge in the image gets.",
             "tooltip": "Flood fill inwards from the image border, so regions enclosed by the
 subject (eyes, highlights, gaps in lettering) stay opaque.
 
-This is also what makes Remove Colors border-only: an entry seeds the flood
-where its color meets the border, and nowhere else. Turn it off and every
-listed color is removed wherever it appears — enclosed regions included.",
+This is also what makes the color list above border-only: an entry seeds
+the flood where its color meets the border, and nowhere else. Turn it off
+and every listed color is removed wherever it appears — enclosed regions
+included.",
         },
         {
             "property": &"decontaminate",

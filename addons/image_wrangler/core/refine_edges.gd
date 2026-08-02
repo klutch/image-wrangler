@@ -127,7 +127,7 @@ func stage_weight() -> float:
 func prerequisite_note(ctx: IWPipelineContext) -> String:
     if ctx != null and ctx.has_keying:
         return ""
-    return "Needs a Remove Background above it."
+    return "Needs a stage above it that removes the background."
 
 
 func process_context(ctx: IWPipelineContext) -> void:

@@ -217,7 +217,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "label": "Matte Source",
             "type": SettingType.ENUM,
             "options": ["Analytic", "Network Alpha"],
-            "tooltip": "What writes the alpha once the network has said what is subject.\n\nAnalytic samples one background colour and recovers the edge against it, the\nway Remove Background does — sharp edges, fringe removal, colour bleed.\n\nNetwork Alpha uses the network's own answer as the alpha directly. Softer\nedges and no fringe removal, but it survives busy backgrounds no single\nsampled colour describes.",
+            "tooltip": "What writes the alpha once the network has said what is subject.\n\nAnalytic samples one background colour and recovers the edge against it, the\nway Matte Remove Background does — sharp edges, fringe removal, colour bleed.\n\nNetwork Alpha uses the network's own answer as the alpha directly. Softer\nedges and no fringe removal, but it survives busy backgrounds no single\nsampled colour describes.",
         },
         {
             "property": &"decontaminate",

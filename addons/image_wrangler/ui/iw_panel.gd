@@ -32,12 +32,13 @@ const OPERATIONS := [
     {"script": "res://addons/image_wrangler/core/exclude_tiles.gd", "icon": &"ListSelect"},
     {"script": "res://addons/image_wrangler/core/fill_pinholes.gd", "icon": &"Bucket"},
     {"script": "res://addons/image_wrangler/core/hsv_adjust.gd", "icon": &"ColorPicker"},
+    # Named Matte Remove Background, which is why it sits here rather than under its
+    # filename. Same below for Remove Colors.
+    {"script": "res://addons/image_wrangler/core/remove_background.gd", "icon": &"Eraser"},
     {"script": "res://addons/image_wrangler/core/neural_remove_background.gd", "icon": &"AnimationTree"},
     {"script": "res://addons/image_wrangler/core/polygon_edit_op.gd", "icon": &"Polygon2D"},
     {"script": "res://addons/image_wrangler/core/random_hsv_tiles.gd", "icon": &"RandomNumberGenerator"},
     {"script": "res://addons/image_wrangler/core/refine_edges.gd", "icon": &"CurveEdit"},
-    {"script": "res://addons/image_wrangler/core/remove_background.gd", "icon": &"Eraser"},
-    # Named Remove Colors, which is why it sits here rather than under its filename.
     {"script": "res://addons/image_wrangler/core/island_picker_op.gd", "icon": &"ColorPick"},
     {"script": "res://addons/image_wrangler/core/remove_crevice.gd", "icon": &"ToolTriangle"},
     {"script": "res://addons/image_wrangler/core/remove_lines.gd", "icon": &"Line2D"},
