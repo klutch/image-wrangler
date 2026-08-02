@@ -188,10 +188,11 @@ adjust, since it works on the finished picture rather than running the network a
 - **Windows x86_64**, which is what the prebuilt binaries in `addons/image_wrangler/bin/`
   are for. Other platforms need a build from source (`scons` in the addon folder, with the
   `godot-cpp` submodule checked out).
-- **A Vulkan driver**, for the Upscale tab and the Neural normal map generator only.
-  Without one both still run, on the processor. Upscale takes minutes rather than seconds
-  and says so on the tab; the Neural generator slows down without comment. Nothing else
-  needs a GPU.
+
+**No GPU is needed.** A Vulkan driver only makes two things faster: the Upscale tab and the
+Neural normal map generator. Without one both still run on the processor. Upscale takes
+minutes rather than seconds and says so on the tab; the Neural generator slows down without
+comment. Everything else is processor-only to begin with.
 
 Building the extension needs one step before `scons`, because the inference library the
 upscalers and the Neural generator run on ships as source rather than binaries. That source
