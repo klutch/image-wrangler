@@ -80,12 +80,13 @@ public:
     // the image rather than picked by the user.
     //
     // `probability` is the L8 answer off IWSegNet at whatever size it came back; it is
-    // stretched over the image here. No ncnn anywhere in this one, deliberately — it
-    // stays in the plain build, and a build without the network merely has no stage that
-    // calls it.
+    // stretched over the image here. `contiguous` keeps only background the image border
+    // can reach, so an enclosed pocket the network cut out — a highlight, an eye — stays
+    // subject. No ncnn anywhere in this one, deliberately — it stays in the plain build,
+    // and a build without the network merely has no stage that calls it.
     static void apply_segmentation(const Ref<IWPipelineContext> &ctx,
             const Ref<Image> &probability, double threshold, double tolerance,
-            int64_t edge_width);
+            int64_t edge_width, bool contiguous);
 
 	// IslandPickerOp._subtract: floods every Subtract island into the background and
 	// mattes what it opened.

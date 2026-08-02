@@ -40,7 +40,7 @@ void IWStageKernels::_bind_methods() {
 			D_METHOD("classify", "ctx", "contiguous", "edge_width"), &IWStageKernels::classify);
     ClassDB::bind_static_method("IWStageKernels",
             D_METHOD("apply_segmentation", "ctx", "probability", "threshold", "tolerance",
-                    "edge_width"),
+                    "edge_width", "contiguous"),
             &IWStageKernels::apply_segmentation);
 	ClassDB::bind_static_method("IWStageKernels",
 			D_METHOD("flood_islands", "ctx", "seeds", "tolerances"),
@@ -754,7 +754,7 @@ void IWStageKernels::classify(
 // this and Remove Background narrow each other in either order.
 void IWStageKernels::apply_segmentation(const Ref<IWPipelineContext> &ctx,
         const Ref<Image> &probability, double threshold, double tolerance,
-        int64_t edge_width) {
+        int64_t edge_width, bool contiguous) {
     ERR_FAIL_COND(ctx.is_null());
     ERR_FAIL_COND(probability.is_null());
     ERR_FAIL_COND(probability->is_empty());
@@ -781,12 +781,78 @@ void IWStageKernels::apply_segmentation(const Ref<IWPipelineContext> &ctx,
     // transparent, so on a re-run the network is reading colour where there is nothing,
     // and its answer there means nothing.
     std::vector<uint8_t> wants(static_cast<size_t>(pixel_count));
+    for (int64_t i = 0; i < pixel_count; i++) {
+        wants[static_cast<size_t>(i)] =
+                ctx->is_clear(i) ? 2 : (static_cast<double>(p[i]) < cut ? 1 : 0);
+    }
+
+    // Only background the border can reach is removed, when asked. The network is
+    // trained to cut enclosed holes out of an object, and on sprite art those "holes"
+    // are as often highlights and eyes as they are real gaps — so the same border flood
+    // Remove Background offers is offered here, over the network's classification
+    // rather than over colour. A pocket the flood cannot reach goes back to subject.
+    // Clear pixels are crossable ground and stay background either way, exactly as
+    // classify leaves them: transparency needs no key and no reach.
+    if (contiguous) {
+        std::vector<uint8_t> reached(static_cast<size_t>(pixel_count), 0);
+        std::vector<int32_t> flood(static_cast<size_t>(pixel_count));
+        int64_t head = 0;
+        int64_t grown = 0;
+#define IW_SEED_EDGE(m_index)                                                    \
+    {                                                                            \
+        const int64_t seed = (m_index);                                          \
+        if (wants[static_cast<size_t>(seed)] != 0 &&                             \
+                reached[static_cast<size_t>(seed)] == 0) {                       \
+            reached[static_cast<size_t>(seed)] = 1;                              \
+            flood[static_cast<size_t>(grown++)] = static_cast<int32_t>(seed);    \
+        }                                                                        \
+    }
+        for (int64_t x = 0; x < width; x++) {
+            IW_SEED_EDGE(x)
+            IW_SEED_EDGE((height - 1) * width + x)
+        }
+        for (int64_t y = 0; y < height; y++) {
+            IW_SEED_EDGE(y * width)
+            IW_SEED_EDGE(y * width + width - 1)
+        }
+#undef IW_SEED_EDGE
+        while (head < grown) {
+            const int32_t index = flood[static_cast<size_t>(head++)];
+            const int64_t x = index % width;
+            const int64_t y = index / width;
+#define IW_REACH_NEIGHBOUR(m_n)                                                  \
+    {                                                                            \
+        const int64_t n = (m_n);                                                 \
+        if (wants[static_cast<size_t>(n)] != 0 &&                                \
+                reached[static_cast<size_t>(n)] == 0) {                          \
+            reached[static_cast<size_t>(n)] = 1;                                 \
+            flood[static_cast<size_t>(grown++)] = static_cast<int32_t>(n);       \
+        }                                                                        \
+    }
+            if (x > 0) {
+                IW_REACH_NEIGHBOUR(index - 1)
+            }
+            if (x < width - 1) {
+                IW_REACH_NEIGHBOUR(index + 1)
+            }
+            if (y > 0) {
+                IW_REACH_NEIGHBOUR(index - width)
+            }
+            if (y < height - 1) {
+                IW_REACH_NEIGHBOUR(index + width)
+            }
+#undef IW_REACH_NEIGHBOUR
+        }
+        for (int64_t i = 0; i < pixel_count; i++) {
+            if (wants[static_cast<size_t>(i)] == 1 && reached[static_cast<size_t>(i)] == 0) {
+                wants[static_cast<size_t>(i)] = 0;
+            }
+        }
+    }
+
     int64_t subject_count = 0;
     for (int64_t i = 0; i < pixel_count; i++) {
-        const uint8_t want =
-                ctx->is_clear(i) ? 2 : (static_cast<double>(p[i]) < cut ? 1 : 0);
-        wants[static_cast<size_t>(i)] = want;
-        if (want == 0) {
+        if (wants[static_cast<size_t>(i)] == 0) {
             subject_count++;
         }
     }

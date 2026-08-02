@@ -47,6 +47,10 @@ static func default_model_dir() -> String:
 ## How sure the network has to be before a pixel counts as subject, 0 to 1.
 @export var threshold: float = 0.5
 
+## Only remove background the image border can reach, so pockets enclosed by the subject
+## (highlights, eyes, gaps in lettering) stay opaque even when the network cuts them out.
+@export var contiguous: bool = true
+
 ## Width of the antialiased band, in pixels. Same meaning as Remove Background's.
 @export var edge_width: int = 2
 

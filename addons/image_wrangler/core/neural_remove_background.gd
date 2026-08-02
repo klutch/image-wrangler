@@ -9,7 +9,9 @@ extends IWStackOperation
 ## never flooded into, and a subject colour close to the key gets eaten. This stage fixes
 ## exactly those two things — the network says [i]what[/i] is subject, and the matte
 ## machinery that stage already uses draws the edge. The network replaces the flood, and
-## nothing else.
+## nothing else. The enclosed reach is behind Only Outer Background, off by request: the
+## network cuts highlights and eyes out as readily as real gaps, so by default only what
+## the border can reach is removed, exactly as Remove Background behaves.
 ##
 ## [b]The edge is still analytic.[/b] The network answers at its own resolution, so its
 ## boundary is a few pixels loose once stretched over the image. That does not move the
@@ -195,6 +197,12 @@ func get_settings_schema() -> Array[Dictionary]:
             "tooltip": "How sure the network has to be before a pixel counts as subject.\n\nLower keeps more of the image; raise it if background survives, lower it if\nthe subject loses pieces.\n\nCheap to move: the network does not run again, its answer is re-read.",
         },
         {
+            "property": &"contiguous",
+            "label": "Only Outer Background",
+            "type": SettingType.BOOL,
+            "tooltip": "Only remove background the image border can reach, so pockets enclosed by\nthe subject (highlights, eyes, gaps in lettering) stay opaque.\n\nThe network is trained to cut enclosed holes out of an object, and on sprite\nart those holes are as often highlights as real gaps. Turn this off to let\nit reach enclosed background — the one thing Remove Background never could.",
+        },
+        {
             "property": &"edge_width",
             "label": "Edge Width",
             "type": SettingType.INT,
@@ -295,7 +303,7 @@ func process_context(ctx: IWPipelineContext) -> void:
         return
 
     IWStageKernels.apply_segmentation(ctx, probability, settings.threshold,
-            settings.edge_tolerance, settings.edge_width + slack)
+            settings.edge_tolerance, settings.edge_width + slack, settings.contiguous)
     if ctx.mask.is_empty():
         # The pass stood down: either the network called nothing subject — its way of
         # refusing a picture outside its training, and acting on it would delete the whole
