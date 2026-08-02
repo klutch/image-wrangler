@@ -48,6 +48,33 @@ PackedInt32Array IWStageKernels::find_islands(const Ref<IWPipelineContext> &ctx)
     return bounds;
 }
 
+// Visible pixels no island claimed — faint debris with no solid pixel in reach, which
+// the cut leaves off every sprite. Counted so the Export tab can say so instead of
+// dropping them in silence.
+int64_t IWStageKernels::stray_pixel_count(const Ref<IWPipelineContext> &ctx) {
+    ERR_FAIL_COND_V(ctx.is_null(), 0);
+    const int64_t pixel_count = ctx->pixel_count;
+    if (pixel_count <= 0) {
+        return 0;
+    }
+    const PackedFloat32Array visible = ctx->final_alpha();
+    if (visible.size() != pixel_count) {
+        return 0;
+    }
+    const iw::Islands found = iw::label_islands(visible.ptr(), ctx->width, ctx->height);
+    if (found.label.size() != static_cast<size_t>(pixel_count)) {
+        return 0;
+    }
+    const float *alpha = visible.ptr();
+    int64_t stray = 0;
+    for (int64_t i = 0; i < pixel_count; i++) {
+        if (found.label[static_cast<size_t>(i)] < 0 && iw::widen(alpha[i]) > 0.0) {
+            stray++;
+        }
+    }
+    return stray;
+}
+
 // Every island lifted out on its own, one image each, at the size of its own rectangle.
 //
 // [b]Cut to the island rather than cropped to its box.[/b] Two objects that interlock have

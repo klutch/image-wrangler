@@ -143,6 +143,10 @@ func process_context(ctx: IWPipelineContext) -> void:
     if radius > 0 and not ctx.key_dist.is_empty():
         ctx.coverage = IWStageKernels.guided_refine(
                 ctx.coverage, ctx.key_dist, ctx.width, ctx.height, radius)
+        # The filter rebuilt the coverage knowing nothing about the drawn regions, so a
+        # cut above would be smeared half shut. Folding them back in here keeps every
+        # standing declaration where its own stage put it.
+        ctx.apply_regions_to_coverage()
     if not report_progress(0.8):
         return
     if alpha_floor > 0.0 or alpha_ceiling < 1.0:

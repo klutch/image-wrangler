@@ -262,6 +262,10 @@ PackedInt32Array IWStageKernels::paint_strokes(
         cov[index] = iw::narrow(value);
         if (value > 0.0) {
             data[static_cast<int64_t>(index) * 4 + 3] = 255;
+        } else {
+            // The mirror of the force above: a full erase takes the source alpha with
+            // it, or a stage below that rebuilds coverage grows the stroke back.
+            data[static_cast<int64_t>(index) * 4 + 3] = 0;
         }
         // A region declared elsewhere would otherwise overrule the paint. Clearing the
         // forced flag is not enough on its own: the declaration behind it is still

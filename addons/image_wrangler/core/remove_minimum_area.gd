@@ -13,10 +13,11 @@ extends IWStackOperation
 ## area. A speck made mostly of fringe is mostly not there, and counting it whole would let
 ## it pass for a solid block of the same width.
 ##
-## [b]It sees fainter things than the packer does.[/b] Anything above zero alpha joins a
-## shape here, where an object elsewhere in the addon has to be half opaque somewhere to
-## count at all. A speck with no solid pixel anywhere is exactly the thing worth removing,
-## so it cannot be the thing the rule cannot see.
+## [b]Faint pixels near a shape are its fringe; faint pixels farther out are their own
+## shape.[/b] Anything visible within a couple of pixels of a solid part travels with it.
+## Anything visible beyond that — a speck, dust, a hair-faint tether — is measured on its
+## own. That is what makes a speck removable even when a faint chain ties it to something
+## big, and it is why a speck with no solid pixel anywhere still counts.
 ##
 ## [b]It measures nothing by colour, so it needs no background keyed above it.[/b] It reads
 ## alpha and works on art that arrived with its own transparency.

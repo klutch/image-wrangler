@@ -17,6 +17,12 @@ namespace {
 // into view by a stage below.
 constexpr int64_t TILE_MARGIN = 1;
 
+// How far a shape's faint fringe reaches past its solid core, in 8-connected steps.
+// Antialiasing puts about one pixel of fringe on an edge and the guided filter softens
+// a couple more. Two steps keeps a real fringe with its shape, while a longer faint
+// tether cannot carry a speck into it.
+constexpr uint8_t FRINGE_REACH = 2;
+
 // Clears every pixel in `doomed` and retires whatever the stages above declared for it.
 //
 // The second half is the ordering rule: a declaration is a record of what some stage
@@ -55,17 +61,18 @@ void erase_pixels(const Ref<IWPipelineContext> &ctx, const PackedInt32Array &doo
     ctx->clear_regions_at(doomed);
 }
 
-// Labels every run of visible pixels, counting anything above zero alpha.
+// Labels what the size rule measures: a shape is a solid core plus the fringe within
+// FRINGE_REACH of it, and every run of visible pixels beyond that is a shape of its own.
 //
-// Not iw::label_islands, and the difference is the whole point of this one. That labeller
-// asks which pixels are one object, so it starts from the solid part and grows outwards,
-// and a speck with no solid pixel anywhere is never labelled at all. Measuring area has no
-// such question in it — a faint speck is exactly the thing worth measuring — so here every
-// visible pixel seeds and joins alike.
+// Not one flat flood over anything visible, and the reach is the whole point: a flat
+// flood lets a hair-faint tether carry a speck into a big shape's component, where its
+// area can never doom it. Limiting how far fringe travels keeps real antialiasing with
+// its shape while a tethered speck, a faint-only speck, or a detached halo ring becomes
+// an island of its own — measurable, and so removable.
 //
-// 8-connected, matching the other labeller, so two parts touching corner to corner are one
-// thing in both.
-iw::Islands label_visible(const float *alpha, int64_t width, int64_t height) {
+// 8-connected, matching the other labeller, so two parts touching corner to corner are
+// one thing in both.
+iw::Islands label_measurable(const float *alpha, int64_t width, int64_t height) {
     iw::Islands found;
     const int64_t pixel_count = width * height;
     if (alpha == nullptr || pixel_count <= 0) {
@@ -74,8 +81,10 @@ iw::Islands label_visible(const float *alpha, int64_t width, int64_t height) {
 
     found.label.assign(static_cast<size_t>(pixel_count), -1);
     std::vector<int32_t> &label = found.label;
-    // Every pixel enters at most once, so this is a plain queue with no wraparound.
+    // Every pixel enters at most once across all three passes, so one plain queue.
     std::vector<int32_t> queue(static_cast<size_t>(pixel_count), 0);
+    // Steps from the nearest solid pixel, written by the fringe pass alone.
+    std::vector<uint8_t> depth(static_cast<size_t>(pixel_count), 0);
     int64_t head = 0;
     int64_t tail = 0;
 
@@ -98,17 +107,75 @@ iw::Islands label_visible(const float *alpha, int64_t width, int64_t height) {
         queue[tail++] = index;
     };
 
+    const auto open_island = [&](int32_t index) {
+        const int32_t here = static_cast<int32_t>(found.min_x.size());
+        found.min_x.push_back(static_cast<int32_t>(index % width));
+        found.max_x.push_back(found.min_x[here]);
+        found.min_y.push_back(static_cast<int32_t>(index / width));
+        found.max_y.push_back(found.min_y[here]);
+        claim(index, here);
+        return here;
+    };
+
+    // The solid cores, one island each, drained before the scan moves on.
+    for (int64_t i = 0; i < pixel_count; i++) {
+        if (label[i] >= 0 || iw::widen(alpha[i]) < iw::SOLID_ALPHA) {
+            continue;
+        }
+        const int32_t here = open_island(static_cast<int32_t>(i));
+        while (head < tail) {
+            const int32_t index = queue[head++];
+            const int64_t x = index % width;
+            const int64_t y = index / width;
+            const int64_t first_row = iw::maxi(y - 1, 0);
+            const int64_t last_row = iw::mini(y + 1, height - 1);
+            const int64_t first_col = iw::maxi(x - 1, 0);
+            const int64_t last_col = iw::mini(x + 1, width - 1);
+            for (int64_t row = first_row; row <= last_row; row++) {
+                for (int64_t col = first_col; col <= last_col; col++) {
+                    const int32_t n = static_cast<int32_t>(row * width + col);
+                    if (label[n] < 0 && iw::widen(alpha[n]) >= iw::SOLID_ALPHA) {
+                        claim(n, here);
+                    }
+                }
+            }
+        }
+    }
+
+    // The fringe, from every island at once and no farther than FRINGE_REACH. Rewinding
+    // over the queue grows in depth order, so a fringe two shapes share splits between
+    // them rather than going wholesale to whichever was found first.
+    head = 0;
+    while (head < tail) {
+        const int32_t index = queue[head++];
+        if (depth[index] >= FRINGE_REACH) {
+            continue;
+        }
+        const int32_t here = label[index];
+        const int64_t x = index % width;
+        const int64_t y = index / width;
+        const int64_t first_row = iw::maxi(y - 1, 0);
+        const int64_t last_row = iw::mini(y + 1, height - 1);
+        const int64_t first_col = iw::maxi(x - 1, 0);
+        const int64_t last_col = iw::mini(x + 1, width - 1);
+        for (int64_t row = first_row; row <= last_row; row++) {
+            for (int64_t col = first_col; col <= last_col; col++) {
+                const int32_t n = static_cast<int32_t>(row * width + col);
+                if (label[n] < 0 && iw::widen(alpha[n]) > 0.0) {
+                    depth[n] = static_cast<uint8_t>(depth[index] + 1);
+                    claim(n, here);
+                }
+            }
+        }
+    }
+
+    // Whatever is visible and still unclaimed — tethered specks, faint dust, detached
+    // rings — each run its own island, so it can be measured at all.
     for (int64_t i = 0; i < pixel_count; i++) {
         if (label[i] >= 0 || iw::widen(alpha[i]) <= 0.0) {
             continue;
         }
-        const int32_t here = static_cast<int32_t>(found.min_x.size());
-        found.min_x.push_back(static_cast<int32_t>(i % width));
-        found.max_x.push_back(found.min_x[here]);
-        found.min_y.push_back(static_cast<int32_t>(i / width));
-        found.max_y.push_back(found.min_y[here]);
-        claim(static_cast<int32_t>(i), here);
-
+        const int32_t here = open_island(static_cast<int32_t>(i));
         while (head < tail) {
             const int32_t index = queue[head++];
             const int64_t x = index % width;
@@ -154,7 +221,7 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
         return bounds;
     }
 
-    const iw::Islands found = label_visible(visible.ptr(), ctx->width, ctx->height);
+    const iw::Islands found = label_measurable(visible.ptr(), ctx->width, ctx->height);
     const int64_t count = found.count();
     if (count <= 0) {
         return bounds;
@@ -181,28 +248,45 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
         return bounds;
     }
 
-    // [b]A doomed shape takes its whole rectangle, grown by TILE_MARGIN.[/b] Everything
-    // inside goes, whatever it is labelled: erasing only the doomed pixels leaves behind
-    // whatever else was in the box — the keyed-out halo still holding alpha in the source,
-    // and any faint fringe that counted as a shape of its own — as a rim round where the
-    // shape was.
+    // A doomed shape takes its own pixels and their TILE_MARGIN surround — but never a
+    // kept island's pixels. The margin is for the keyed-out halo still holding alpha in
+    // the source; a whole rectangle could reach unrelated art inside the box and
+    // silently destroy it.
     const int64_t width = ctx->width;
     const int64_t height = ctx->height;
     std::vector<uint8_t> taken(static_cast<size_t>(pixel_count), 0);
-    for (int64_t n = 0; n < count; n++) {
-        if (doomed[static_cast<size_t>(n)] == 0) {
-            continue;
+    for (int64_t i = 0; i < pixel_count; i++) {
+        const int32_t island = found.label[static_cast<size_t>(i)];
+        if (island >= 0 && doomed[static_cast<size_t>(island)] != 0) {
+            taken[static_cast<size_t>(i)] = 1;
         }
-        const int64_t first_row = iw::maxi(found.min_y[n] - TILE_MARGIN, 0);
-        const int64_t last_row = iw::mini(found.max_y[n] + TILE_MARGIN, height - 1);
-        const int64_t first_col = iw::maxi(found.min_x[n] - TILE_MARGIN, 0);
-        const int64_t last_col = iw::mini(found.max_x[n] + TILE_MARGIN, width - 1);
-        for (int64_t y = first_row; y <= last_row; y++) {
-            const int64_t row = y * width;
-            for (int64_t x = first_col; x <= last_col; x++) {
-                taken[static_cast<size_t>(row + x)] = 1;
+    }
+    // Chebyshev growth, one 3x3 sweep per margin step, the reach the grown rectangle
+    // had. The context's dilate is 4-connected and would miss the diagonal halo pixel.
+    std::vector<uint8_t> grown(static_cast<size_t>(pixel_count), 0);
+    for (int64_t step = 0; step < TILE_MARGIN; step++) {
+        grown = taken;
+        for (int64_t y = 0; y < height; y++) {
+            for (int64_t x = 0; x < width; x++) {
+                if (taken[static_cast<size_t>(y * width + x)] == 0) {
+                    continue;
+                }
+                const int64_t first_row = iw::maxi(y - 1, 0);
+                const int64_t last_row = iw::mini(y + 1, height - 1);
+                const int64_t first_col = iw::maxi(x - 1, 0);
+                const int64_t last_col = iw::mini(x + 1, width - 1);
+                for (int64_t row = first_row; row <= last_row; row++) {
+                    for (int64_t col = first_col; col <= last_col; col++) {
+                        const size_t n = static_cast<size_t>(row * width + col);
+                        const int32_t neighbour = found.label[n];
+                        if (neighbour < 0 || doomed[static_cast<size_t>(neighbour)] != 0) {
+                            grown[n] = 1;
+                        }
+                    }
+                }
             }
         }
+        taken.swap(grown);
     }
 
     PackedInt32Array going;
@@ -223,14 +307,20 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
         }
     }
 
+    // Grown by the margin and clamped, so the outline covers what was actually taken
+    // rather than sitting a pixel inside it.
     for (int64_t n = 0; n < count; n++) {
         if (doomed[static_cast<size_t>(n)] == 0) {
             continue;
         }
-        bounds.push_back(found.min_x[n]);
-        bounds.push_back(found.min_y[n]);
-        bounds.push_back(found.max_x[n] - found.min_x[n] + 1);
-        bounds.push_back(found.max_y[n] - found.min_y[n] + 1);
+        const int64_t left = iw::maxi(found.min_x[n] - TILE_MARGIN, 0);
+        const int64_t top = iw::maxi(found.min_y[n] - TILE_MARGIN, 0);
+        const int64_t right = iw::mini(found.max_x[n] + TILE_MARGIN, width - 1);
+        const int64_t bottom = iw::mini(found.max_y[n] + TILE_MARGIN, height - 1);
+        bounds.push_back(static_cast<int32_t>(left));
+        bounds.push_back(static_cast<int32_t>(top));
+        bounds.push_back(static_cast<int32_t>(right - left + 1));
+        bounds.push_back(static_cast<int32_t>(bottom - top + 1));
     }
     return bounds;
 }

@@ -107,6 +107,8 @@ void IWStageKernels::_bind_methods() {
             D_METHOD("find_islands", "ctx"), &IWStageKernels::find_islands);
     ClassDB::bind_static_method("IWStageKernels",
             D_METHOD("cut_islands", "ctx"), &IWStageKernels::cut_islands);
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("stray_pixel_count", "ctx"), &IWStageKernels::stray_pixel_count);
     // Defined in iw_island_kernels.cpp; bound here so every entry point is in one list.
     ClassDB::bind_static_method("IWStageKernels",
             D_METHOD("remove_minimum_area", "ctx", "min_area"),
@@ -412,8 +414,11 @@ PackedFloat32Array IWStageKernels::guided_refine(
 		const float *g = guide.ptr();
 		float *out = refined.ptrw();
 		for (int64_t i = 0; i < pixel_count; i++) {
-			out[i] = iw::narrow(iw::clampf(
-					iw::widen(ms[i]) * iw::widen(g[i]) + iw::widen(mo[i]), 0.0, 1.0));
+            const double q = iw::clampf(
+                    iw::widen(ms[i]) * iw::widen(g[i]) + iw::widen(mo[i]), 0.0, 1.0);
+            // Below half a byte step nothing survives the export, but inside the
+            // pipeline it acts as connective tissue between specks and shapes.
+            out[i] = q < 0.5 / 255.0 ? 0.0f : iw::narrow(q);
 		}
 	}
 	return refined;
@@ -535,6 +540,26 @@ PackedInt32Array IWStageKernels::squeeze(const Ref<IWPipelineContext> &ctx) {
 	// The band has to grow from what this opened, or a nook would have a hard rim where
 	// every other edge in the image has a matte.
 	touched.append_array(ctx->grow_edge_band(touched, ctx->edge_width));
+
+    // Any stroke laid down above followed a silhouette this just changed, so what was
+    // worked out for these pixels no longer describes anything. Left standing it would
+    // fill the opened nook with stroke colour at compose.
+    {
+        float *inner = ctx->stroke_inner.size() == pixel_count ? ctx->stroke_inner.ptrw() : nullptr;
+        float *outer = ctx->stroke_outer.size() == pixel_count ? ctx->stroke_outer.ptrw() : nullptr;
+        if (inner != nullptr || outer != nullptr) {
+            const int32_t *taken_ptr = touched.ptr();
+            for (int64_t t = 0; t < touched.size(); t++) {
+                const int32_t i = taken_ptr[t];
+                if (inner != nullptr) {
+                    inner[i] = 0.0f;
+                }
+                if (outer != nullptr) {
+                    outer[i] = 0.0f;
+                }
+            }
+        }
+    }
 	return touched;
 }
 
@@ -817,6 +842,20 @@ PackedInt32Array IWStageKernels::flood_islands(
 			}
 		}
 	}
+
+    // Removed means gone: what the flood claimed as background loses its source alpha
+    // too, so a stage below that rebuilds coverage cannot grow the island back. The
+    // edge pixels keep theirs — they are the matte.
+    {
+        uint8_t *data = ctx->data.ptrw();
+        const int32_t *taken_ptr = touched.ptr();
+        for (int64_t t = 0; t < touched.size(); t++) {
+            const int32_t i = taken_ptr[t];
+            if (mask[i] == background) {
+                data[static_cast<int64_t>(i) * 4 + 3] = 0;
+            }
+        }
+    }
 
 	// The band has to grow from what this opened, or an island region would have a hard
 	// rim where every other edge in the image has a matte.

@@ -321,6 +321,9 @@ public:
     // order as find_islands.
     static TypedArray<Image> cut_islands(const Ref<IWPipelineContext> &ctx);
 
+    // Visible pixels no island claimed, which the cut leaves off every sprite.
+    static int64_t stray_pixel_count(const Ref<IWPipelineContext> &ctx);
+
     // RemoveMinimumArea: removes every island whose area is at or below `min_area`.
     //
     // Area is summed alpha, so a half-covered pixel counts a half. Labelled through any

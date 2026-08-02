@@ -327,6 +327,9 @@ var _packing_image: Image
 ## rectangles, and holding it means ticking the box does not mean packing again.
 var _packing_rects: Array = []
 
+## Visible pixels the last packing run dropped: faint debris no sprite claimed.
+var _stray_pixels := 0
+
 ## The normal map for the sheet on screen, or null when normals are switched off.
 ##
 ## Held rather than worked out twice, so the preview and the write path cannot disagree about
@@ -3953,6 +3956,7 @@ func _run_packing() -> void:
     var sprites := []
     var read := 0
     var total := _sources.size()
+    _stray_pixels = 0
 
     for i in total:
         if _shutting_down:
@@ -4026,10 +4030,14 @@ func _run_packing() -> void:
     var grown := ""
     if packed_width != settings.output_width or packed_height != settings.output_height:
         grown = "  (expanded from %d x %d)" % [settings.output_width, settings.output_height]
-    _set_packing_status("Packed %d sprite%s from %d image%s onto %d x %d.%s"
+    var strays := ""
+    if _stray_pixels > 0:
+        strays = "  %d faint stray pixel%s had no sprite and were left off." \
+                % [_stray_pixels, "" if _stray_pixels == 1 else "s"]
+    _set_packing_status("Packed %d sprite%s from %d image%s onto %d x %d.%s%s"
             % [sprites.size(), "" if sprites.size() == 1 else "s",
                     read, "" if read == 1 else "s",
-                    packed_width, packed_height, grown])
+                    packed_width, packed_height, grown, strays])
 
 
 ## Every object in one processed image, each cut out on its own.
@@ -4038,6 +4046,7 @@ func _sprites_in(image: Image) -> Array:
     var out := []
     for sprite: Image in IWStageKernels.cut_islands(ctx):
         out.append(sprite)
+    _stray_pixels += IWStageKernels.stray_pixel_count(ctx)
     return out
 
 

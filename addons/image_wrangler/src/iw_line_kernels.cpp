@@ -349,12 +349,16 @@ PackedInt32Array IWStageKernels::remove_lines(
 	// is to run above Edge Cleanup, which is what the stage's note says.
 	float *inner_ptr = ctx->stroke_inner.size() == pixel_count ? ctx->stroke_inner.ptrw() : nullptr;
 	float *outer_ptr = ctx->stroke_outer.size() == pixel_count ? ctx->stroke_outer.ptrw() : nullptr;
+    uint8_t *data_ptr = ctx->data.ptrw();
 
 	for (int64_t i = 0; i < pixel_count; i++) {
 		if (support[static_cast<size_t>(i)] == 0 || kept[static_cast<size_t>(i)] != 0) {
 			continue;
 		}
 		coverage_ptr[i] = 0.0f;
+        // The source alpha goes too, so a stage below that rebuilds coverage cannot
+        // grow the line back out of the alpha still sitting here.
+        data_ptr[i * 4 + 3] = 0;
 		if (mask_ptr != nullptr) {
 			mask_ptr[i] = IWPipelineContext::MASK_BACKGROUND;
 		}
