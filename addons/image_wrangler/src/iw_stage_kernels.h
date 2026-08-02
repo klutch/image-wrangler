@@ -227,6 +227,31 @@ public:
             int64_t rng_seed, double hue_amount, double saturation_amount,
             double value_amount);
 
+    // Posterize.process_context: cuts the image down to a small set of colours.
+    //
+    // `palette_mode` 0 is a fixed ladder of `levels` steps per channel, so a colour lands
+    // in the same place whatever the picture is. `palette_mode` 1 is Wu's quantiser: one
+    // pass counts the colours of the solid pixels, that count is split into `color_count`
+    // boxes by repeatedly cutting whichever still holds the most error, and each box's mean
+    // becomes a palette entry. One palette covers the whole image, and an image holding
+    // fewer colours than asked for simply gets fewer.
+    //
+    // `dither_mode` 1 is Floyd-Steinberg and works against either palette, walking
+    // alternate rows backwards so a smooth gradient does not come out combed.
+    // `dither_strength` scales the leftover colour before it is passed on; 0 is the same as
+    // no dither at all.
+    //
+    // Reads the alpha the run currently shows, so where it sits in the stack decides which
+    // pixels the palette is built from. [b]Alpha is never touched.[/b] A pixel that is not
+    // visible is neither recoloured nor given any leftover colour, and none is passed into
+    // one — so a large clear region cannot spend a palette entry or leave a rim.
+    //
+    // Rewrites the source pixels over the whole image, so the caller owes the run a full
+    // rebuild of the distance map afterwards.
+    static void posterize(const Ref<IWPipelineContext> &ctx, int64_t palette_mode,
+            int64_t levels, int64_t color_count, int64_t dither_mode,
+            double dither_strength);
+
     // FillPinholes.process_context: closes every enclosed patch of not-fully-opaque pixels
     // of at most `max_area` pixels, colouring each from the solid pixels around it.
     //

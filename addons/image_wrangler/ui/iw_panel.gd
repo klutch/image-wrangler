@@ -37,6 +37,7 @@ const OPERATIONS := [
     {"script": "res://addons/image_wrangler/core/remove_background.gd", "icon": &"Eraser"},
     {"script": "res://addons/image_wrangler/core/neural_remove_background.gd", "icon": &"AnimationTree"},
     {"script": "res://addons/image_wrangler/core/polygon_edit_op.gd", "icon": &"Polygon2D"},
+    {"script": "res://addons/image_wrangler/core/posterize.gd", "icon": &"Theme"},
     {"script": "res://addons/image_wrangler/core/random_hsv_tiles.gd", "icon": &"RandomNumberGenerator"},
     {"script": "res://addons/image_wrangler/core/refine_edges.gd", "icon": &"CurveEdit"},
     {"script": "res://addons/image_wrangler/core/island_picker_op.gd", "icon": &"ColorPick"},
@@ -644,6 +645,8 @@ var _magenta_toggle: CheckBox
 var _refresh_button: Button
 var _remove_button: Button
 var _clear_button: Button
+## Enabled only while the clipboard holds a stack and there are images to paste it onto.
+var _paste_all_button: Button
 var _suffix_edit: LineEdit
 var _process_selected_button: Button
 var _process_all_button: Button
@@ -674,6 +677,7 @@ var _packing_dialog: AcceptDialog
 var _reset_dialog: ConfirmationDialog
 ## The same for the normal map stack, which throws away something different and says so.
 var _normal_reset_dialog: ConfirmationDialog
+var _paste_all_dialog: ConfirmationDialog
 var _stack_save_dialog: FileDialog
 var _stack_load_dialog: FileDialog
 
@@ -875,6 +879,13 @@ func _exit_tree() -> void:
     # open, so it is let go on the same path — iw_ncnn::shutdown() stands down while
     # anything is still open, and static teardown order is not guaranteed.
     NeuralRemoveBackground.forget()
+
+
+## The one clipboard change the copy routes cannot see is one made outside the editor,
+## and focus coming back is the moment it could have happened.
+func _notification(what: int) -> void:
+    if what == NOTIFICATION_APPLICATION_FOCUS_IN:
+        _refresh_paste_all_button()
 
 
 ## Builds the file operation and its form. One instance for the session, since a
@@ -1209,6 +1220,7 @@ func _forget_controls() -> void:
     _refresh_button = null
     _remove_button = null
     _clear_button = null
+    _paste_all_button = null
     _suffix_edit = null
     _process_selected_button = null
     _process_all_button = null
@@ -1226,6 +1238,7 @@ func _forget_controls() -> void:
     _packing_dialog = null
     _reset_dialog = null
     _normal_reset_dialog = null
+    _paste_all_dialog = null
     _stack_save_dialog = null
     _stack_load_dialog = null
     _stack_menu = null
@@ -1353,6 +1366,16 @@ func _build_source_column() -> Control:
     hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     hint.modulate = Color(1, 1, 1, 0.6)
     column.add_child(hint)
+
+    _paste_all_button = Button.new()
+    _paste_all_button.text = "Paste to All Images"
+    _paste_all_button.tooltip_text = "Replaces every open image's operation stack with the stack on the clipboard.\n\nCopy a stack first — Ctrl+C over the stack, or copy one operation from its menu."
+    _paste_all_button.disabled = true
+    _paste_all_button.pressed.connect(_on_paste_all_pressed)
+    # The pointer arriving is the last chance to re-read a clipboard that has no change
+    # signal, so a copy made moments ago enables the button before it can be missed.
+    _paste_all_button.mouse_entered.connect(_refresh_paste_all_button)
+    column.add_child(_paste_all_button)
 
     return column
 
@@ -1928,6 +1951,16 @@ func _build_dialogs() -> void:
     _normal_reset_dialog.confirmed.connect(_reset_normals)
     add_child(_normal_reset_dialog)
 
+    # Asks before one stack lands on every open image, since the closest thing to undoing
+    # it wholesale is doing it image by image.
+    _paste_all_dialog = ConfirmationDialog.new()
+    _paste_all_dialog.title = "Paste to All Images?"
+    _paste_all_dialog.ok_button_text = "Paste"
+    _paste_all_dialog.dialog_text = ("Are you sure you want to overwrite all the open images' "
+            + "operation stack with the stack in the clipboard? Can only be undone individually.")
+    _paste_all_dialog.confirmed.connect(_paste_stack_to_all)
+    add_child(_paste_all_dialog)
+
 
 # --- Sources ------------------------------------------------------------
 
@@ -2006,6 +2039,7 @@ func _refresh_file_list() -> void:
     _schedule_upscale()
     if _normal_stack != null:
         _normal_stack.set_can_add(not _sources.is_empty())
+    _refresh_paste_all_button()
     var selected := _selected_index()
     _file_list.clear()
     for path in _sources:
@@ -2675,6 +2709,7 @@ func _on_copy_stack() -> void:
         return
     DisplayServer.clipboard_set(SettingsIO.stack_to_text(records))
     _set_status("Copied %s to the clipboard." % _operation_count(records.size()))
+    _refresh_paste_all_button()
 
 
 ## Puts whatever stack is on the clipboard in place of this one.
@@ -2697,6 +2732,100 @@ func _paste_stack_from_clipboard() -> bool:
     _replace_stack(stages, "Paste stack")
     _set_status("Pasted %s over the stack." % _operation_count(stages.size()))
     return true
+
+
+## Whether the clipboard holds anything the stack tools could paste.
+func _clipboard_holds_stack() -> bool:
+    return not _stages_from_text(DisplayServer.clipboard_get()).is_empty()
+
+
+## Keeps Paste to All Images in step with the clipboard and the list.
+##
+## Called from every copy route, from the list changing, from focus coming back to the
+## editor, and from the pointer arriving over the button — the clipboard has no signal of
+## its own, so it is re-read at the moments it could have changed.
+func _refresh_paste_all_button() -> void:
+    if _paste_all_button == null:
+        return
+    _paste_all_button.disabled = _sources.is_empty() or not _clipboard_holds_stack()
+
+
+func _on_paste_all_pressed() -> void:
+    # Asked once more at the click itself: the clipboard can have moved since the button
+    # was last refreshed, and a dialog promising a paste it cannot do would be worse than
+    # a dead button.
+    _refresh_paste_all_button()
+    if _paste_all_button.disabled:
+        _set_status("Found no operation stack on the clipboard.")
+        return
+    _paste_all_dialog.popup_centered()
+
+
+## The confirmed half: the clipboard's stack over every open image.
+##
+## The image on screen goes through the ordinary paste, so its preview, autosave and
+## history row follow the usual route. Every other image gets fresh instances — the codec
+## builds settings anew on every read, so no two images ever share a Resource — written
+## into its stored records and its sidecar, with a history row recorded so the paste can
+## still be undone from that image once it is selected. That is the "individually" the
+## dialog warns about: there is no one undo for all of it.
+func _paste_stack_to_all() -> void:
+    var text := DisplayServer.clipboard_get()
+    # Any pending sidecar write goes first, so it cannot land on top of what this writes.
+    _flush_autosave()
+    var current := _current_path()
+    var wrote := 0
+    var failed := 0
+    for path: String in _sources:
+        if path == current:
+            continue
+        var stages := _stages_from_text(text)
+        if stages.is_empty():
+            break
+        var records := []
+        for stage: IWStackOperation in stages:
+            records.append({
+                "id": stage.get_operation_id(),
+                "enabled": stage.enabled,
+                "folded": stage.folded,
+                "settings": stage.get_settings(),
+                "operation": stage,
+            })
+        _record_paste_for(path, records)
+        _stacks_by_path[path] = records
+        if SettingsIO.save_stack(path, records) == OK:
+            wrote += 1
+        else:
+            failed += 1
+    if not current.is_empty() and _paste_stack_from_clipboard():
+        wrote += 1
+    if failed > 0:
+        _set_status("Pasted the stack to %d of %d images; the rest could not save their settings."
+                % [wrote, wrote + failed])
+    else:
+        _set_status("Pasted the stack to %s." % _image_count(wrote))
+
+
+## A history row for an image that is not on screen.
+##
+## Not [method _history_for], deliberately: that one seeds a fresh history from the stack
+## on screen, which here would be some other image's. A history made on this path is
+## seeded from the path's own stored stack, so undoing the paste arrives back at what the
+## image actually held.
+func _record_paste_for(path: String, records: Array) -> void:
+    var history: IWHistory
+    if _history_by_path.has(path):
+        history = _history_by_path[path]
+    else:
+        history = IWHistory.new()
+        history.seed(SettingsIO.encode_stack(_stack_for(path)))
+        _history_by_path[path] = history
+    history.record(IWCommand.new("Paste stack to all images", &"", history.current_state(),
+            SettingsIO.encode_stack(records), _apply_history_state))
+
+
+func _image_count(count: int) -> String:
+    return "1 image" if count == 1 else "%d images" % count
 
 
 # --- The right-click menu over the stack --------------------------------
@@ -2767,6 +2896,7 @@ func _copy_one(index: int) -> void:
         "settings": stage.get_settings(),
     }]))
     _set_status("Copied %s." % stage.get_operation_name())
+    _refresh_paste_all_button()
 
 
 ## Puts the clipboard's one operation into the stack at [param at].
@@ -4661,6 +4791,9 @@ func _on_copy_normals() -> void:
         return
     DisplayServer.clipboard_set(SettingsIO.stack_to_text(records))
     _set_packing_status("Copied %s to the clipboard." % _generator_count(records.size()))
+    # A clipboard of generators is not a stack of operations, and the button should stop
+    # offering the one it no longer holds.
+    _refresh_paste_all_button()
 
 
 func _on_paste_normals() -> void:
@@ -4734,6 +4867,7 @@ func _copy_one_normal(index: int) -> void:
         "settings": layer.get_settings(),
     }]))
     _set_packing_status("Copied %s." % layer.get_operation_name())
+    _refresh_paste_all_button()
 
 
 func _paste_one_normal(at: int) -> void:
