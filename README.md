@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="header.svg" alt="Image Wrangler" width="520">
+  <picture><img src="header.svg" alt="Image Wrangler" title="Image Wrangler" width="520"></picture>
 </h1>
 
 <p align="center">
