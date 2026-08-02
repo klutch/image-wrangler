@@ -75,6 +75,18 @@ public:
 	// or subject, and records which background colour claimed each.
 	static void classify(const Ref<IWPipelineContext> &ctx, bool contiguous, int64_t edge_width);
 
+    // NeuralRemoveBackground.process_context: turns a network's subject probability into
+    // the same classification classify produces, with the background colour sampled from
+    // the image rather than picked by the user.
+    //
+    // `probability` is the L8 answer off IWSegNet at whatever size it came back; it is
+    // stretched over the image here. No ncnn anywhere in this one, deliberately — it
+    // stays in the plain build, and a build without the network merely has no stage that
+    // calls it.
+    static void apply_segmentation(const Ref<IWPipelineContext> &ctx,
+            const Ref<Image> &probability, double threshold, double tolerance,
+            int64_t edge_width);
+
 	// IslandPickerOp._subtract: floods every Subtract island into the background and
 	// mattes what it opened.
 	//

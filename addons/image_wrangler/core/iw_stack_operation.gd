@@ -109,6 +109,16 @@ func prerequisite_note(_ctx: IWPipelineContext) -> String:
     return ""
 
 
+## Whether running this stage on [param source] now would cost enough that the preview
+## should wait for Refresh rather than follow a slider.
+##
+## The same question [method IWNormalLayer.is_expensive] answers on the packing side. A
+## stage that holds enough to answer cheaply says false, and everything downstream of it
+## goes back to being live — so expensive is a state, not a property of the class.
+func is_expensive(_source: Image) -> bool:
+    return false
+
+
 ## Roughly what share of a run this stage costs, relative to the others.
 ##
 ## Only ratios matter; the pipeline normalises them. This is what stops the overall

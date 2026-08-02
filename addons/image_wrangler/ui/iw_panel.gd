@@ -29,21 +29,42 @@ const OPERATIONS := [
     {"script": "res://addons/image_wrangler/core/brush_edit_op.gd", "icon": &"Paint"},
     {"script": "res://addons/image_wrangler/core/denoise.gd", "icon": &"Blend"},
     {"script": "res://addons/image_wrangler/core/edge_cleanup.gd", "icon": &"Path2D"},
+    {"script": "res://addons/image_wrangler/core/exclude_tiles.gd", "icon": &"ListSelect"},
     {"script": "res://addons/image_wrangler/core/fill_pinholes.gd", "icon": &"Bucket"},
     {"script": "res://addons/image_wrangler/core/hsv_adjust.gd", "icon": &"ColorPicker"},
-    {"script": "res://addons/image_wrangler/core/island_picker_op.gd", "icon": &"ColorPick"},
+    {"script": "res://addons/image_wrangler/core/neural_remove_background.gd", "icon": &"AnimationTree"},
     {"script": "res://addons/image_wrangler/core/polygon_edit_op.gd", "icon": &"Polygon2D"},
     {"script": "res://addons/image_wrangler/core/random_hsv_tiles.gd", "icon": &"RandomNumberGenerator"},
     {"script": "res://addons/image_wrangler/core/refine_edges.gd", "icon": &"CurveEdit"},
     {"script": "res://addons/image_wrangler/core/remove_background.gd", "icon": &"Eraser"},
+    # Named Remove Colors, which is why it sits here rather than under its filename.
+    {"script": "res://addons/image_wrangler/core/island_picker_op.gd", "icon": &"ColorPick"},
     {"script": "res://addons/image_wrangler/core/remove_crevice.gd", "icon": &"ToolTriangle"},
     {"script": "res://addons/image_wrangler/core/remove_lines.gd", "icon": &"Line2D"},
     {"script": "res://addons/image_wrangler/core/remove_minimum_area.gd", "icon": &"GPUParticles2D"},
     {"script": "res://addons/image_wrangler/core/smooth_blocks.gd", "icon": &"Grid"},
     {"script": "res://addons/image_wrangler/core/smooth_color.gd", "icon": &"Color"},
     {"script": "res://addons/image_wrangler/core/smooth_halos.gd", "icon": &"Gradient"},
-    {"script": "res://addons/image_wrangler/core/exclude_tiles.gd", "icon": &"ListSelect"},
 ]
+
+## Operations the Add dropdown leaves out, by script path.
+##
+## Withheld, not deleted: everything else still knows them, so a stack that already
+## holds one keeps working and keeps saving. Only the way to add a new one is closed.
+const WITHHELD_OPERATIONS := [
+    "res://addons/image_wrangler/core/refine_edges.gd",
+    "res://addons/image_wrangler/core/remove_background.gd",
+]
+
+
+## The operations the Add dropdown offers, which is [constant OPERATIONS] less
+## [constant WITHHELD_OPERATIONS].
+static func offered_operations() -> Array:
+    var out := []
+    for entry: Dictionary in OPERATIONS:
+        if not WITHHELD_OPERATIONS.has(String(entry["script"])):
+            out.append(entry)
+    return out
 
 
 ## Every normal map generator the Export tab's dropdown offers, in the order it offers them.
@@ -151,8 +172,8 @@ left behind, since the two are then in the same place at the same time."""
 
 const INDICATOR_TOOLTIP := """Draws the outlines that say what has been picked or drawn.
 
-Islands get a dashed box round the pixels they reached; drawn regions
-get their shape dashed in the same way. Both sit right on top of the
+Picked regions get a dashed box round the pixels they reached; drawn
+regions get their outline dashed in the same way. Both sit on top of the
 edges you are trying to judge, so turning them off is how you see the
 result on its own.
 
@@ -798,7 +819,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
     # means anything while a pick is about to happen.
     if key.keycode == KEY_X and _pick_target is IslandPicker:
         var mode := (_pick_target as IslandPicker).toggle_next_mode()
-        _set_status("Next island: %s." % IWAlphaMode.LABELS[mode])
+        _set_status("Next region: %s." % IWAlphaMode.LABELS[mode])
         accept_event()
         return
 
@@ -850,6 +871,10 @@ func _exit_tree() -> void:
     # editor goes on running after the dock has gone.
     if _upscale != null:
         _upscale.close()
+    # The segmentation network is held statically for the same reason the upscaler is held
+    # open, so it is let go on the same path — iw_ncnn::shutdown() stands down while
+    # anything is still open, and static teardown order is not guaranteed.
+    NeuralRemoveBackground.forget()
 
 
 ## Builds the file operation and its form. One instance for the session, since a
@@ -1528,7 +1553,7 @@ func _build_operation_column() -> Control:
     _stack_view.name = "Operations"
     _stack_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _stack_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-    _stack_view.operations = OPERATIONS
+    _stack_view.operations = offered_operations()
     _stack_view.form_builder = _build_entry_form
     _stack_view.stack_changed.connect(_on_stack_changed)
     _stack_view.setting_changed.connect(_on_setting_changed)
@@ -1686,8 +1711,12 @@ func _build_operation_column() -> Control:
 ## Fills one stack entry's form. Handed to the stack view so it does not have to know
 ## about the settings builder.
 func _build_entry_form(stage: IWStackOperation, box: VBoxContainer, entry: Control, uid: int) -> void:
-    SettingsBuilder.build(stage, box, func() -> void: entry.setting_changed.emit(entry),
-            _fold_state, str(uid))
+    var announce := func() -> void: entry.setting_changed.emit(entry)
+    SettingsBuilder.build(stage, box, announce, _fold_state, str(uid))
+    # The one control the builder leaves unwired, exactly as the normal form binds it: a
+    # download reports to the preview's overlay, and only the dock can reach that. A typed
+    # folder counts as a setting change, and Refresh means what it means on this tab.
+    _bind_model_folders(box, announce)
 
 
 ## Switches between the stack and the file operation.
@@ -3854,13 +3883,30 @@ func _on_setting_changed() -> void:
 
 ## Whether the preview should follow settings changes on its own.
 ##
-## Only the image's size decides. Below the limit the preview keeps up and there
-## is no reason to ask; above it, one tweak of a slider would lock the editor for
-## seconds at a time, and Refresh is the way to ask for it deliberately.
+## The image's size, and whether any stage would have to do expensive work from
+## scratch. Below the limit the preview keeps up and there is no reason to ask;
+## above it, or with a network still to run, one tweak of a slider would lock the
+## editor for seconds at a time, and Refresh is the way to ask for it deliberately.
 func _auto_preview_allowed() -> bool:
     if _source_image == null:
         return false
-    return _source_image.get_width() * _source_image.get_height() <= AUTO_PREVIEW_PIXEL_LIMIT
+    if _source_image.get_width() * _source_image.get_height() > AUTO_PREVIEW_PIXEL_LIMIT:
+        return false
+    return not _stack_is_expensive()
+
+
+## Whether any enabled stage answers that running it now would cost real time — a
+## network with no answer in hand for this image. Expensive is a state rather than a
+## class: once such a stage has run, it answers cheap, and everything goes back to
+## following sliders live. See [method IWStackOperation.is_expensive].
+func _stack_is_expensive() -> bool:
+    if _stack_view == null:
+        return false
+    for entry: Control in _stack_view.entries():
+        var stage: IWStackOperation = entry.stage
+        if stage != null and stage.enabled and stage.is_expensive(_source_image):
+            return true
+    return false
 
 
 func _schedule_preview() -> void:
@@ -4444,7 +4490,10 @@ func _bind_model_folders(node: Node, announce: Callable) -> void:
 func _on_download_begin(title: String) -> void:
     if _preview != null:
         _preview.set_busy(true)
-    _set_packing_status("%s..." % title)
+    if _is_image_mode(_mode):
+        _set_status("%s..." % title)
+    else:
+        _set_packing_status("%s..." % title)
 
 
 ## One step of a download, as a share of the whole job and a share of the part it is in.
@@ -4461,6 +4510,17 @@ func _on_download_step(overall: float, fraction: float, label: String) -> void:
 func _on_download_done(message: String, ok: bool) -> void:
     if _preview != null:
         _preview.set_busy(false)
+    if _is_image_mode(_mode):
+        # A model that has just arrived un-blocks whichever stage was waiting on it, which
+        # nothing else would notice — the setting did not move, what is behind it did. The
+        # stage is still expensive until it has run, so the preview is asked for rather
+        # than started.
+        if ok:
+            _refresh_notes()
+            _set_status("%s Press Refresh to run it." % message)
+        else:
+            _set_status(message)
+        return
     _set_packing_status(message)
     if not ok:
         return

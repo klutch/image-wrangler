@@ -272,7 +272,10 @@ static func _build_model_folder(operation: IWOperation, property: StringName,
         setting: Dictionary) -> Control:
     var field := ModelFolder.new()
     field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    field.setup(operation, property, String(setting.get("default", "")))
+    # The whole entry goes along: the control reads its label and where its model can be
+    # fetched from off the schema, so a second operation with a different model needs no
+    # edit here.
+    field.setup(operation, property, String(setting.get("default", "")), setting)
     return field
 
 

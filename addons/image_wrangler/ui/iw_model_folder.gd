@@ -22,11 +22,16 @@ signal folder_changed
 ## same reason [signal folder_changed] leaves it there.
 signal refresh_requested
 
-## Where the model comes from.
+## Where the model comes from when the schema entry does not say.
 ##
 ## A source archive rather than a release binary, because that tag is what the converted
 ## model is published under. What is inside it is whatever the repository holds — see
 ## [method _extract], which does not assume a shape.
+##
+## Only a default: an operation whose model lives elsewhere carries a
+## [code]download_url[/code] on its Model Folder schema entry, and one that carries the
+## key [i]empty[/i] is saying no archive is published yet — the button then says so
+## instead of fetching the wrong model. See [method setup].
 const MODEL_URL := "https://github.com/klutch/deepbump-ncnn/archive/refs/tags/release.zip"
 
 ## What the archive is called on the way down. Removed once it has been unpacked.
@@ -48,13 +53,14 @@ const EXTRACT_SHARE := 0.11
 ## is around thirteen megabytes.
 const MAX_DOWNLOAD_BYTES := 256 * 1024 * 1024
 
-## What the archive is assumed to weigh when the server will not say.
+## What the archive is assumed to weigh when neither the schema nor the server says.
 ##
 ## [b]Only ever a fallback.[/b] A forge serves a source archive as it builds it, so there is
 ## no length in the header to measure against — and a bar that sat at nothing for twelve
 ## megabytes would be saying the download had stalled. The count beside it is the real number
 ## either way, so the estimate being off shows as a bar that arrives early or crawls at the
-## end rather than as a wrong answer.
+## end rather than as a wrong answer. An operation whose archive weighs something else
+## carries [code]download_bytes[/code] on its schema entry.
 const ESTIMATED_DOWNLOAD_BYTES := 12 * 1024 * 1024
 
 ## How far the estimated bar is allowed to get, so it cannot claim to be finished before the
@@ -71,6 +77,11 @@ var _property: StringName
 ## default carries an empty one, and a blank row saying nothing is worse than a filled one
 ## saying where the model would go.
 var _fallback := ""
+
+## What this row shows and fetches, from the schema entry. See [method setup].
+var _label := "Model Folder"
+var _url := MODEL_URL
+var _bytes := ESTIMATED_DOWNLOAD_BYTES
 
 var _field: LineEdit
 var _browse: Button
@@ -97,10 +108,18 @@ var _step := Callable()
 var _finish := Callable()
 
 
-func setup(operation: IWOperation, property: StringName, fallback := "") -> void:
+## [param setting] is the whole schema entry, read for what this control can carry per
+## operation: [code]label[/code], [code]download_url[/code] and [code]download_bytes[/code].
+## Each falls back to the constant above when the entry says nothing — except the URL,
+## where a key present but empty means no archive is published for this model yet.
+func setup(operation: IWOperation, property: StringName, fallback := "",
+        setting: Dictionary = {}) -> void:
     _operation = operation
     _property = property
     _fallback = fallback
+    _label = String(setting.get("label", _label))
+    _url = String(setting.get("download_url", _url))
+    _bytes = int(setting.get("download_bytes", _bytes))
     _settle()
     _build()
     refresh()
@@ -128,7 +147,7 @@ func _build() -> void:
     add_child(row)
 
     var caption := Label.new()
-    caption.text = "Model Folder"
+    caption.text = _label
     caption.custom_minimum_size = Vector2(LABEL_WIDTH, 0)
     caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
     row.add_child(caption)
@@ -164,7 +183,10 @@ func _build() -> void:
 
     _download = Button.new()
     _download.text = "Download Latest Model"
-    _download.tooltip_text = "Fetches the converted model and unpacks it into the folder above.\n\nAround thirteen megabytes. Anything already there under the same name is\noverwritten."
+    if _url.is_empty():
+        _download.tooltip_text = "No archive is published for this model yet.\nConvert one yourself and point the folder above at it."
+    else:
+        _download.tooltip_text = "Fetches the converted model and unpacks it into the folder above.\n\nAround %s. Anything already there under the same name is\noverwritten." % String.humanize_size(_bytes)
     _download.pressed.connect(_on_download)
     add_child(_download)
 
@@ -261,18 +283,25 @@ func _trouble() -> String:
         return "This build has no network to run, so no model would help. See tools/build_ncnn.py."
     var dir := _resolved()
     if dir.is_empty():
+        if _url.is_empty():
+            return "No folder named. Point this at the folder holding the model."
         return "No folder named. Point this at one and press Download Latest Model."
     if not DirAccess.dir_exists_absolute(dir):
+        if _url.is_empty():
+            return "%s does not exist yet." % _stored()
         return "%s does not exist yet. Download Latest Model will make it." % _stored()
     if _model_in(dir).is_empty():
+        if _url.is_empty():
+            return "No model here. Point this at a folder holding a .param with a .bin of the same name beside it."
         return "No model here. Press Download Latest Model, or point this at a folder holding a .param with a .bin of the same name beside it."
     return ""
 
 
-## Whether this build has the network wrapper at all.
+## Whether this build has the network wrappers at all.
 ##
-## Asked of [ClassDB] rather than of [NormalNeural], so this control needs no reference to
-## the one layer that happens to use it.
+## Asked of [ClassDB] rather than of any one operation, so this control needs no reference
+## to the layers that use it. One class stands for all of them: every ncnn wrapper is
+## compiled in or left out together — see [code]register_types.cpp[/code].
 static func _network_built() -> bool:
     return ClassDB.class_exists(&"IWNormalNet")
 
@@ -305,14 +334,14 @@ func _update_buttons() -> void:
     _field.editable = live
     _browse.disabled = not live
     _refresh_button.disabled = not live
-    _download.disabled = not live or not _network_built()
+    _download.disabled = not live or not _network_built() or _url.is_empty()
     _download.text = "Downloading..." if _busy else "Download Latest Model"
 
 
 # --- Fetching the model -------------------------------------------------
 
 func _on_download() -> void:
-    if _busy:
+    if _busy or _url.is_empty():
         return
     # [HTTPRequest] refuses to start from outside the tree, and a form being rebuilt is
     # briefly exactly that.
@@ -333,7 +362,7 @@ func _on_download() -> void:
     _update_buttons()
     if _begin.is_valid():
         _begin.call("Downloading the model")
-    _tell(0.0, 0.0, "Connecting to github.com")
+    _tell(0.0, 0.0, "Connecting to %s" % _host())
 
     if _http == null:
         _http = HTTPRequest.new()
@@ -344,7 +373,7 @@ func _on_download() -> void:
         add_child(_http)
     _http.download_file = dir.path_join(ZIP_NAME)
 
-    var error := _http.request(MODEL_URL)
+    var error := _http.request(_url)
     if error != OK:
         _done("Could not start the download (error %d)." % error, false)
         return
@@ -375,7 +404,7 @@ func _process(_delta: float) -> void:
         return
     # No length in the header, so the bar runs against an estimate and the label carries the
     # only number anybody can rely on. See ESTIMATED_DOWNLOAD_BYTES.
-    var guessed := clampf(float(got) / float(ESTIMATED_DOWNLOAD_BYTES), 0.0, ESTIMATE_CEILING)
+    var guessed := clampf(float(got) / float(_bytes), 0.0, ESTIMATE_CEILING)
     _tell(guessed * DOWNLOAD_SHARE, guessed, "Downloading %s" % String.humanize_size(got))
 
 
@@ -389,7 +418,7 @@ func _on_downloaded(result: int, code: int, _headers: PackedStringArray,
         return
     if code != 200:
         _scrub(zip)
-        _done("github.com answered %d rather than handing over the file." % code, false)
+        _done("%s answered %d rather than handing over the file." % [_host(), code], false)
         return
 
     _tell(DOWNLOAD_SHARE, 1.0, "Downloaded")
@@ -531,6 +560,12 @@ static func _find_model(dir: String, depth: int) -> String:
         if not found.is_empty():
             return found
     return ""
+
+
+## The server the archive comes from, for the lines that name where they are talking to.
+func _host() -> String:
+    var host := _url.get_slice("/", 2)
+    return host if not host.is_empty() else "the server"
 
 
 func _scrub(zip: String) -> void:

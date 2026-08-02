@@ -256,7 +256,7 @@ a white plate around a green stem needs both listed, and taking white out
 stops green working too, because nothing reaches it from the border.
 
 Background walled off by opaque subject is never reached, whatever you
-list. Add an Island Picker for that instead.
+list. Add a Remove Colors stage for that instead.
 
 Where two entries could both claim a pixel, the higher one wins.",
         },
@@ -271,7 +271,7 @@ Where two entries could both claim a pixel, the higher one wins.",
 2 suits ordinary antialiasing. Raise it for soft edges, glows or
 drop shadows; set it to 0 for a hard-edged cutout.
 
-Remove Crevice takes its width from here too. Island Picker has its own —
+Remove Crevice takes its width from here too. Remove Colors has its own —
 whichever asks for more is what every edge in the image gets.",
         },
         {

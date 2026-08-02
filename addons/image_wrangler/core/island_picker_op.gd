@@ -58,7 +58,7 @@ func _init() -> void:
 
 
 func get_operation_name() -> String:
-    return "Island Picker"
+    return "Remove Colors"
 
 
 func get_operation_id() -> StringName:
@@ -90,7 +90,7 @@ func get_settings_schema() -> Array[Dictionary]:
         {
             "property": &"islands",
             "type": SettingType.ISLAND_PICKER,
-            "tooltip": "Regions picked off the preview: drag a rectangle, or click for a single pixel.\n\nSubtract removes the region, which is how an enclosed background — an eye, a\ngap in lettering, a highlight — comes out, since no Remove Color ever reaches\nit. Add forces the region opaque, which is how a region a loose tolerance ate\ncomes back.\n\nEvery pixel you picked keys out its own color at its own tolerance, so an\nisland need not match anything in Remove Background, and needs no Remove\nBackground above it at all.",
+            "tooltip": "Regions picked off the preview: drag a rectangle, or click for a single pixel.\n\nSubtract removes the region, which is how an enclosed background — an eye, a\ngap in lettering, a highlight — comes out, since a flood from the border never\nreaches it. Add forces the region opaque, which is how a region a loose\ntolerance ate comes back.\n\nEvery pixel you picked keys out its own color at its own tolerance, so a region\nneed not match anything a stage above it took out, and needs no stage above it\nat all.",
         },
         {
             "property": &"edge_width",
@@ -99,7 +99,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "min": 0,
             "max": 16,
             "step": 1,
-            "tooltip": "How many pixels of antialiasing to rebuild around what a Subtract island\nopens. 2 suits ordinary antialiasing; set it to 0 for a hard-edged cut.\n\nThe widest any stage asks for is what every edge in the image gets, so a\nRemove Background above asking for more still wins.",
+            "tooltip": "How many pixels of antialiasing to rebuild around what a Subtract region\nopens. 2 suits ordinary antialiasing; set it to 0 for a hard-edged cut.\n\nThe widest any stage asks for is what every edge in the image gets, so a\nstage above asking for more still wins.",
         },
     ]
 

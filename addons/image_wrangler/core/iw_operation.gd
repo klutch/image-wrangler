@@ -48,6 +48,10 @@ enum SettingType {
     EXCLUDE_TILES,
     ## A folder holding a neural model: a path to type or browse for, a line saying what is
     ## missing from it, and a button that fetches one. The property must hold a [String].
+    ## The entry may carry [code]download_url[/code] and [code]download_bytes[/code] saying
+    ## where that model's archive lives and roughly what it weighs; left off, the control
+    ## falls back to DeepBump's. A [code]download_url[/code] present but [i]empty[/i] means
+    ## no archive is published yet, and the button says so instead of fetching.
     MODEL_FOLDER,
 }
 

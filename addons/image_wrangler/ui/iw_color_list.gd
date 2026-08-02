@@ -46,7 +46,7 @@ const SAMPLE_SWATCH_WIDTH := 48
 ## What the route hint says. Said on the way in rather than left to the tooltip:
 ## picking a colour the flood has no route to looks like it should work and does
 ## nothing, and adding one is the moment that misunderstanding happens.
-const ROUTE_HINT := "Reached through the other colors in the list, so keep the ones around it. Background walled off by the subject needs the Island Picker."
+const ROUTE_HINT := "Reached through the other colors in the list, so keep the ones around it. Background walled off by the subject needs a Remove Colors stage."
 
 var _operation: IWOperation
 var _property: StringName
@@ -329,7 +329,7 @@ func _on_clear_pressed() -> void:
 	colors.clear()
 	_refresh()
 	_load_editor()
-	_set_hint("Nothing is keyed out from the border now. Islands still apply.")
+	_set_hint("Nothing is keyed out from the border now. Picked regions still apply.")
 	colors_changed.emit()
 
 

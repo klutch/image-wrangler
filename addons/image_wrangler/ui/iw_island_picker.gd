@@ -118,13 +118,13 @@ func _build() -> void:
         _mode_choice.add_item(String(option))
     _mode_choice.selected = _next_mode
     _mode_choice.focus_mode = Control.FOCUS_NONE
-    _mode_choice.tooltip_text = "What the next island picked will do: Subtract makes its area transparent,\nAdd makes it opaque. Press X over the dock to switch.\n\nOnly sets new islands. Change one already in the list from its own row."
+    _mode_choice.tooltip_text = "What the next region picked will do: Subtract makes its area transparent,\nAdd makes it opaque. Press X over the dock to switch.\n\nOnly sets new regions. Change one already in the list from its own row."
     _mode_choice.item_selected.connect(_on_next_mode_selected)
     buttons.add_child(_mode_choice)
 
     _clear_button = Button.new()
     _clear_button.text = "Clear"
-    _clear_button.tooltip_text = "Remove every island for this image."
+    _clear_button.tooltip_text = "Remove every region for this image."
     _clear_button.pressed.connect(_on_clear_pressed)
     buttons.add_child(_clear_button)
 
@@ -146,14 +146,14 @@ func _build() -> void:
     _tolerance_slider.max_value = RemoveColorEntry.MAX_TOLERANCE
     _tolerance_slider.step = 0.005
     _tolerance_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _tolerance_slider.tooltip_text = "How far a pixel may drift from the color under a picked pixel and still be\npart of the region it floods.\n\nWrites every pixel in the highlighted island at once. Open Pixels below to\nset one of them on its own.\n\nIts own, not shared between islands: how clean one region is says nothing\nabout the one beside it. A new island starts on whatever the last one was\nset to."
+    _tolerance_slider.tooltip_text = "How far a pixel may drift from the color under a picked pixel and still be\npart of the region it floods.\n\nWrites every pixel in the highlighted region at once. Open Pixels below to\nset one of them on its own.\n\nIts own, not shared between regions: how clean one region is says nothing\nabout the one beside it. A new region starts on whatever the last one was\nset to."
     _tolerance_slider.value_changed.connect(_on_tolerance_changed)
     _editor.add_child(_tolerance_slider)
 
     _mixed_label = Label.new()
     _mixed_label.text = "mixed"
     _mixed_label.modulate = Color(1, 1, 1, 0.6)
-    _mixed_label.tooltip_text = "The pixels in this island have different tolerances.\nThe slider shows one of them; moving it sets them all."
+    _mixed_label.tooltip_text = "The pixels in this region have different tolerances.\nThe slider shows one of them; moving it sets them all."
     _mixed_label.visible = false
     _editor.add_child(_mixed_label)
 
@@ -161,7 +161,7 @@ func _build() -> void:
     _picks_toggle.toggle_mode = true
     _picks_toggle.flat = true
     _picks_toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
-    _picks_toggle.tooltip_text = "The pixels this island floods from, each with a tolerance of its own."
+    _picks_toggle.tooltip_text = "The pixels this region floods from, each with a tolerance of its own."
     _picks_toggle.toggled.connect(func(_pressed: bool) -> void: _rebuild_pick_rows())
     _picks_toggle.visible = false
     add_child(_picks_toggle)

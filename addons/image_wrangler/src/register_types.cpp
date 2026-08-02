@@ -6,13 +6,14 @@
 #include "iw_pixel_math.h"
 #include "iw_stage_kernels.h"
 
-// The three classes built on ncnn are left out of a build that has not had it made, which is
+// The four classes built on ncnn are left out of a build that has not had it made, which is
 // the ordinary state of a fresh checkout — see tools/build_ncnn.py. SConstruct defines this
 // when it has one to link against, and the tabs that use them test at runtime.
 #ifdef IW_HAVE_NCNN
 #include "iw_ncnn_instance.h"
 #include "iw_normal_net.h"
 #include "iw_realesrgan.h"
+#include "iw_seg_net.h"
 #include "iw_waifu2x.h"
 #endif
 
@@ -38,6 +39,7 @@ void initialize_image_wrangler(ModuleInitializationLevel p_level) {
     GDREGISTER_CLASS(IWWaifu2x);
     GDREGISTER_CLASS(IWRealESRGAN);
     GDREGISTER_CLASS(IWNormalNet);
+    GDREGISTER_CLASS(IWSegNet);
 #endif
 }
 

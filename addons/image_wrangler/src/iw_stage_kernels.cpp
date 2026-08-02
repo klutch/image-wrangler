@@ -38,6 +38,10 @@ void IWStageKernels::_bind_methods() {
 			D_METHOD("squeeze", "ctx"), &IWStageKernels::squeeze);
 	ClassDB::bind_static_method("IWStageKernels",
 			D_METHOD("classify", "ctx", "contiguous", "edge_width"), &IWStageKernels::classify);
+    ClassDB::bind_static_method("IWStageKernels",
+            D_METHOD("apply_segmentation", "ctx", "probability", "threshold", "tolerance",
+                    "edge_width"),
+            &IWStageKernels::apply_segmentation);
 	ClassDB::bind_static_method("IWStageKernels",
 			D_METHOD("flood_islands", "ctx", "seeds", "tolerances"),
 			&IWStageKernels::flood_islands);
@@ -732,6 +736,144 @@ void IWStageKernels::classify(
 	// so growing the band from it walks outwards in lock-step and depth stays correct.
 	queue.resize(tail);
 	ctx->grow_edge_band(queue, edge_width);
+}
+
+// Turns a network's subject probability into the classification classify produces.
+//
+// One call rather than several, because the steps are circular from the outside: the key
+// colour cannot be sampled until the probability says which pixels are background, and the
+// mask cannot be written until the key's index is known.
+//
+// Exactly one key is registered, flagged as an island. The flag is load-bearing — an
+// island key never claims pixels image-wide, so a Remove Crevice below cannot flood
+// through the subject on it, and every subject pixel seeds rebuild_nearest. The key
+// itself is what keeps compute_coverage working: a band pixel with no key gets full
+// alpha, so a keyless mask would flatten into an opaque rim.
+//
+// Additive, the same convention as classify: a pixel already claimed is left alone, so
+// this and Remove Background narrow each other in either order.
+void IWStageKernels::apply_segmentation(const Ref<IWPipelineContext> &ctx,
+        const Ref<Image> &probability, double threshold, double tolerance,
+        int64_t edge_width) {
+    ERR_FAIL_COND(ctx.is_null());
+    ERR_FAIL_COND(probability.is_null());
+    ERR_FAIL_COND(probability->is_empty());
+    const int64_t width = ctx->width;
+    const int64_t height = ctx->height;
+    const int64_t pixel_count = ctx->pixel_count;
+    constexpr uint8_t background = IWPipelineContext::MASK_BACKGROUND;
+
+    // The network's answer, stretched over the image. Bilinear, so the fractional values
+    // along its boundary survive the stretch rather than becoming a staircase.
+    Ref<Image> scaled = probability;
+    if (scaled->get_width() != width || scaled->get_height() != height) {
+        scaled = scaled->duplicate();
+        scaled->resize(static_cast<int32_t>(width), static_cast<int32_t>(height),
+                Image::INTERPOLATE_BILINEAR);
+    }
+    const PackedByteArray prob = scaled->get_data();
+    ERR_FAIL_COND(prob.size() < pixel_count);
+    const uint8_t *p = prob.ptr();
+    const double cut = threshold * 255.0;
+
+    // 0 subject, 1 background with a colour, 2 background because it arrived clear.
+    // Transparency is decided first: this stack bleeds subject colour into what it makes
+    // transparent, so on a re-run the network is reading colour where there is nothing,
+    // and its answer there means nothing.
+    std::vector<uint8_t> wants(static_cast<size_t>(pixel_count));
+    int64_t subject_count = 0;
+    for (int64_t i = 0; i < pixel_count; i++) {
+        const uint8_t want =
+                ctx->is_clear(i) ? 2 : (static_cast<double>(p[i]) < cut ? 1 : 0);
+        wants[static_cast<size_t>(i)] = want;
+        if (want == 0) {
+            subject_count++;
+        }
+    }
+    // A network that saw no subject anywhere is refusing the picture, not describing it —
+    // this model does that on content outside its training. Acting on the answer would
+    // key the whole image out, so the pass stands down instead and the caller says why.
+    if (subject_count == 0) {
+        return;
+    }
+
+    // The key is the mean of the background actually touching the subject — those are the
+    // pixels whose colour is blended into the antialiased edge, which is what the matte
+    // un-blends against. The image-wide mean is the fallback for when the boundary is all
+    // transparency.
+    const uint8_t *src = ctx->data.ptr();
+    double edge_sum[3] = { 0.0, 0.0, 0.0 };
+    double all_sum[3] = { 0.0, 0.0, 0.0 };
+    int64_t edge_count = 0;
+    int64_t all_count = 0;
+    for (int64_t i = 0; i < pixel_count; i++) {
+        if (wants[static_cast<size_t>(i)] != 1) {
+            continue;
+        }
+        const uint8_t *here = src + i * 4;
+        for (int channel = 0; channel < 3; channel++) {
+            all_sum[channel] += here[channel];
+        }
+        all_count++;
+
+        const int64_t x = i % width;
+        const int64_t y = i / width;
+        const bool beside_subject =
+                (x > 0 && wants[static_cast<size_t>(i - 1)] == 0) ||
+                (x < width - 1 && wants[static_cast<size_t>(i + 1)] == 0) ||
+                (y > 0 && wants[static_cast<size_t>(i - width)] == 0) ||
+                (y < height - 1 && wants[static_cast<size_t>(i + width)] == 0);
+        if (beside_subject) {
+            for (int channel = 0; channel < 3; channel++) {
+                edge_sum[channel] += here[channel];
+            }
+            edge_count++;
+        }
+    }
+    // Nothing but subject and transparency: there is no background colour to matte
+    // against, and nothing for this pass to do.
+    if (all_count == 0) {
+        return;
+    }
+    const double *sum = edge_count > 0 ? edge_sum : all_sum;
+    const double over = static_cast<double>(edge_count > 0 ? edge_count : all_count);
+    const Color key(iw::narrow(sum[0] / over / 255.0), iw::narrow(sum[1] / over / 255.0),
+            iw::narrow(sum[2] / over / 255.0));
+    const int64_t key_index = ctx->add_key(key, tolerance, true);
+
+    const bool fresh = ctx->mask.is_empty();
+    if (fresh) {
+        ctx->mask.resize(pixel_count);
+        ctx->mask.fill(IWPipelineContext::MASK_SUBJECT);
+        ctx->key_of.resize(pixel_count);
+        ctx->key_of.fill(IWPipelineContext::KEY_NONE);
+    }
+    uint8_t *mask = ctx->mask.ptrw();
+    int32_t *key_of = ctx->key_of.ptrw();
+
+    // Claimed at most once each, so the queue can be sized up front. Clear pixels are
+    // marked without being queued, exactly as classify leaves them: they have no colour
+    // anything could be matted against, so they grow no band.
+    PackedInt32Array queue;
+    queue.resize(pixel_count);
+    int32_t *queue_ptr = queue.ptrw();
+    int64_t tail = 0;
+    for (int64_t i = 0; i < pixel_count; i++) {
+        if (mask[i] == background) {
+            continue;
+        }
+        const uint8_t want = wants[static_cast<size_t>(i)];
+        if (want == 2) {
+            mask[i] = background;
+            key_of[i] = IWPipelineContext::KEY_CLEAR;
+        } else if (want == 1) {
+            mask[i] = background;
+            key_of[i] = static_cast<int32_t>(key_index);
+            queue_ptr[tail++] = static_cast<int32_t>(i);
+        }
+    }
+    queue.resize(tail);
+    ctx->grow_edge_band(queue, edge_width);
 }
 
 // Floods every Subtract island into the background and mattes what it opened.

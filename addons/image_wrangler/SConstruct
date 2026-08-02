@@ -103,6 +103,7 @@ NCNN_WRAPPERS = [
     "iw_waifu2x.cpp",
     "iw_realesrgan.cpp",
     "iw_normal_net.cpp",
+    "iw_seg_net.cpp",
 ]
 
 

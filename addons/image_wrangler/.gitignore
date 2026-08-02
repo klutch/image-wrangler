@@ -16,3 +16,7 @@ __pycache__/
 thirdparty/ncnn/
 thirdparty/ncnn-build/
 thirdparty/ncnn-shaders/
+
+# Downloaded models, never committed. Each folder also self-ignores with its own
+# .gitignore, the way thirdparty/deepbump/ does; this line is the backstop.
+thirdparty/anime-seg/
