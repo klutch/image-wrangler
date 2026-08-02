@@ -1,6 +1,10 @@
-# Image Wrangler
+<h1 align="center">Image Wrangler</h1>
 
-<p>
+<p align="center">
+  <b>Cut subjects out of images and turn them into game-ready sheets, without leaving Godot.</b>
+</p>
+
+<p align="center">
   <img alt="Godot 4.7+" src="https://img.shields.io/badge/Godot-4.7%2B-0072B2?style=for-the-badge&logo=godotengine&logoColor=white">
   <img alt="GDExtension C++" src="https://img.shields.io/badge/GDExtension-C%2B%2B-E69F00?style=for-the-badge&logoColor=white">
   <img alt="Windows x86_64" src="https://img.shields.io/badge/Windows-x86__64-56B4E9?style=for-the-badge&logo=windows&logoColor=white">
@@ -8,6 +12,16 @@
   <img alt="Built with Claude" src="https://img.shields.io/badge/Built%20with-Claude-CC79A7?style=for-the-badge">
 </p>
 
+<p align="center">
+  <a href="#what-it-is">What it is</a> &nbsp;•&nbsp;
+  <a href="#operations">Operations</a> &nbsp;•&nbsp;
+  <a href="#batch-tools">Batch tools</a> &nbsp;•&nbsp;
+  <a href="#other-features">Other features</a> &nbsp;•&nbsp;
+  <a href="#installing">Installing</a> &nbsp;•&nbsp;
+  <a href="#license">License</a>
+</p>
+
+> [!NOTE]
 > **Claude was used extensively to build this addon.** The code, the comments and this
 > README were written with heavy help from Anthropic's Claude.
 
@@ -37,17 +51,23 @@ baked in take the same path.
 
 ## Screenshots
 
-Three AI-made flower sheets, backgrounds and all:
+<p align="center">
+  <img src="workspace_original.png" alt="The original sheet loaded in the editor">
+  <br>
+  <em>Three AI-made flower sheets, backgrounds and all.</em>
+</p>
 
-![The original sheet loaded in the editor](workspace_original.png)
+<p align="center">
+  <img src="workspace_modified.png" alt="The same sheet with the background removed">
+  <br>
+  <em>Background removed, edges kept soft, some regions corrected with the manual tools.</em>
+</p>
 
-Background removed, edges kept soft, some regions corrected with the manual tools:
-
-![The same sheet with the background removed](workspace_modified.png)
-
-Every flower lifted off all three sheets and packed onto one atlas:
-
-![114 sprites packed onto a single sheet](workspace_packing.png)
+<p align="center">
+  <img src="workspace_packing.png" alt="114 sprites packed onto a single sheet">
+  <br>
+  <em>Every flower lifted off all three sheets and packed onto one atlas.</em>
+</p>
 
 ---
 
@@ -126,11 +146,12 @@ the green channel for DirectX-style engines; off is what Godot wants. **Show Nor
 previews the map in place of the sheet. **Clean Edges** replaces each sprite's noisy
 outermost rim with the shape found just inside it, as deep as **Inner Reach** says.
 
-**Getting the Neural model.** Add a Neural generator and press **Download Latest Model**.
-It fetches the model, about thirteen megabytes, and unpacks it into the folder named above
-the button. It can also be downloaded by hand from
-[klutch/deepbump-ncnn](https://github.com/klutch/deepbump-ncnn), with the folder pointed at
-wherever you put it.
+> [!TIP]
+> **Getting the Neural model.** Add a Neural generator and press **Download Latest Model**.
+> It fetches the model, about thirteen megabytes, and unpacks it into the folder named
+> above the button. It can also be downloaded by hand from
+> [klutch/deepbump-ncnn](https://github.com/klutch/deepbump-ncnn), with the folder pointed
+> at wherever you put it.
 
 ### Upscale
 
@@ -189,16 +210,17 @@ adjust, since it works on the finished picture rather than running the network a
   are for. Other platforms need a build from source (`scons` in the addon folder, with the
   `godot-cpp` submodule checked out).
 
-**No GPU is needed.** A Vulkan driver only makes two things faster: the Upscale tab and the
-Neural normal map generator. Without one both still run on the processor. Upscale takes
-minutes rather than seconds and says so on the tab; the Neural generator slows down without
-comment. Everything else is processor-only to begin with.
+> [!NOTE]
+> **No GPU is needed.** A Vulkan driver only makes two things faster: the Upscale tab and
+> the Neural normal map generator. Without one both still run on the processor. Upscale
+> takes minutes rather than seconds and says so on the tab; the Neural generator slows down
+> without comment. Everything else is processor-only to begin with.
 
 Building the extension needs one step before `scons`, because the inference library the
 upscalers and the Neural generator run on ships as source rather than binaries. That source
 is committed here, so a plain clone already has it:
 
-```
+```sh
 cd addons/image_wrangler
 python tools/build_ncnn.py     # once, needs CMake
 scons target=editor
