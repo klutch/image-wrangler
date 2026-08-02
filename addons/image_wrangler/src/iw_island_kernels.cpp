@@ -131,19 +131,6 @@ iw::Islands label_visible(const float *alpha, int64_t width, int64_t height) {
     return found;
 }
 
-// The pixels belonging to any island `doomed` marks.
-PackedInt32Array pixels_of(const iw::Islands &found, const std::vector<uint8_t> &doomed) {
-    PackedInt32Array indices;
-    const int64_t pixel_count = static_cast<int64_t>(found.label.size());
-    for (int64_t i = 0; i < pixel_count; i++) {
-        const int32_t island = found.label[static_cast<size_t>(i)];
-        if (island >= 0 && doomed[static_cast<size_t>(island)] != 0) {
-            indices.push_back(static_cast<int32_t>(i));
-        }
-    }
-    return indices;
-}
-
 } // namespace
 
 // RemoveMinimumArea.process_context.
@@ -194,7 +181,47 @@ PackedInt32Array IWStageKernels::remove_minimum_area(
         return bounds;
     }
 
-    erase_pixels(ctx, pixels_of(found, doomed));
+    // [b]A doomed shape takes its whole rectangle, grown by TILE_MARGIN.[/b] Everything
+    // inside goes, whatever it is labelled: erasing only the doomed pixels leaves behind
+    // whatever else was in the box — the keyed-out halo still holding alpha in the source,
+    // and any faint fringe that counted as a shape of its own — as a rim round where the
+    // shape was.
+    const int64_t width = ctx->width;
+    const int64_t height = ctx->height;
+    std::vector<uint8_t> taken(static_cast<size_t>(pixel_count), 0);
+    for (int64_t n = 0; n < count; n++) {
+        if (doomed[static_cast<size_t>(n)] == 0) {
+            continue;
+        }
+        const int64_t first_row = iw::maxi(found.min_y[n] - TILE_MARGIN, 0);
+        const int64_t last_row = iw::mini(found.max_y[n] + TILE_MARGIN, height - 1);
+        const int64_t first_col = iw::maxi(found.min_x[n] - TILE_MARGIN, 0);
+        const int64_t last_col = iw::mini(found.max_x[n] + TILE_MARGIN, width - 1);
+        for (int64_t y = first_row; y <= last_row; y++) {
+            const int64_t row = y * width;
+            for (int64_t x = first_col; x <= last_col; x++) {
+                taken[static_cast<size_t>(row + x)] = 1;
+            }
+        }
+    }
+
+    PackedInt32Array going;
+    for (int64_t i = 0; i < pixel_count; i++) {
+        if (taken[static_cast<size_t>(i)] != 0) {
+            going.push_back(static_cast<int32_t>(i));
+        }
+    }
+    erase_pixels(ctx, going);
+
+    // The source alpha goes too, for the reason exclude_tiles takes it: a stage below that
+    // rebuilds coverage wholesale would otherwise grow the speck back out of the alpha
+    // still sitting here. Colour is left alone for un-blending.
+    uint8_t *pixels = ctx->data.ptrw();
+    for (int64_t i = 0; i < pixel_count; i++) {
+        if (taken[static_cast<size_t>(i)] != 0) {
+            pixels[i * 4 + 3] = 0;
+        }
+    }
 
     for (int64_t n = 0; n < count; n++) {
         if (doomed[static_cast<size_t>(n)] == 0) {
