@@ -86,7 +86,7 @@ one pass, so no stage sees a half-finished image. The Add dropdown lists them al
 | **HSV Adjustment** | Pick rectangles off the preview. Each gets its own hue, saturation and value sliders. Regions may overlap. |
 | **Island Picker** | Click a region to remove or protect it, one at a time. For patches no colour rule can single out. |
 | **Polygon Edit** | Draw a shape and force everything inside it transparent or opaque. For watermarks and scan edges. |
-| **Posterize** | Cuts the image down to a small set of colours, either an even ladder or the best colours found in the picture. Optional Floyd-Steinberg dither. |
+| **Posterize** | Cuts the image down to a small set of colours, either an even ladder or the best colours found in the picture — one palette per object by default, so a sheet of unrelated sprites does not average into one muddy set. Optional Floyd-Steinberg dither. |
 | **Random HSV Tiles** | Finds every separate object and gives each a random colour. |
 | **Refine Edges** | A guided filter that tidies alpha while following the picture's own edges. No softening. |
 | **Remove Background** | Recovers per-pixel coverage from an antialiased edge instead of thresholding it, so the silhouette stays soft rather than fringed or jagged. |

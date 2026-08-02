@@ -233,8 +233,16 @@ public:
     // in the same place whatever the picture is. `palette_mode` 1 is Wu's quantiser: one
     // pass counts the colours of the solid pixels, that count is split into `color_count`
     // boxes by repeatedly cutting whichever still holds the most error, and each box's mean
-    // becomes a palette entry. One palette covers the whole image, and an image holding
-    // fewer colours than asked for simply gets fewer.
+    // becomes a palette entry. An image holding fewer colours than asked for simply gets
+    // fewer.
+    //
+    // `per_tile` gives every object its own palette rather than sharing one across the
+    // sheet, which is what stops a sheet of unrelated sprites averaging into one muddy set
+    // of colours. Objects are whatever iw::label_islands says they are, so this stage and
+    // Random HSV Tiles cannot disagree about where one ends. A visible pixel no object
+    // claimed — a speck too faint to have a solid middle — has no palette to belong to and
+    // is left alone. Ignored under `palette_mode` 0, where the ladder is the same
+    // everywhere by definition.
     //
     // `dither_mode` 1 is Floyd-Steinberg and works against either palette, walking
     // alternate rows backwards so a smooth gradient does not come out combed.
@@ -249,7 +257,7 @@ public:
     // Rewrites the source pixels over the whole image, so the caller owes the run a full
     // rebuild of the distance map afterwards.
     static void posterize(const Ref<IWPipelineContext> &ctx, int64_t palette_mode,
-            int64_t levels, int64_t color_count, int64_t dither_mode,
+            int64_t levels, int64_t color_count, bool per_tile, int64_t dither_mode,
             double dither_strength);
 
     // FillPinholes.process_context: closes every enclosed patch of not-fully-opaque pixels

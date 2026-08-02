@@ -1,5 +1,6 @@
 #include "iw_stage_kernels.h"
 
+#include "iw_islands.h"
 #include "iw_math.h"
 
 #include <vector>
@@ -24,8 +25,17 @@ constexpr int64_t MAX_LEVELS = 32;
 
 // At or above this a pixel counts toward the palette. Anything visible at all is
 // recolored, but a half-covered fringe pixel is a blend of two colors and has no business
-// voting on what the colors are.
-constexpr double SOLID = 0.5;
+// voting on what the colors are. The same half iw::label_islands calls solid, so a tile's
+// palette is built from exactly the pixels that decided the tile was a tile.
+constexpr double SOLID = iw::SOLID_ALPHA;
+
+// A region holding more pixels than the cube holds cells is quicker served by a lookup
+// table than by asking the palette directly for each one. Below that the table costs more
+// to fill than it ever saves.
+//
+// Every table together can never come to more than one byte per pixel of the image, since
+// a region only earns one by holding at least as many pixels as the table has entries.
+constexpr int64_t TABLE_WORTH_IT = GRID_SIZE * GRID_SIZE * GRID_SIZE;
 
 // Further apart than two colors can be, which is 3 * 255 * 255.
 constexpr int64_t FAR_APART = 1 << 30;
@@ -228,9 +238,17 @@ bool cut_box(const Moments &m, Box &one, Box &two) {
     return true;
 }
 
-// Counts the colors of every solid pixel, then turns those counts into running totals so
-// any box in the cube can be totalled from its eight corners.
-void build_moments(const uint8_t *data, const float *alpha, int64_t pixel_count,
+// Counts the colors of every solid pixel inside one rectangle, then turns those counts
+// into running totals so any box in the cube can be totalled from its eight corners.
+//
+// `label` null counts the whole rectangle; otherwise only the pixels carrying `want`, so
+// one tile can be counted without its neighbours. The rectangle is inclusive on both
+// corners, matching what iw::label_islands hands back.
+//
+// Answers with how many pixels it counted, which is what decides whether a lookup table is
+// worth building for this region.
+int64_t build_moments(const uint8_t *data, const float *alpha, const int32_t *label,
+        int32_t want, int64_t width, int64_t x0, int64_t y0, int64_t x1, int64_t y1,
         Moments &m) {
     m.count.assign(static_cast<size_t>(MOMENT_COUNT), 0);
     m.sum_r.assign(static_cast<size_t>(MOMENT_COUNT), 0);
@@ -238,20 +256,31 @@ void build_moments(const uint8_t *data, const float *alpha, int64_t pixel_count,
     m.sum_b.assign(static_cast<size_t>(MOMENT_COUNT), 0);
     m.sum_sq.assign(static_cast<size_t>(MOMENT_COUNT), 0.0);
 
-    for (int64_t i = 0; i < pixel_count; i++) {
-        if (iw::widen(alpha[i]) < SOLID) {
-            continue;
+    int64_t counted = 0;
+    for (int64_t y = y0; y <= y1; y++) {
+        for (int64_t x = x0; x <= x1; x++) {
+            const int64_t i = y * width + x;
+            if (iw::widen(alpha[i]) < SOLID) {
+                continue;
+            }
+            if (label != nullptr && label[i] != want) {
+                continue;
+            }
+            const int64_t at = i * 4;
+            const int64_t r = data[at];
+            const int64_t g = data[at + 1];
+            const int64_t b = data[at + 2];
+            const int64_t cell = at3((r >> 3) + 1, (g >> 3) + 1, (b >> 3) + 1);
+            m.count[cell]++;
+            m.sum_r[cell] += r;
+            m.sum_g[cell] += g;
+            m.sum_b[cell] += b;
+            m.sum_sq[cell] += static_cast<double>(r * r + g * g + b * b);
+            counted++;
         }
-        const int64_t at = i * 4;
-        const int64_t r = data[at];
-        const int64_t g = data[at + 1];
-        const int64_t b = data[at + 2];
-        const int64_t cell = at3((r >> 3) + 1, (g >> 3) + 1, (b >> 3) + 1);
-        m.count[cell]++;
-        m.sum_r[cell] += r;
-        m.sum_g[cell] += g;
-        m.sum_b[cell] += b;
-        m.sum_sq[cell] += static_cast<double>(r * r + g * g + b * b);
+    }
+    if (counted == 0) {
+        return 0;
     }
 
     std::vector<int64_t> area(static_cast<size_t>(MOMENT_SIZE), 0);
@@ -294,6 +323,7 @@ void build_moments(const uint8_t *data, const float *alpha, int64_t pixel_count,
             }
         }
     }
+    return counted;
 }
 
 // Starts with one box holding every color and repeatedly splits whichever still holds the
@@ -368,63 +398,78 @@ void build_ladder(int64_t levels, std::vector<uint8_t> &ladder) {
     }
 }
 
+// Which palette entry is closest to one color, asked directly.
+int64_t nearest(const uint8_t *pr, const uint8_t *pg, const uint8_t *pb, int64_t size,
+        int64_t r, int64_t g, int64_t b) {
+    int64_t best = 0;
+    int64_t apart = FAR_APART;
+    for (int64_t k = 0; k < size; k++) {
+        const int64_t dr = r - pr[k];
+        const int64_t dg = g - pg[k];
+        const int64_t db = b - pb[k];
+        const int64_t away = dr * dr + dg * dg + db * db;
+        if (away < apart) {
+            apart = away;
+            best = k;
+        }
+    }
+    return best;
+}
+
 // The nearest palette color for every cell of the same cube the counting used, measured at
-// the cell's middle. That is one comparison against the whole palette per cell rather than
-// per pixel: at 256 colors, eight million comparisons once instead of 256 for every pixel
-// on the sheet.
+// the cell's middle. That is one search per cell rather than per pixel: at 256 colors,
+// eight million comparisons once instead of 256 for every pixel in the region.
 void build_inverse(const uint8_t *pr, const uint8_t *pg, const uint8_t *pb,
         int64_t palette_size, std::vector<uint8_t> &inverse) {
     inverse.assign(static_cast<size_t>(GRID_SIZE * GRID_SIZE * GRID_SIZE), 0);
     for (int64_t r = 0; r < GRID_SIZE; r++) {
-        const int64_t mid_r = r * 8 + 4;
         for (int64_t g = 0; g < GRID_SIZE; g++) {
-            const int64_t mid_g = g * 8 + 4;
             for (int64_t b = 0; b < GRID_SIZE; b++) {
-                const int64_t mid_b = b * 8 + 4;
-                int64_t best = 0;
-                int64_t nearest = FAR_APART;
-                for (int64_t k = 0; k < palette_size; k++) {
-                    const int64_t dr = mid_r - pr[k];
-                    const int64_t dg = mid_g - pg[k];
-                    const int64_t db = mid_b - pb[k];
-                    const int64_t apart = dr * dr + dg * dg + db * db;
-                    if (apart < nearest) {
-                        nearest = apart;
-                        best = k;
-                    }
-                }
                 inverse[static_cast<size_t>((r * GRID_SIZE + g) * GRID_SIZE + b)] =
-                        static_cast<uint8_t>(best);
+                        static_cast<uint8_t>(nearest(pr, pg, pb, palette_size,
+                                r * 8 + 4, g * 8 + 4, b * 8 + 4));
             }
         }
     }
 }
 
+// One set of colors and, when the region was big enough to earn one, the table that finds
+// the nearest of them quickly. Per tile there is one of these per tile.
+struct Palette {
+    uint8_t r[MAX_COLORS] = {};
+    uint8_t g[MAX_COLORS] = {};
+    uint8_t b[MAX_COLORS] = {};
+    int64_t size = 0;
+    std::vector<uint8_t> inverse;
+};
+
 // One place a color is turned into the color that replaces it, whichever palette is in
-// play. The dither loop is the only loop, so the four pairings of palette and dither come
-// out as one code path with one branch that never changes during a run.
+// play. The dither loop is the only loop, so every pairing of palette, dither and per-tile
+// comes out as one code path.
 struct Snapper {
     const uint8_t *ladder = nullptr;
-    const uint8_t *inverse = nullptr;
-    const uint8_t *pr = nullptr;
-    const uint8_t *pg = nullptr;
-    const uint8_t *pb = nullptr;
+    const Palette *palette = nullptr;
 
     void snap(double r, double g, double b, int64_t out[3]) const {
         const int64_t ir = iw::roundi(iw::clampf(r, 0.0, 255.0));
         const int64_t ig = iw::roundi(iw::clampf(g, 0.0, 255.0));
         const int64_t ib = iw::roundi(iw::clampf(b, 0.0, 255.0));
-        if (inverse != nullptr) {
-            const int64_t cell = ((ir >> 3) * GRID_SIZE + (ig >> 3)) * GRID_SIZE + (ib >> 3);
-            const int64_t k = inverse[cell];
-            out[0] = pr[k];
-            out[1] = pg[k];
-            out[2] = pb[k];
+        if (ladder != nullptr) {
+            out[0] = ladder[ir];
+            out[1] = ladder[ig];
+            out[2] = ladder[ib];
             return;
         }
-        out[0] = ladder[ir];
-        out[1] = ladder[ig];
-        out[2] = ladder[ib];
+        int64_t k = 0;
+        if (!palette->inverse.empty()) {
+            k = palette->inverse[static_cast<size_t>(
+                    ((ir >> 3) * GRID_SIZE + (ig >> 3)) * GRID_SIZE + (ib >> 3))];
+        } else {
+            k = nearest(palette->r, palette->g, palette->b, palette->size, ir, ig, ib);
+        }
+        out[0] = palette->r[k];
+        out[1] = palette->g[k];
+        out[2] = palette->b[k];
     }
 };
 
@@ -440,10 +485,11 @@ void add_error(double *row, int64_t x, double share, double er, double eg, doubl
 // Cuts the image down to a small set of colors.
 //
 // See the declaration in iw_stage_kernels.h for what the modes mean and what is left
-// alone. The palette is built once for the whole image and the pixels are written in one
-// pass, which is why the caller owes the run a full rebuild of the distance map.
+// alone. The palettes are built up front and the pixels are written in one pass, which is
+// why the caller owes the run a full rebuild of the distance map.
 void IWStageKernels::posterize(const Ref<IWPipelineContext> &ctx, int64_t palette_mode,
-        int64_t levels, int64_t color_count, int64_t dither_mode, double dither_strength) {
+        int64_t levels, int64_t color_count, bool per_tile, int64_t dither_mode,
+        double dither_strength) {
     ERR_FAIL_COND(ctx.is_null());
     if (ctx->pixel_count <= 0) {
         return;
@@ -470,33 +516,70 @@ void IWStageKernels::posterize(const Ref<IWPipelineContext> &ctx, int64_t palett
     levels = iw::mini(iw::maxi(levels, MIN_LEVELS), MAX_LEVELS);
     color_count = iw::mini(iw::maxi(color_count, MIN_COLORS), MAX_COLORS);
 
+    // A fixed ladder is the same everywhere by definition, so asking for it per tile is
+    // asking for nothing. Only a palette read off the image can differ from tile to tile.
+    const bool by_tile = best_colors && per_tile;
+
     uint8_t *data = ctx->data.ptrw();
 
     std::vector<uint8_t> ladder;
-    std::vector<uint8_t> inverse;
-    uint8_t palette_r[MAX_COLORS] = {};
-    uint8_t palette_g[MAX_COLORS] = {};
-    uint8_t palette_b[MAX_COLORS] = {};
+    std::vector<Palette> palettes;
+    std::vector<Snapper> snappers;
+    const int32_t *label = nullptr;
+    iw::Islands found;
 
-    Snapper snapper;
-    if (best_colors) {
-        Moments moments;
-        build_moments(data, alpha, pixel_count, moments);
-        const int64_t made = build_palette(moments, color_count, palette_r, palette_g,
-                palette_b);
-        if (made <= 0) {
-            // Not one solid pixel anywhere, so there is no palette to build and nothing
-            // worth guessing at.
-            return;
-        }
-        build_inverse(palette_r, palette_g, palette_b, made, inverse);
-        snapper.inverse = inverse.data();
-        snapper.pr = palette_r;
-        snapper.pg = palette_g;
-        snapper.pb = palette_b;
-    } else {
+    if (!best_colors) {
         build_ladder(levels, ladder);
-        snapper.ladder = ladder.data();
+        snappers.resize(1);
+        snappers[0].ladder = ladder.data();
+    } else {
+        Moments moments;
+        if (by_tile) {
+            found = iw::label_islands(alpha, width, height);
+            const int64_t island_count = found.count();
+            if (island_count <= 0) {
+                // Not one object anywhere, so there is nothing to give a palette to.
+                return;
+            }
+            label = found.label.data();
+            palettes.resize(static_cast<size_t>(island_count));
+            for (int64_t n = 0; n < island_count; n++) {
+                const int64_t counted = build_moments(data, alpha, label,
+                        static_cast<int32_t>(n), width, found.min_x[n], found.min_y[n],
+                        found.max_x[n], found.max_y[n], moments);
+                if (counted <= 0) {
+                    continue;
+                }
+                Palette &palette = palettes[static_cast<size_t>(n)];
+                palette.size = build_palette(moments, color_count, palette.r, palette.g,
+                        palette.b);
+                if (counted > TABLE_WORTH_IT) {
+                    build_inverse(palette.r, palette.g, palette.b, palette.size,
+                            palette.inverse);
+                }
+            }
+        } else {
+            palettes.resize(1);
+            Palette &palette = palettes[0];
+            const int64_t counted = build_moments(data, alpha, nullptr, 0, width,
+                    0, 0, width - 1, height - 1, moments);
+            if (counted <= 0) {
+                // Not one solid pixel anywhere, so there is no palette to build and
+                // nothing worth guessing at.
+                return;
+            }
+            palette.size = build_palette(moments, color_count, palette.r, palette.g,
+                    palette.b);
+            if (counted > TABLE_WORTH_IT) {
+                build_inverse(palette.r, palette.g, palette.b, palette.size,
+                        palette.inverse);
+            }
+        }
+
+        snappers.resize(palettes.size());
+        for (size_t n = 0; n < palettes.size(); n++) {
+            snappers[n].palette = &palettes[n];
+        }
     }
 
     const double spread = floyd ? iw::clampf(dither_strength, 0.0, 1.0) : 0.0;
@@ -530,6 +613,19 @@ void IWStageKernels::posterize(const Ref<IWPipelineContext> &ctx, int64_t palett
             if (iw::widen(alpha[i]) <= 0.0) {
                 continue;
             }
+
+            // Per tile, a pixel is coloured out of its own object's palette. A visible
+            // pixel no object claimed is a speck too faint to have a solid middle
+            // anywhere, so there is no palette it belongs to and it is left as it is —
+            // the same answer RandomHSVTiles gives the same pixels.
+            int64_t which = 0;
+            if (label != nullptr) {
+                if (label[i] < 0 || palettes[static_cast<size_t>(label[i])].size <= 0) {
+                    continue;
+                }
+                which = label[i];
+            }
+            const Snapper &snapper = snappers[static_cast<size_t>(which)];
 
             const int64_t at = i * 4;
             const int64_t e = x * 3;

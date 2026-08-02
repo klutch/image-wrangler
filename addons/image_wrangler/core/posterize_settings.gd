@@ -31,6 +31,9 @@ enum Dither {
 ## How many colors the palette holds when it is picked out of the image.
 @export var color_count: int = 16
 
+## Whether every object gets its own palette instead of the whole sheet sharing one.
+@export var per_tile: bool = true
+
 ## Whether the color a pixel could not have is passed on to its neighbours.
 @export var dither_mode: int = Dither.NONE
 

@@ -7,7 +7,13 @@ extends IWStackOperation
 ## Even Steps puts each of red, green and blue on a fixed ladder, so a color lands in the
 ## same place whatever the picture is. Best Colors counts the colors actually in the image
 ## and picks the set that fits it, which holds a subtle picture together far better and
-## gives a different answer for every image. One palette covers the whole image either way.
+## gives a different answer for every image.
+##
+## Best Colors gives each object its own palette by default. One palette shared across a
+## sheet of unrelated sprites has to cover all of them at once, so it settles on an average
+## that suits none of them and every sprite comes out muddy. Objects are found the same way
+## [RandomHSVTiles] finds them, off the alpha the run currently shows, so where this sits in
+## the stack decides what counts as one. Turn it off when the sprites have to match.
 ##
 ## Without dithering a gradient comes out as flat steps, which is the poster look and is
 ## usually the point. Floyd-Steinberg passes the leftover color on to the neighbours not
@@ -104,7 +110,15 @@ func get_settings_schema() -> Array[Dictionary]:
             "step": 1,
             "shown_when": &"palette_mode",
             "shown_values": [PosterizeSettings.Palette.BEST_COLORS],
-            "tooltip": "How many colors the palette holds.\n\nOne palette covers the whole image, so this is the total rather than a count\nper channel. Sixteen is enough for most sprite art. Past about sixty-four the\nresult stops looking posterized and starts looking like the original.\n\nAn image with fewer colors than this simply gets fewer.",
+            "tooltip": "How many colors the palette holds.\n\nA total rather than a count per channel, and with Per Tile on it is the total\nfor each object rather than for the sheet. Sixteen is enough for most sprite\nart. Past about sixty-four the result stops looking posterized and starts\nlooking like the original.\n\nAn image with fewer colors than this simply gets fewer.",
+        },
+        {
+            "property": &"per_tile",
+            "label": "Per Tile",
+            "type": SettingType.BOOL,
+            "shown_when": &"palette_mode",
+            "shown_values": [PosterizeSettings.Palette.BEST_COLORS],
+            "tooltip": "Whether every object gets its own palette instead of the whole sheet\nsharing one.\n\nOn a sheet of unrelated sprites one shared palette has to cover all of them at\nonce, so it lands on an average that suits none of them and every sprite comes\nout muddy. Its own palette per object spends the whole count on that object.\n\nObjects are found the same way Random HSV Tiles finds them, so where this sits\nin the stack decides what counts as one. Off, the whole sheet shares a palette,\nwhich is what to use when the sprites have to match each other.",
         },
         {
             "property": &"dither_mode",
@@ -128,9 +142,10 @@ func get_settings_schema() -> Array[Dictionary]:
 
 
 ## One pass to count the colors, a palette build that costs the same whatever the image
-## size, and one pass to write.
+## size, and one pass to write. Per tile adds the two passes that find the objects, and one
+## palette build for each of them.
 func stage_weight() -> float:
-    return 0.35
+    return 0.45 if _by_tile() else 0.35
 
 
 ## It reads color, which every image has.
@@ -142,13 +157,22 @@ func establishes_keying() -> bool:
     return false
 
 
+## Whether a palette is actually being read off the image once per object. A fixed ladder
+## is the same everywhere, so asking for it per tile is asking for nothing.
+func _by_tile() -> bool:
+    return settings.palette_mode == PosterizeSettings.Palette.BEST_COLORS and settings.per_tile
+
+
 ## Never an error. Only a note that with nothing keyed out there is no background to leave
-## out of the count, so it gets a share of the palette like anything else.
+## out of the count, so it gets a share of the palette like anything else — and no gap
+## between objects either, so there may only be the one.
 func prerequisite_note(ctx: IWPipelineContext) -> String:
     if settings.palette_mode != PosterizeSettings.Palette.BEST_COLORS:
         return ""
     if ctx == null or ctx.has_keying or not ctx.coverage.is_empty():
         return ""
+    if settings.per_tile:
+        return "Reading the source's own transparency, so the whole image may be one object."
     return "Picking the palette off the whole image, background included."
 
 
@@ -161,6 +185,7 @@ func process_context(ctx: IWPipelineContext) -> void:
             settings.palette_mode,
             settings.levels,
             settings.color_count,
+            settings.per_tile,
             settings.dither_mode,
             settings.dither_strength)
 

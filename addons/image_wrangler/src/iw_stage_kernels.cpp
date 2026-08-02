@@ -89,7 +89,7 @@ void IWStageKernels::_bind_methods() {
             &IWStageKernels::random_hsv_tiles);
     // Defined in iw_posterize_kernels.cpp; bound here so every entry point is in one list.
     ClassDB::bind_static_method("IWStageKernels",
-            D_METHOD("posterize", "ctx", "palette_mode", "levels", "color_count",
+            D_METHOD("posterize", "ctx", "palette_mode", "levels", "color_count", "per_tile",
                     "dither_mode", "dither_strength"),
             &IWStageKernels::posterize);
     // Defined in iw_hole_kernels.cpp; bound here so every entry point is in one list.
