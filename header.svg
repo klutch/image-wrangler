@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="96" viewBox="0 0 640 96" role="img" aria-label="Image Wrangler">
+    <title>Image Wrangler</title>
+    <defs>
+        <linearGradient id="rainbow" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#ff3b30"/>
+            <stop offset="17%" stop-color="#ff9500"/>
+            <stop offset="34%" stop-color="#ffcc00"/>
+            <stop offset="50%" stop-color="#34c759"/>
+            <stop offset="67%" stop-color="#00c7be"/>
+            <stop offset="84%" stop-color="#0a84ff"/>
+            <stop offset="100%" stop-color="#af52de"/>
+        </linearGradient>
+    </defs>
+    <text x="320" y="68" text-anchor="middle"
+          font-family="Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif"
+          font-size="58" font-weight="700" letter-spacing="1"
+          fill="url(#rainbow)">Image Wrangler</text>
+</svg>
