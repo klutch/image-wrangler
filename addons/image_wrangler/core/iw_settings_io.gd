@@ -588,6 +588,9 @@ static func _v1_fill(id: StringName, old: _LegacyV1Settings, into: Resource) -> 
             into.polygons = old.polygons
         &"island_picker":
             into.islands = old.islands
+            # The one width a version 1 file had, so an island keeps cutting to the
+            # depth it cut to rather than to whatever a fresh one asks for.
+            into.edge_width = old.edge_width
         &"remove_crevice":
             into.crevice_reach = old.crevice_reach
             into.crevice_tolerance = old.crevice_tolerance

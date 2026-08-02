@@ -36,6 +36,11 @@ extends IWStackOperation
 ## through anything the Remove Colors above it claim, not only through its own
 ## colour, so an island dropped on a white plate still crosses onto the green stem
 ## beside it. See [method IWPipelineContext.flood_key_for].
+##
+## [b]It needs nothing above it.[/b] With no Remove Background in the stack this works
+## straight off the source image: an empty classification is laid down first, so a
+## Subtract island has somewhere to write and picks up its own soft edge from
+## [member IslandPickerSettings.edge_width]. See [method _ensure_classification].
 
 ## The colour this operation's marks are drawn in on the preview.
 ##
@@ -85,7 +90,16 @@ func get_settings_schema() -> Array[Dictionary]:
         {
             "property": &"islands",
             "type": SettingType.ISLAND_PICKER,
-            "tooltip": "Regions picked off the preview: drag a rectangle, or click for a single pixel.\n\nSubtract removes the region, which is how an enclosed background — an eye, a\ngap in lettering, a highlight — comes out, since no Remove Color ever reaches\nit. Add forces the region opaque, which is how a region a loose tolerance ate\ncomes back.\n\nEvery pixel you picked keys out its own color at its own tolerance, so an\nisland need not match anything in Remove Background.",
+            "tooltip": "Regions picked off the preview: drag a rectangle, or click for a single pixel.\n\nSubtract removes the region, which is how an enclosed background — an eye, a\ngap in lettering, a highlight — comes out, since no Remove Color ever reaches\nit. Add forces the region opaque, which is how a region a loose tolerance ate\ncomes back.\n\nEvery pixel you picked keys out its own color at its own tolerance, so an\nisland need not match anything in Remove Background, and needs no Remove\nBackground above it at all.",
+        },
+        {
+            "property": &"edge_width",
+            "label": "Edge Width",
+            "type": SettingType.INT,
+            "min": 0,
+            "max": 16,
+            "step": 1,
+            "tooltip": "How many pixels of antialiasing to rebuild around what a Subtract island\nopens. 2 suits ordinary antialiasing; set it to 0 for a hard-edged cut.\n\nThe widest any stage asks for is what every edge in the image gets, so a\nRemove Background above asking for more still wins.",
         },
     ]
 
@@ -113,29 +127,31 @@ func stage_weight() -> float:
     return 0.25
 
 
-## An Add island needs nothing above it — it is its own flood and forces alpha
-## directly. A Subtract one needs a classification to add background to, so the
-## answer is about the islands picked rather than about the operation.
+## Both modes stand on their own. An Add island is its own flood and forces alpha
+## directly; a Subtract one lays down a classification when nothing above has.
 func needs_keying() -> bool:
+    return false
+
+
+## Only a Subtract island leaves anything behind for the stages below to measure
+## against, so the answer is about the islands picked rather than about the operation.
+func establishes_keying() -> bool:
     return settings.islands != null and _has(IWAlphaMode.Mode.SUBTRACT)
-
-
-func prerequisite_note(ctx: IWPipelineContext) -> String:
-    if settings.islands == null:
-        return ""
-    if not _has(IWAlphaMode.Mode.SUBTRACT):
-        return ""
-    if ctx != null and ctx.has_classification():
-        return ""
-    return "Subtract islands need a Remove Background above them."
 
 
 func process_context(ctx: IWPipelineContext) -> void:
     if settings.islands == null:
         return
 
+    # Offered the way Remove Background offers one, so the widest ask wins and every
+    # edge in the image is matted to the same depth.
+    ctx.edge_width = maxi(ctx.edge_width, settings.edge_width)
+    ctx.search_radius = maxi(
+            maxi(ctx.bleed_radius, ctx.edge_width), IWPipelineContext.MIN_SEARCH_RADIUS)
+
     var touched := PackedInt32Array()
-    if ctx.has_classification():
+    if _has(IWAlphaMode.Mode.SUBTRACT):
+        _ensure_classification(ctx)
         touched = _subtract(ctx)
     if not report_progress(0.5):
         return
@@ -183,6 +199,25 @@ func absorb_run_report(from: IWStackOperation) -> void:
     for i in mine.size():
         if mine[i] != null and theirs[i] != null:
             mine[i].flooded_bounds = theirs[i].flooded_bounds
+
+
+## Lays down an empty classification when nothing above has, so a Subtract island has
+## somewhere to write.
+##
+## [method IWStageKernels.classify] with no keys registered claims nothing: every pixel
+## starts out subject and only source transparency is opened up, which is the same ground
+## a Remove Background would have left alone. That is the whole dependency — an island
+## registers its own keys off the pixels it was pointed at, so it never needed anyone
+## else's.
+##
+## Coverage is filled in to match. A fresh one reads as zero everywhere, and only the
+## pixels an island touches get recomputed, so without this the rest of the image would
+## come out transparent.
+func _ensure_classification(ctx: IWPipelineContext) -> void:
+    if ctx.has_classification():
+        return
+    IWStageKernels.classify(ctx, true, ctx.edge_width)
+    ctx.ensure_coverage()
 
 
 func _has(mode: int) -> bool:

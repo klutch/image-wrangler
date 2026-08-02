@@ -88,28 +88,27 @@ func has(at: Vector2i) -> bool:
 
 
 ## Appends an entry holding the single pixel [param at] and returns it.
-func add(at: Vector2i) -> IslandEntry:
-	return add_region(Rect2i(at, Vector2i.ONE))
+func add(at: Vector2i, mode: int = IWAlphaMode.Mode.SUBTRACT) -> IslandEntry:
+	return add_region(Rect2i(at, Vector2i.ONE), mode)
 
 
-## Appends an entry covering [param region] and returns it.
+## Appends an entry covering [param region] in [param mode] and returns it.
 ##
 ## Every pixel of the rectangle becomes a pick, up to [constant MAX_PICKS]; past that
 ## the rectangle is walked on an even stride wide enough to fit. See [IWRegionScan],
 ## which is also what the Remove Colors list sweeps a region with, so the two pickers
 ## cannot come to different conclusions about the same gesture.
 ##
-## The entry starts on the same mode and tolerance as the one before it. Picking
-## islands is repetitive work — several regions in one image, wanted the same way —
-## and setting the same two controls again after every gesture is exactly the sort
-## of thing the list should remember for you. The first entry has nothing to
-## follow and takes the defaults.
-func add_region(region: Rect2i) -> IslandEntry:
+## The mode is the caller's to state — the picker has a dropdown for it. The tolerance
+## carries over from the entry before, since picking islands is repetitive work and
+## dialling the same number in after every gesture is what the list should remember
+## for you. The first entry has nothing to follow and takes the default.
+func add_region(region: Rect2i, mode: int = IWAlphaMode.Mode.SUBTRACT) -> IslandEntry:
 	var entry := IslandEntry.new()
+	entry.mode = IWAlphaMode.sanitise(mode)
 	var tolerance := IslandPick.DEFAULT_TOLERANCE
 	var previous := get_at(entries.size() - 1)
 	if previous != null:
-		entry.mode = previous.mode
 		# A group the user has since tuned pick by pick has no one tolerance to
 		# inherit, so the new entry falls back to the one it shows for that group.
 		var inherited := previous.shared_tolerance()

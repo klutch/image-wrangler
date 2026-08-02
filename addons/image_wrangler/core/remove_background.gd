@@ -271,8 +271,8 @@ Where two entries could both claim a pixel, the higher one wins.",
 2 suits ordinary antialiasing. Raise it for soft edges, glows or
 drop shadows; set it to 0 for a hard-edged cutout.
 
-Remove Crevice and Island Picker take their band width from here too, so
-every edge in the image is matted to the same depth.",
+Remove Crevice takes its width from here too. Island Picker has its own —
+whichever asks for more is what every edge in the image gets.",
         },
         {
             "property": &"contiguous",

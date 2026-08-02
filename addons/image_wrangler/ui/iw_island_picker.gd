@@ -60,6 +60,13 @@ var _list: EntryList
 var _pick_button: Button
 var _clear_button: Button
 
+## Which way the next island picked will move alpha, and the dropdown showing it.
+##
+## A choice made before the gesture rather than fixed up after it: the user knows
+## whether they are cutting or patching as they reach for the region.
+var _next_mode: int = IWAlphaMode.Mode.SUBTRACT
+var _mode_choice: OptionButton
+
 ## Tolerance editor for the highlighted row. Hidden rather than disabled when
 ## nothing is selected, so the group does not show a control that edits nothing.
 var _editor: HBoxContainer
@@ -105,6 +112,15 @@ func _build() -> void:
     _pick_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _pick_button.toggled.connect(func(pressed: bool) -> void: pick_toggled.emit(pressed))
     buttons.add_child(_pick_button)
+
+    _mode_choice = OptionButton.new()
+    for option in IWAlphaMode.LABELS:
+        _mode_choice.add_item(String(option))
+    _mode_choice.selected = _next_mode
+    _mode_choice.focus_mode = Control.FOCUS_NONE
+    _mode_choice.tooltip_text = "What the next island picked will do: Subtract makes its area transparent,\nAdd makes it opaque. Press X over the dock to switch.\n\nOnly sets new islands. Change one already in the list from its own row."
+    _mode_choice.item_selected.connect(_on_next_mode_selected)
+    buttons.add_child(_mode_choice)
 
     _clear_button = Button.new()
     _clear_button.text = "Clear"
@@ -203,7 +219,7 @@ func add_region(region: Rect2i) -> int:
             _select(existing)
             return 0
 
-    var entry := islands.add_region(region)
+    var entry := islands.add_region(region, _next_mode)
     _refresh()
     _select(islands.size() - 1)
     # Said out loud rather than left to be noticed: past the cap the region is seeded
@@ -280,6 +296,20 @@ func selected_index() -> int:
 ## Lets the dock switch picking off without echoing back a [signal pick_toggled].
 func set_pick_active(enabled: bool) -> void:
     _pick_button.set_pressed_no_signal(enabled)
+
+
+## Which way the next island picked will move alpha. See [IWAlphaMode].
+func next_mode() -> int:
+    return _next_mode
+
+
+## Flips that choice and returns what it is now, for the dock's X key.
+func toggle_next_mode() -> int:
+    if not _interactive:
+        return _next_mode
+    _set_next_mode(IWAlphaMode.Mode.SUBTRACT if _next_mode == IWAlphaMode.Mode.ADD
+            else IWAlphaMode.Mode.ADD)
+    return _next_mode
 
 
 # --- Internals ----------------------------------------------------------
@@ -456,6 +486,17 @@ func _on_enabled_toggled(index: int, on: bool) -> void:
     selection_changed.emit()
 
 
+func _on_next_mode_selected(mode: int) -> void:
+    _set_next_mode(mode)
+
+
+## Writes the choice and puts the dropdown on it, whichever of the two asked.
+func _set_next_mode(mode: int) -> void:
+    _next_mode = IWAlphaMode.sanitise(mode)
+    if _mode_choice != null:
+        _mode_choice.selected = _next_mode
+
+
 func _on_mode_changed(index: int, mode: int) -> void:
     var islands := _island_list()
     var entry := islands.get_at(index) if islands != null else null
@@ -554,6 +595,8 @@ func _refresh() -> void:
 func _update_buttons() -> void:
     _clear_button.disabled = not _interactive or _list.count() == 0
     _pick_button.disabled = not _interactive
+    if _mode_choice != null:
+        _mode_choice.disabled = not _interactive
     if _tolerance_slider != null:
         _tolerance_slider.read_only = not _interactive
     if _picks_toggle != null:

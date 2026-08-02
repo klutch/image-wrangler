@@ -729,6 +729,9 @@ func _ready() -> void:
 ## Ctrl+Z and Ctrl+Shift+Z walk this image's history, one step up or down the list the
 ## History tab shows.
 ##
+## X switches the Island Picker holding the crosshair between Subtract and Add, which
+## is what the next island it takes will be.
+##
 ## Ctrl+C and Ctrl+V carry the whole stack, the same as the two toolbar buttons above it.
 ## Only on the Operations tab and only with an image open, since neither means anything
 ## without a stack to read or write.
@@ -788,6 +791,15 @@ func _unhandled_key_input(event: InputEvent) -> void:
         return
 
     if key.ctrl_pressed or key.alt_pressed or key.shift_pressed or key.meta_pressed:
+        return
+
+    # X flips what the next island picked will be. Gated on a picker holding the
+    # crosshair, both because the stack may hold several and because the choice only
+    # means anything while a pick is about to happen.
+    if key.keycode == KEY_X and _pick_target is IslandPicker:
+        var mode := (_pick_target as IslandPicker).toggle_next_mode()
+        _set_status("Next island: %s." % IWAlphaMode.LABELS[mode])
+        accept_event()
         return
 
     # Escape puts the brush away. Unlike the polygon it does not wait for a shape to be
@@ -3243,6 +3255,8 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
         _set_status("Drag a rectangle in the preview to add it to the list.")
     elif source is ExcludeTilesList:
         _set_status("Click a tile to pick it, or drag over several. Clicking a picked one lets it go.")
+    elif source is IslandPicker:
+        _set_status("Drag a region in the preview to add it to the list, or click one pixel. X switches Subtract and Add.")
     else:
         _set_status("Drag a region in the preview to add it to the list, or click one pixel.")
     _update_overlays()
