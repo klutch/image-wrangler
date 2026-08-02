@@ -119,7 +119,7 @@ made.
 | **Round Edges** | Rounds each sprite off from its outline inwards. The silhouette only, so a flat shape comes out looking carved. |
 | **Color Regions** | The same rounding, plus every colour boundary inside the sprite, so each flat area of colour lifts on its own. |
 | **Brightness** | Reads the sprite's own light and dark as high and low. Picks up line work and large form. |
-| **Neural** | Hands each sprite to a trained network. Needs a model, and only appears in builds made with the network wrapper. |
+| **Neural** | Hands each sprite to a trained network. Needs a ncnn-compatible model. Tested using [klutch/deepbump-ncnn](https://github.com/klutch/deepbump-ncnn). |
 
 Four switches act on the whole map rather than one generator. **Green Points Down** flips
 the green channel for DirectX-style engines; off is what Godot wants. **Show Normal Map**
