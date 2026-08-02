@@ -26,6 +26,39 @@ constexpr double RESTORE_SOLID = 0.995;
 constexpr double RESTORE_CLEAR = 0.005;
 constexpr int64_t RESTORE_INWARD_MAX = 2;
 
+// How visible the solid side of a pair must actually be before it can anchor a
+// restoration. Coverage alone cannot say: a pixel can be fully covered yet carry almost
+// no source alpha of its own, and everything restored against it inherits the mistake.
+constexpr double RESTORE_ANCHOR_VISIBLE = 0.5;
+
+// How visible the reference pixel and its whole neighbourhood must be. The division
+// only recovers coverage when the reference is uncontaminated subject; on a hairline
+// strand or a crumb every pixel in reach is itself a blend, and dividing one blend by
+// another scrambles the alpha instead of restoring it — which is what used to break
+// thin strands into debris the packer then lifted out as sprites of their own.
+constexpr double RESTORE_REFERENCE_VISIBLE = 0.9;
+
+// Whether `index` is interior subject: visible through and through, neighbours included.
+inline bool interior_visible(
+        const uint8_t *data, const float *coverage, int64_t index,
+        int64_t width, int64_t height) {
+    const int64_t x = index % width;
+    const int64_t y = index / width;
+    if (x < 1 || y < 1 || x >= width - 1 || y >= height - 1) {
+        return false;
+    }
+    const double to_unit = 1.0 / 255.0;
+    for (int64_t oy = -1; oy <= 1; oy++) {
+        for (int64_t ox = -1; ox <= 1; ox++) {
+            const int64_t n = (y + oy) * width + (x + ox);
+            if (data[n * 4 + 3] * to_unit * iw::widen(coverage[n]) < RESTORE_REFERENCE_VISIBLE) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 // How far the automatic stroke colour is darkened and saturated relative to what it
 // sampled. Painting a colour over itself shows nothing.
 constexpr double AUTO_STROKE_DARKEN = 0.35;
@@ -151,12 +184,15 @@ PackedFloat32Array IWStageKernels::restore_edges(const Ref<IWPipelineContext> &c
 	const bool has_regions = !ctx->blacked.is_empty();
 	const bool has_nearest = !ctx->nearest.is_empty();
 	const bool has_key_of = !ctx->key_of.is_empty();
+    const bool has_force = ctx->force_opaque.size() == pixel_count;
 
 	const PackedFloat32Array coverage_ref = ctx->coverage;
 	const float *coverage = coverage_ref.ptr();
 	const int32_t *key_of = ctx->key_of.ptr();
 	const int32_t *nearest = ctx->nearest.ptr();
 	const uint8_t *blacked = ctx->blacked.ptr();
+    const uint8_t *source = ctx->data.ptr();
+    const uint8_t *force = ctx->force_opaque.ptr();
 
 	std::vector<Color> keys;
 	keys.reserve(static_cast<size_t>(ctx->keys.size()));
@@ -202,6 +238,15 @@ PackedFloat32Array IWStageKernels::restore_edges(const Ref<IWPipelineContext> &c
 			continue;
 		}
 
+        // The solid side of the pair anchors the restoration, so it has to be genuinely
+        // visible — its own source alpha times its coverage — not merely covered.
+        const int64_t anchor = solid ? i : facing;
+        if (!(has_force && force[anchor] != 0)
+                && source[anchor * 4 + 3] * (1.0 / 255.0) * iw::widen(coverage[anchor])
+                        < RESTORE_ANCHOR_VISIBLE) {
+            continue;
+        }
+
 		// The background this edge is against, taken from whichever of the two sides the
 		// flood actually claimed, since that is the one that knows.
 		int64_t claimed = -1;
@@ -216,9 +261,9 @@ PackedFloat32Array IWStageKernels::restore_edges(const Ref<IWPipelineContext> &c
 		if (subject < 0 && has_nearest) {
 			subject = nearest[i];
 		}
-		if (subject < 0) {
-			continue;
-		}
+        if (subject < 0 || !interior_visible(source, coverage, subject, width, height)) {
+            continue;
+        }
 
 		const double reference = ctx->distance_at(subject, key);
 		// Subject indistinguishable from background here: the division would amplify
