@@ -103,6 +103,9 @@ const NORMAL_SUFFIX := "_normal.png"
 const MIN_SIZE := 1
 const MAX_SIZE := 16384
 
+## The widest gap that can be asked for between sprites.
+const MAX_PADDING := 16
+
 ## How wide the lookup table is, in pixels, whatever is in it.
 ##
 ## Fixed rather than fitted to the sprite count so the shader side is a constant it can
@@ -248,6 +251,15 @@ func get_settings_schema() -> Array[Dictionary]:
             "tooltip": "How tall the packed sheet starts, in pixels.\n\nWhere it ends up depends on Expand to Fit: on, this is a starting point and the\nsheet doubles from it until everything fits; off, it is exactly the size used\nand you are told when the sprites do not fit in it.",
         },
         {
+            "property": &"padding",
+            "label": "Padding",
+            "type": SettingType.INT,
+            "min": 0,
+            "max": MAX_PADDING,
+            "step": 1,
+            "tooltip": "Empty pixels kept between the sprites, and between the sprites and the\nsheet's edges.\n\nOne is enough to stop texture filtering pulling a neighbour's colour in at\nthe rim. The lookup table holds each sprite's own rectangle, without the\npadding.",
+        },
+        {
             "property": &"expand_to_fit",
             "label": "Expand to Fit",
             "type": SettingType.BOOL,
@@ -292,11 +304,18 @@ func plan(sizes: Array) -> Dictionary:
     var width: int = clampi(settings.output_width, MIN_SIZE, MAX_SIZE)
     var height: int = clampi(settings.output_height, MIN_SIZE, MAX_SIZE)
     var mode := sanitise_mode(settings.mode)
+    var padding: int = clampi(settings.padding, 0, MAX_PADDING)
+    # [b]Padding is a trick of sizes, not a change to the packers.[/b] Each sprite is grown
+    # by the padding on its right and bottom, and planned into a sheet shrunk by the same
+    # amount at the left and top. The growth becomes the gap to the next sprite along and
+    # the border at the far edges; the shrink becomes the border at the near ones. The
+    # positions come back shifted onto the real sheet at the end.
+    var padded := _padded(sizes, padding)
     var wanted := _packable(sizes)
 
-    var attempt := _plan_at(sizes, width, height, mode)
+    var attempt := _plan_at(padded, maxi(width - padding, 0), maxi(height - padding, 0), mode)
     if attempt["placed"] >= wanted or not settings.expand_to_fit:
-        return _at_size(attempt, width, height)
+        return _at_size(_shifted(attempt, padding), width, height)
 
     # [b]Doubling, alternately, rather than working out the size that would fit.[/b] There
     # is no size to work out: Grid's capacity appears a whole cell at a time, and the row
@@ -322,11 +341,11 @@ func plan(sizes: Array) -> Dictionary:
             height = mini(height * 2, MAX_SIZE)
         grow_width = not grow_width
 
-        attempt = _plan_at(sizes, width, height, mode)
+        attempt = _plan_at(padded, maxi(width - padding, 0), maxi(height - padding, 0), mode)
         if attempt["placed"] >= wanted:
             break
 
-    return _at_size(attempt, width, height)
+    return _at_size(_shifted(attempt, padding), width, height)
 
 
 ## One attempt, at one size.
@@ -353,6 +372,30 @@ func _packable(sizes: Array) -> int:
         if size.x > 0 and size.y > 0:
             count += 1
     return count
+
+
+## Each real sprite grown by [param padding] on the right and bottom. Empty ones stay
+## empty, so they are still skipped rather than placed as a square of nothing.
+func _padded(sizes: Array, padding: int) -> Array:
+    if padding <= 0:
+        return sizes
+    var out := []
+    for size: Vector2i in sizes:
+        if size.x > 0 and size.y > 0:
+            out.append(size + Vector2i(padding, padding))
+        else:
+            out.append(size)
+    return out
+
+
+## Every placed position moved down and right by [param padding], onto the real sheet.
+func _shifted(attempt: Dictionary, padding: int) -> Dictionary:
+    if padding > 0:
+        var positions: Array = attempt["positions"]
+        for i in positions.size():
+            if positions[i].x >= 0:
+                positions[i] += Vector2i(padding, padding)
+    return attempt
 
 
 ## The plan, told what size it was made for.

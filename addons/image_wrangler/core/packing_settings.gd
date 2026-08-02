@@ -18,6 +18,12 @@ extends Resource
 @export var output_width: int = 1024
 @export var output_height: int = 1024
 
+## Empty pixels kept between the sprites, and between the sprites and the sheet's edges.
+##
+## One is enough to stop texture filtering pulling a neighbour's colour in at the rim.
+## Zero packs the sprites shoulder to shoulder.
+@export var padding: int = 1
+
 ## Whether the sheet may double until everything fits.
 ##
 ## On by default, and for every mode: a packing that comes back with the sprites on it is
