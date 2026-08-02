@@ -38,6 +38,11 @@ var _made_from: Image
 var _made_rects := PackedInt32Array()
 var _made_dir := ""
 
+## [member _made] with a strength applied, kept so dragging the slider costs one combine
+## pass rather than a run of the network.
+var _tuned: Image
+var _tuned_strength := 1.0
+
 
 func _init() -> void:
     settings = NormalNeuralSettings.new()
@@ -145,7 +150,7 @@ func is_expensive(sheet: Image, rects: PackedInt32Array) -> bool:
 func generate(sheet: Image, rects: PackedInt32Array) -> Image:
     last_error = ""
     if can_reuse(sheet, rects):
-        return _made
+        return _with_strength()
 
     var net := _net()
     if net == null:
@@ -172,11 +177,39 @@ func generate(sheet: Image, rects: PackedInt32Array) -> Image:
     _made_from = sheet
     _made_rects = rects
     _made_dir = dir
-    return map
+    _tuned = null
+    return _with_strength()
+
+
+## The raw map scaled by [member NormalNeuralSettings.strength]. At one it comes back
+## untouched.
+##
+## Scaled by slope-combining the map with itself at strength minus one: its own slope plus
+## that much of it again is the slope times the strength. Combining takes alpha from the
+## base, and here the base is the map itself, so transparency comes through untouched.
+func _with_strength() -> Image:
+    var strength := settings.strength
+    if is_equal_approx(strength, 1.0):
+        return _made
+    if _tuned != null and is_equal_approx(_tuned_strength, strength):
+        return _tuned
+    _tuned = IWStageKernels.combine_normals(_made, _made, _made_rects, CombineMode.SLOPE,
+            strength - 1.0)
+    _tuned_strength = strength
+    return _tuned
 
 
 func own_schema() -> Array[Dictionary]:
     return [
+        {
+            "property": &"strength",
+            "label": "Strength",
+            "type": SettingType.FLOAT,
+            "min": 0.0,
+            "max": 3.0,
+            "step": 0.01,
+            "tooltip": "How strongly the map leans.\n\nAt one the network's answer comes through untouched. Below one flattens it\ntowards facing straight up; above one exaggerates it.\n\nCheap to move: the network does not run again, the map it already made is\nrescaled.",
+        },
         {
             "property": &"model_dir",
             "label": "Model Folder",

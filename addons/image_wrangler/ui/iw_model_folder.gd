@@ -18,6 +18,10 @@ extends VBoxContainer
 ## leaves for the dock to wire — the dock is the only thing that knows what an edit costs.
 signal folder_changed
 
+## Emitted when Refresh is pressed. What refreshing means is the dock's to decide, for the
+## same reason [signal folder_changed] leaves it there.
+signal refresh_requested
+
 ## Where the model comes from.
 ##
 ## A source archive rather than a release binary, because that tag is what the converted
@@ -70,6 +74,7 @@ var _fallback := ""
 
 var _field: LineEdit
 var _browse: Button
+var _refresh_button: Button
 var _download: Button
 var _warning: Label
 var _dialog: FileDialog
@@ -150,6 +155,12 @@ func _build() -> void:
     _warning.modulate = Color(1.0, 0.85, 0.4)
     _warning.visible = false
     add_child(_warning)
+
+    _refresh_button = Button.new()
+    _refresh_button.text = "Refresh"
+    _refresh_button.tooltip_text = "Runs the export again now, network included."
+    _refresh_button.pressed.connect(func() -> void: refresh_requested.emit())
+    add_child(_refresh_button)
 
     _download = Button.new()
     _download.text = "Download Latest Model"
@@ -293,6 +304,7 @@ func _update_buttons() -> void:
     var live := _interactive and not _busy
     _field.editable = live
     _browse.disabled = not live
+    _refresh_button.disabled = not live
     _download.disabled = not live or not _network_built()
     _download.text = "Downloading..." if _busy else "Download Latest Model"
 

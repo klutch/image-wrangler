@@ -21,6 +21,10 @@ static func default_model_dir() -> String:
     return ProjectSettings.globalize_path(MODEL_SUBDIR)
 
 
+## How strongly the map leans. One is the network's answer untouched; lower flattens it,
+## higher exaggerates it.
+@export var strength: float = 1.0
+
 ## The folder holding the converted model the network runs.
 ##
 ## [b]Empty means [method default_model_dir].[/b] It is not a folder anyone chose — it is

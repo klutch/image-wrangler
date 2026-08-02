@@ -4281,6 +4281,7 @@ func _bind_model_folders(node: Node, announce: Callable) -> void:
         if child.has_method(&"bind_download"):
             child.bind_download(_on_download_begin, _on_download_step, _on_download_done)
             child.folder_changed.connect(announce)
+            child.refresh_requested.connect(_on_refresh_pressed)
             continue
         _bind_model_folders(child, announce)
 
