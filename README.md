@@ -1,4 +1,6 @@
-<h1 align="center">Image Wrangler</h1>
+<h1 align="center">
+  <img src="header.svg" alt="Image Wrangler" width="520">
+</h1>
 
 <p align="center">
   <img alt="Godot 4.7+" src="https://img.shields.io/badge/Godot-4.7%2B-0072B2?style=for-the-badge&logo=godotengine&logoColor=white">
