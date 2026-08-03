@@ -248,6 +248,12 @@ const NORMAL_DEBOUNCE := 0.2
 const NORMAL_REACH_MIN := 1
 const NORMAL_REACH_MAX := 10
 
+## Where the Export tab's three sections keep whether they are folded, in [member
+## _fold_state]. Prefixed so they cannot collide with a key a settings form makes.
+const EXPORT_FOLD_PACKING := "export/packing"
+const EXPORT_FOLD_NORMALS := "export/normals"
+const EXPORT_FOLD_PIVOTS := "export/pivots"
+
 ## How long the Upscale tab waits after a change before running the network again.
 ##
 ## The same as Packing's, and for the same reason — a spinner being dragged reports a change
@@ -1671,17 +1677,26 @@ func _build_operation_column() -> Control:
     _rename_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     rename_page.add_child(_rename_box)
 
-    # No scroll of its own, for the reason the History tab has none: the normal map stack
-    # below brings one, and nesting the two would give the tab a scrollbar that moved a list
-    # with a scrollbar in it. The five rows above the stack sit at their natural height and
-    # the stack takes whatever pressure the dock is under.
+    # The one scroll on this tab. The normal map stack inside it is set to stand at the
+    # height its cards need instead of bringing a scroll of its own, so the sections below
+    # it sit directly under the last card rather than at the bottom of the dock.
+    var packing_scroll := ScrollContainer.new()
+    packing_scroll.name = "Export"
+    packing_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    _modes.add_child(packing_scroll)
+
     var packing_page := VBoxContainer.new()
-    packing_page.name = "Export"
-    _modes.add_child(packing_page)
+    packing_page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    packing_scroll.add_child(packing_page)
+
+    # Three sections, each folding away on its own. The same headings the settings forms
+    # use, built by hand here because these hold whole controls rather than schema rows.
+    var packing_section := SettingsBuilder.begin_group(packing_page, "Packing", false,
+            _fold_state, EXPORT_FOLD_PACKING)
 
     _packing_box = VBoxContainer.new()
     _packing_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    packing_page.add_child(_packing_box)
+    packing_section.add_child(_packing_box)
 
     # Says what the mode in the dropdown above it does. Built here and moved into the form
     # by _build_packing, which is the only thing that knows where the dropdown ended up.
@@ -1689,12 +1704,17 @@ func _build_operation_column() -> Control:
     _packing_mode_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     _packing_mode_note.modulate = Color(1, 1, 1, 0.6)
 
+    var normal_section := SettingsBuilder.begin_group(packing_page, "Normal Maps", false,
+            _fold_state, EXPORT_FOLD_NORMALS)
+
     # The second stack in the dock, and the same class as the first. What it offers, what a
     # card's form looks like and what each tool button does all arrive from here — see
     # iw_stack_view.gd.
     _normal_stack = StackView.new()
     _normal_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _normal_stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    # Grows with its cards and takes no room while there are none, so Pivots below it stays
+    # under the list instead of being pushed to the bottom of the tab.
+    _normal_stack.fit_to_content = true
     _normal_stack.operations = normal_generators()
     _normal_stack.add_prompt = "Add Normal Map Generator"
     _normal_stack.add_tooltip = "Add a normal map generator to the bottom of the stack.\nDrag its header afterwards to move it.\n\nEach one builds on what the ones above it made, in the way its own Combine\nsetting says. With none of them the sheet gets no normal map at all.\n\nDisabled while no image is open."
@@ -1709,7 +1729,7 @@ func _build_operation_column() -> Control:
     _normal_stack.load_requested.connect(_on_load_normals)
     _normal_stack.reset_requested.connect(_on_reset_normals)
     _normal_stack.menu_requested.connect(_on_normal_menu)
-    packing_page.add_child(_normal_stack)
+    normal_section.add_child(_normal_stack)
 
     # Both of these are about the whole map rather than about any one generator, so they go
     # in the part of the stack view that does not scroll — under the Add dropdown, above the
@@ -1747,6 +1767,10 @@ func _build_operation_column() -> Control:
     _packing_reach_slider.tooltip_text = "How deep the rim is taken to be, in pixels, and so how far in the replacements\ncome from.\n\nOne is the single outermost ring of pixels and is enough for most art. Larger\nnumbers reach past a thicker band of antialiasing, at the cost of flattening\ndetail that genuinely belongs near the outline."
     _packing_reach_slider.value_changed.connect(_on_inner_reach_changed)
     extras.add_child(_packing_reach_slider)
+
+    # Empty for now: the heading is here so the section it will hold has a place to go.
+    SettingsBuilder.begin_group(packing_page, "Pivots", true, _fold_state,
+            EXPORT_FOLD_PIVOTS)
 
     _packing_status = Label.new()
     _packing_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

@@ -96,6 +96,15 @@ var add_prompt := "Add New Operation"
 ## What the dropdown says when it is hovered.
 var add_tooltip := "Add an operation to the bottom of the stack.\nDrag its header afterwards to move it.\n\nPicking the same one twice adds a second of it, which is what duplicates are for.\nDisabled while no image is open."
 
+## Whether the list is exactly as tall as its cards rather than as tall as the room it is
+## given. Empty, it takes no height at all.
+##
+## For a stack sharing a tab with other sections, which the leftover-room version would push
+## to the bottom whether or not there was anything in the list. Set before the view enters
+## the tree. Whatever holds the view needs a scroll of its own, since this one stops having
+## anything to scroll.
+var fit_to_content := false
+
 ## Where a tool button keeps the icon it wants and the word to fall back on.
 const META_ICON := &"iw_icon"
 const META_LABEL := &"iw_label"
@@ -118,7 +127,14 @@ var _list: VBoxContainer
 var _tools: HBoxContainer
 var _extras: VBoxContainer
 var _scroll: ScrollContainer
+var _inset: MarginContainer
 var _next_uid := 1
+
+## Which scroll a drag near the edge runs, found once when the drag starts.
+##
+## Ours, unless [member fit_to_content] left it with nothing to scroll — then whichever one
+## the dock wrapped the tab in. Looked up at the start of a drag rather than every frame.
+var _auto_scroll: ScrollContainer
 
 ## Which entry the stack is pointed at, or 0 for none.
 ##
@@ -151,11 +167,13 @@ func _notification(what: int) -> void:
     # and neither is a card being dragged in the other stack.
     if what == NOTIFICATION_DRAG_BEGIN:
         _scroll_carry = 0.0
+        _auto_scroll = _find_auto_scroll()
         set_process(_dragging_ours())
         return
     # Always arrives, including when a drag is abandoned, so this cannot be left running.
     if what == NOTIFICATION_DRAG_END:
         set_process(false)
+        _auto_scroll = null
         return
     if what != NOTIFICATION_THEME_CHANGED:
         return
@@ -177,19 +195,19 @@ func _process(delta: float) -> void:
     # closing one — a rebuild mid-drag, a tool script reloaded under the dock, a second view
     # answering a drag that was never its own — left the list running under a pointer that
     # was not dragging anything. Reading the live drag is one call and cannot be out of date.
-    if _scroll == null or not is_visible_in_tree() or not _dragging_ours():
+    if _auto_scroll == null or not is_visible_in_tree() or not _dragging_ours():
         set_process(false)
         return
-    var at := _scroll.get_local_mouse_position()
+    var at := _auto_scroll.get_local_mouse_position()
     # Sideways out of the column is not a request to scroll it.
-    if at.x < 0.0 or at.x > _scroll.size.x:
+    if at.x < 0.0 or at.x > _auto_scroll.size.x:
         return
 
     var speed := 0.0
     if at.y < AUTO_SCROLL_EDGE:
         speed = -_edge_speed(AUTO_SCROLL_EDGE - at.y)
-    elif at.y > _scroll.size.y - AUTO_SCROLL_EDGE:
-        speed = _edge_speed(at.y - (_scroll.size.y - AUTO_SCROLL_EDGE))
+    elif at.y > _auto_scroll.size.y - AUTO_SCROLL_EDGE:
+        speed = _edge_speed(at.y - (_auto_scroll.size.y - AUTO_SCROLL_EDGE))
     if is_zero_approx(speed):
         _scroll_carry = 0.0
         return
@@ -199,7 +217,22 @@ func _process(delta: float) -> void:
     if whole == 0:
         return
     _scroll_carry -= float(whole)
-    _scroll.scroll_vertical += whole
+    _auto_scroll.scroll_vertical += whole
+
+
+## The scroll a drag near the edge should run.
+##
+## Ours normally. With [member fit_to_content] on it has nothing left to scroll, so the
+## nearest one above this view is used instead — that is the one the cards are moving in.
+func _find_auto_scroll() -> ScrollContainer:
+    if not fit_to_content:
+        return _scroll
+    var node := get_parent()
+    while node != null:
+        if node is ScrollContainer:
+            return node
+        node = node.get_parent()
+    return null
 
 
 ## Whether the drag in flight is one of this view's own cards.
@@ -342,7 +375,8 @@ func _build() -> void:
     _scroll = ScrollContainer.new()
     var scroll := _scroll
     scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    if not fit_to_content:
+        scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
     # The dock column is narrow and the forms inside give rather than overflow, so a
     # sideways bar would only ever be a second thing to nudge past the vertical one.
     scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -355,6 +389,7 @@ func _build() -> void:
     # click, and leaving them solid would swallow every right-click that missed an entry
     # — which is exactly the one that means "paste at the end".
     var inset := MarginContainer.new()
+    _inset = inset
     inset.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     inset.mouse_filter = Control.MOUSE_FILTER_IGNORE
     for side in ["margin_top", "margin_bottom"]:
@@ -367,9 +402,30 @@ func _build() -> void:
     _list.add_theme_constant_override("separation", ENTRY_GAP)
     inset.add_child(_list)
 
+    # A ScrollContainer asks for no height of its own, so left alone it would sit at nothing
+    # and the cards would be unreachable. Followed rather than set once: a card folding or a
+    # form growing changes what the list needs.
+    if fit_to_content:
+        inset.minimum_size_changed.connect(_fit_scroll)
+        _fit_scroll()
+
     # Off until a drag of ours starts. See _notification.
     set_process(false)
     _refresh_selector()
+
+
+## Points the scroll's height at what the list actually needs, for [member fit_to_content].
+##
+## Nothing at all while the list is empty, margins included — an empty stack should leave the
+## sections under it where they were.
+func _fit_scroll() -> void:
+    if _scroll == null or _list == null:
+        return
+    var wanted := 0.0
+    if _list.get_child_count() > 0:
+        wanted = _inset.get_combined_minimum_size().y
+    if not is_equal_approx(_scroll.custom_minimum_size.y, wanted):
+        _scroll.custom_minimum_size.y = wanted
 
 
 ## Room for controls that belong above the stack but below the dropdown.
@@ -537,6 +593,8 @@ func rebuild() -> void:
         entry.refresh_enabled_state()
 
     _settle_selection()
+    if fit_to_content:
+        _fit_scroll()
     entries_rebuilt.emit()
 
 

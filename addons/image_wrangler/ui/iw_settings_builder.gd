@@ -81,7 +81,7 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
             # for. The schema key is read off the entry that opens the group, since
             # that is the only one the heading exists for.
             var collapsed: bool = fold_state.get(key, bool(setting.get("collapsed", false)))
-            target = _begin_group(container, group, collapsed, fold_state, key)
+            target = begin_group(container, group, collapsed, fold_state, key)
 
         var label: String = setting.get("label", String(property).capitalize())
         var tooltip: String = setting.get("tooltip", "")
@@ -145,7 +145,11 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 ##
 ## [param collapsed] is the state it opens in, and every click writes the new one
 ## back to [param fold_state] under [param key], so the fold outlives the form.
-static func _begin_group(container: Container, title: String, collapsed: bool, fold_state: Dictionary, key: String) -> Container:
+##
+## Public because the dock builds sections of its own with it, outside any schema — see
+## the Export tab in [code]iw_panel.gd[/code].
+static func begin_group(container: Container, title: String, collapsed: bool,
+        fold_state: Dictionary, key: String) -> Container:
     if title.is_empty():
         return container
 
