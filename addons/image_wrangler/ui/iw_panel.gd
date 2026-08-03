@@ -3144,7 +3144,14 @@ func _refresh_notes() -> void:
     var keying := false
     for entry: Control in _stack_view.entries():
         var stage: IWStackOperation = entry.stage
-        entry.set_note("" if keying or not stage.needs_keying() else stage.prerequisite_note(null))
+        # A stage that keys is only asked while nothing above it has keyed, since its note
+        # is about exactly that. One that does not key is always asked, because what it is
+        # waiting for is its own — a model or a runtime that is not installed yet, which
+        # nothing about the stack would reveal.
+        var note := ""
+        if not stage.needs_keying() or not keying:
+            note = stage.prerequisite_note(null)
+        entry.set_note(note)
         if stage.enabled and stage.establishes_keying():
             keying = true
 

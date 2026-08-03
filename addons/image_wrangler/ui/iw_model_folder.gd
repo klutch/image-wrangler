@@ -101,6 +101,24 @@ var _archive_subfolder := ""
 ## [method _model_folder_for].
 var _folder_from_name := false
 
+## The files this folder has to hold, by name, when what belongs in it is a fixed list
+## rather than a model.
+##
+## Set for a runtime rather than a network: these are named libraries, not a
+## [code].param[/code] with a [code].bin[/code] beside it. They are the only things taken out
+## of the archive, wherever in it they sit, and the folder counts as filled when all of them
+## are there.
+var _files := PackedStringArray()
+
+## What this control calls the thing it fetches, and what its button says. A runtime is not
+## a model and the lines about it should not say it is.
+var _noun := "model"
+var _download_label := "Download Latest Model"
+
+## Whether what this folder feeds is one of the ncnn networks, which a build can be missing.
+## False for a runtime that has nothing to do with ncnn — see [method _network_built].
+var _needs_network := true
+
 ## A folder fixed in code, which leaves the path row out entirely. Empty for a control whose
 ## folder is a setting. See [method setup_fixed].
 var _fixed := ""
@@ -169,7 +187,18 @@ func _read_schema(setting: Dictionary) -> void:
     _many_models = bool(setting.get("models_in_folders", _many_models))
     _archive_subfolder = String(setting.get("archive_subfolder", _archive_subfolder))
     _folder_from_name = bool(setting.get("folder_from_file_name", _folder_from_name))
+    _files = PackedStringArray(setting.get("files", _files))
+    _noun = String(setting.get("noun", _noun))
+    _download_label = String(setting.get("download_label", _download_label))
+    _needs_network = bool(setting.get("needs_network", _needs_network))
     _show_refresh = bool(setting.get("show_refresh", _show_refresh))
+
+
+## What this control calls the thing it fetches, in the lines that mention it.
+func _subject() -> String:
+    if _noun != "model":
+        return _noun
+    return "models" if _many_models else "model"
 
 
 ## Puts the fallback into an empty setting, so nothing downstream has to know about it.
@@ -233,13 +262,12 @@ func _build() -> void:
         add_child(_refresh_button)
 
     _download = Button.new()
-    _download.text = "Download Latest Model"
-    var subject := "the models" if _many_models else "the model"
+    _download.text = _download_label
     if _url.is_empty():
         _download.tooltip_text = "No archive is published for this model yet.\nConvert one yourself and point the folder above at it."
     else:
-        _download.tooltip_text = "Fetches %s and unpacks them into %s.\n\nAround %s. Anything already there under the same name is\noverwritten." % [
-                subject,
+        _download.tooltip_text = "Fetches the %s and unpacks it into %s.\n\nAround %s. Anything already there under the same name is\noverwritten." % [
+                _subject(),
                 "the folder above" if _fixed.is_empty() else _fixed,
                 String.humanize_size(_bytes)]
     _download.pressed.connect(_on_download)
@@ -338,7 +366,7 @@ func _update_warning() -> void:
 ## The one thing standing between this folder and a normal map, or empty when there is
 ## nothing.
 func _trouble() -> String:
-    if not _network_built():
+    if _needs_network and not _network_built():
         return "This build has no network to run, so no model would help. See tools/build_ncnn.py."
     var dir := _resolved()
     if dir.is_empty():
@@ -359,20 +387,25 @@ func _trouble() -> String:
 ## Four ways of saying it, because two things change what can be done about it: whether an
 ## archive is published to fetch, and whether the folder can be pointed somewhere else.
 func _nothing_here() -> String:
-    var subject := "No models here." if _many_models else "No model here."
+    var subject := "No %s here." % _subject()
     var pointable := _fixed.is_empty()
     if _url.is_empty():
         if pointable:
             return "%s Point this at a folder holding a .param with a .bin of the same name beside it." % subject
-        return "%s Nothing is published to fetch, so they have to be put there by hand." % subject
+        return "%s Nothing is published to fetch, so it has to be put there by hand." % subject
     if pointable:
-        return "%s Press Download Latest Model, or point this at a folder holding a .param with a .bin of the same name beside it." % subject
-    return "%s Press Download Latest Model." % subject
+        return "%s Press %s, or point this at a folder holding a .param with a .bin of the same name beside it." % [subject, _download_label]
+    return "%s Press %s." % [subject, _download_label]
 
 
-## Whether [param dir] holds what this control is about: a pair of files, or — when the
-## folder holds a folder per model — at least one folder holding a pair.
+## Whether [param dir] holds what this control is about: every named file, a pair of files,
+## or — when the folder holds a folder per model — at least one folder holding a pair.
 func _has_model(dir: String) -> bool:
+    if not _files.is_empty():
+        for name in _files:
+            if not FileAccess.file_exists(dir.path_join(name)):
+                return false
+        return true
     if not _many_models:
         return not _model_in(dir).is_empty()
     for folder in DirAccess.get_directories_at(dir):
@@ -420,8 +453,9 @@ func _update_buttons() -> void:
         _browse.disabled = not live
     if _refresh_button != null:
         _refresh_button.disabled = not live
-    _download.disabled = not live or not _network_built() or _url.is_empty()
-    _download.text = "Downloading..." if _busy else "Download Latest Model"
+    _download.disabled = not live or _url.is_empty() \
+            or (_needs_network and not _network_built())
+    _download.text = "Downloading..." if _busy else _download_label
 
 
 # --- Fetching the model -------------------------------------------------
@@ -588,11 +622,11 @@ func _extract(zip: String) -> void:
     _tell(1.0, 1.0, "Done")
 
     if not _has_model(_target_dir):
-        _done("The archive came down and unpacked, but holds no .param with a .bin beside it.",
-                false)
+        _done("The archive came down and unpacked, but does not hold the whole %s."
+                % _subject(), false)
         return
     var where := _stored() if lifted.is_empty() else "%s, %s" % [_stored(), lifted]
-    _done("%s ready in %s." % ["Models" if _many_models else "Model", where], true)
+    _done("%s ready in %s." % [_subject().capitalize(), where], true)
 
 
 ## Where an entry out of the archive belongs under the model folder, or empty to leave it
@@ -609,6 +643,9 @@ func _extract(zip: String) -> void:
 ## [b]Anything else[/b] is taken as it comes, which is right for an archive holding one model
 ## and nothing else worth refusing.
 func _destination_for(relative: String) -> String:
+    if not _files.is_empty():
+        var wanted := relative.get_file()
+        return wanted if _files.has(wanted) else ""
     if not _archive_subfolder.is_empty():
         var prefix := _archive_subfolder + "/"
         return relative.substr(prefix.length()) if relative.begins_with(prefix) else ""

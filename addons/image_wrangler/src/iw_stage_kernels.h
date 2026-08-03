@@ -154,6 +154,15 @@ public:
 	// nothing, never a corrupted image.
 	static bool denoise(const Ref<IWPipelineContext> &ctx, int64_t quality, double blend);
 
+	// Whether denoise above can run at all, which is whether the Open Image Denoise
+	// runtime is in bin/.
+	//
+	// It is 49 MB and downloaded rather than committed, so a fresh checkout has every
+	// other kernel here and not this one. The DLL is delay-loaded precisely so that its
+	// absence costs one stage rather than the whole extension — see SConstruct — and this
+	// is what the Denoise stage asks before offering to do anything.
+	static bool denoise_available();
+
 	// RemoveLines.process_context: erases every structure the silhouette is too thin to
 	// have earned, and returns the indices it took.
 	//

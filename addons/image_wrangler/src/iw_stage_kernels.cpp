@@ -64,6 +64,8 @@ void IWStageKernels::_bind_methods() {
 	// third-party header; bound here so every entry point is in one list.
 	ClassDB::bind_static_method("IWStageKernels",
 			D_METHOD("denoise", "ctx", "quality", "blend"), &IWStageKernels::denoise);
+	ClassDB::bind_static_method("IWStageKernels",
+			D_METHOD("denoise_available"), &IWStageKernels::denoise_available);
 	// Defined in iw_line_kernels.cpp; bound here so every entry point is in one list.
 	ClassDB::bind_static_method("IWStageKernels",
 			D_METHOD("remove_lines", "ctx", "thickness", "detached_only"),

@@ -26,3 +26,14 @@ thirdparty/isnet-general/
 # the models' own licence text and stays committed.
 thirdparty/realesrgan-ncnn-vulkan/models/*/
 thirdparty/waifu2x-ncnn-vulkan/models/*/
+
+# The Open Image Denoise runtime, 50 MB of it in one file, fetched by the Denoise stage's
+# Download Runtime button. Named one by one rather than globbed, because bin/ is also where
+# the built extension lives and that is committed. See thirdparty/oidn/README-vendored.md.
+bin/OpenImageDenoise.dll
+bin/OpenImageDenoise_core.dll
+bin/OpenImageDenoise_device_cpu.dll
+bin/tbb12.dll
+bin/tbbbind.dll
+bin/tbbbind_2_0.dll
+bin/tbbbind_2_5.dll

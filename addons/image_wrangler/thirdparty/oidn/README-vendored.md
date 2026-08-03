@@ -1,7 +1,7 @@
 # Intel Open Image Denoise, vendored
 
-**Version 2.5.0**, x86_64 Windows, from the official Intel prebuilt drop
-(`oidn-2.5.0.x86_64.windows.zip`, <https://github.com/RenderKit/oidn/releases>).
+**Version 2.5.0**, x64 Windows, from the official Intel prebuilt drop
+(`oidn-2.5.0.x64.windows.zip`, <https://github.com/RenderKit/oidn/releases>).
 Apache-2.0 — see `LICENSE.txt` and the two `third-party-programs*.txt` beside it.
 
 Used by the Denoise stage. `IWStageKernels::denoise` is the only code that touches it.
@@ -36,6 +36,41 @@ the SYCL runtime (`sycl8.dll`, `ur_*.dll`) and the three tools. About 24 MB. Saf
 because the kernel asks for `OIDN_DEVICE_TYPE_CPU` by name.
 `OIDN_DEVICE_TYPE_DEFAULT` probes for the others and must not be used.
 
+## The runtime is not in this repository, and is delay-loaded
+
+The seven DLLs are 50 MB — `OpenImageDenoise_core.dll` is 48 of them — so they are ignored
+by `addons/image_wrangler/.gitignore` and fetched on demand. **Press Download Runtime** on
+the Denoise stage's card. The whole 56 MB zip comes down and only those seven files are
+written out of it, wherever in the archive they sit; see `Denoise.RUNTIME_FILES` in
+`core/denoise.gd` and `IWModelFolder._destination_for` in `ui/iw_model_folder.gd`.
+
+**This only works because `OpenImageDenoise.dll` is delay-loaded.** It is an ordinary
+load-time import otherwise, and `image_wrangler.dll` imports it directly — so a missing
+`OpenImageDenoise_core.dll` would be settled by the Windows loader before any of this
+project's code ran. The extension would fail to load and *every* native class would go with
+it: the upscalers, the normal map network, every stage kernel. Fifty megabytes for a stage
+nobody may be using is not worth that, so SConstruct passes
+`/DELAYLOAD:OpenImageDenoise.dll` and links `delayimp`, and nothing is touched until the
+first `oidn*` call.
+
+**Nothing may make that call blind.** The delay-load helper reports a failure by raising a
+structured exception, and this extension is built with exceptions disabled, so a failed
+delayed load would take the editor down rather than return. `oidn_runtime_loaded()` in
+`src/iw_denoise_kernels.cpp` is what stands in front of it, and
+`IWStageKernels.denoise_available()` is how GDScript asks the same question.
+
+Two details in that function are not decoration:
+
+- **It loads by full path**, worked out from this extension's own module handle. Godot
+  resolves the extension's imports against the folder it loaded it from, but a plain
+  `LoadLibrary` later searches from the running executable — Godot's folder, not this
+  addon's — and would not find it. `LOAD_WITH_ALTERED_SEARCH_PATH` is then what lets
+  `OpenImageDenoise_core.dll` resolve as a sibling. Once it is in, the delay-load helper
+  finds it already loaded under that name and reuses it.
+- **It asks again each time** rather than remembering the answer, which is what lets a
+  runtime downloaded into `bin/` work without restarting the editor. Once the DLL is there
+  it costs a module-table lookup.
+
 ## The seven DLLs, and why each one
 
 Confirmed from the import tables, not from the documentation:
@@ -64,11 +99,15 @@ shipped rather than about how it is built.
 
 ## Re-vendoring
 
-Replace the four files above and the seven DLLs from the same zip, together. Check
+Replace the four files above from the zip, and move the download with them: the version is
+in the URL, so `Denoise.RUNTIME_URL` and `Denoise.RUNTIME_BYTES` in `core/denoise.gd` both
+change. The seven DLLs in `bin/` are no longer committed, so nothing needs replacing there —
+delete them and press Download Runtime, which is also the test that the new URL is right.
+Check
 `OIDN_QUALITY_*` in `oidn.h` — the values are 4, 5 and 6 rather than 0, 1 and 2, and
 `quality_for()` in `src/iw_denoise_kernels.cpp` maps `DenoiseSettings.Quality` onto them
 by hand precisely so a renumbering on either side is a compile-time edit rather than a
 silently different filter.
 
-Every future version bump adds another ~49 MB to git history permanently. If that becomes
-painful the answer is Git LFS, which is a migration rather than a change of mind.
+A version bump no longer adds 49 MB to git history, which it did while the DLLs were
+committed — only the URL and the byte count move.

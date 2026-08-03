@@ -46,6 +46,30 @@ extends IWStackOperation
 ## brighter than another's.
 const TINT := Color(1.000, 0.000, 0.000)
 
+## Where the Open Image Denoise runtime goes: beside the extension, which is the only place
+## both Godot's loader and OIDN's own module lookup will find it.
+const RUNTIME_DIR := "res://addons/image_wrangler/bin"
+
+## Intel's prebuilt drop, and roughly what it weighs.
+##
+## The whole zip comes down and only [constant RUNTIME_FILES] is written out of it — the
+## CUDA, HIP and SYCL device modules and the three tools are another 24 MB that nothing here
+## can reach, since the kernel asks for the CPU device by name.
+const RUNTIME_URL := "https://github.com/RenderKit/oidn/releases/download/v2.5.0/oidn-2.5.0.x64.windows.zip"
+const RUNTIME_BYTES := 56062809
+
+## The seven libraries the stage actually needs, and the whole test for whether it can run.
+## Why each one is in thirdparty/oidn/README-vendored.md.
+const RUNTIME_FILES := [
+    "OpenImageDenoise.dll",
+    "OpenImageDenoise_core.dll",
+    "OpenImageDenoise_device_cpu.dll",
+    "tbb12.dll",
+    "tbbbind.dll",
+    "tbbbind_2_0.dll",
+    "tbbbind_2_5.dll",
+]
+
 
 var settings: DenoiseSettings
 
@@ -110,6 +134,22 @@ func get_settings_schema() -> Array[Dictionary]:
             "options": ["Fast", "Balanced", "High"],
             "tooltip": "What the filter trades against how long it takes.\n\nHigh by default, because this stage is one you went and added rather than\none that was already there. Drop to Fast while dialling the rest of the\nstack in on a large sheet, then put it back before processing the batch —\nthe result is not the same image.",
         },
+        {
+            # No property: the folder is fixed in code, because the runtime has to sit
+            # beside the extension and nowhere else would work. See IWModelFolder.
+            "folder": RUNTIME_DIR,
+            "type": SettingType.MODEL_FOLDER,
+            "files": RUNTIME_FILES,
+            "download_url": RUNTIME_URL,
+            "download_bytes": RUNTIME_BYTES,
+            "noun": "runtime",
+            "download_label": "Download Runtime",
+            # Nothing to do with ncnn, unlike every other folder this control serves.
+            "needs_network": false,
+            # No Refresh button on this card: the preview follows on its own.
+            "show_refresh": false,
+            "tooltip": "Fetches Intel Open Image Denoise, which is what this stage runs.\n\nIt is 50 MB and is not committed to the repository, so a fresh checkout has\nevery other stage and not this one. Everything else keeps working without it.",
+        },
     ]
 
 
@@ -130,7 +170,25 @@ func establishes_keying() -> bool:
     return false
 
 
+## Whether the runtime this stage needs is installed.
+##
+## Asked of the kernel rather than of the disk, because the kernel is what has to load it —
+## a folder holding the right file names is not the same as a library that came up.
+static func runtime_installed() -> bool:
+    return ClassDB.class_exists(&"IWStageKernels") and IWStageKernels.denoise_available()
+
+
+func prerequisite_note(_ctx: IWPipelineContext) -> String:
+    if not runtime_installed():
+        return "Open Image Denoise is not installed. Press Download Runtime."
+    return ""
+
+
 func process_context(ctx: IWPipelineContext) -> void:
+    # Stands down rather than pushing an error, the same way a stage waiting on keying
+    # does — the card already says what is missing and what to press.
+    if not runtime_installed():
+        return
     # A coherent request for nothing, and worth catching here — the kernel would
     # otherwise spend a device creation and a whole filter pass arriving at the identity.
     if settings.blend <= 0.0:

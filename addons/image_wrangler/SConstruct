@@ -72,6 +72,17 @@ if env.get("is_msvc", False):
     # godot-cpp defaults debug_symbols=no in any case.
     env.Append(LINKFLAGS=["/IGNORE:4098", "/IGNORE:4099"])
 
+    # Delayed, so a checkout without the runtime still gets an extension that loads.
+    #
+    # The runtime is 49 MB and downloaded rather than committed. Imported normally, its
+    # absence would be settled by the Windows loader before any of this project's code
+    # runs: image_wrangler.dll would fail to load and every native class would go with it,
+    # the upscalers and the normal map network included, over a stage nobody may be using.
+    # Delayed, nothing is touched until the first oidn* call — and iw_denoise_kernels.cpp
+    # brings the DLL up itself, and says so rather than calling, when it cannot.
+    env.Append(LINKFLAGS=["/DELAYLOAD:OpenImageDenoise.dll"])
+    env.Append(LIBS=["delayimp"])
+
 # waifu2x and Real-ESRGAN, for the Upscale tab.
 #
 # Vendored the same way OIDN is, and for the same reason: ncnn is a CMake project that

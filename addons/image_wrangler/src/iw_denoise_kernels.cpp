@@ -17,11 +17,62 @@
 
 #include <OpenImageDenoise/oidn.h>
 
+#include <string>
 #include <vector>
+
+#ifdef _WIN32
+// NOMINMAX is already on the command line, so only this one is set here.
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 using namespace godot;
 
 namespace {
+
+// Whether the Open Image Denoise runtime is loaded, loading it if it is merely on disk.
+//
+// [b]Nothing here may call an oidn* function before this has said yes.[/b] The DLL is
+// delay-loaded — see SConstruct — so the first call is what would fetch it, and the
+// delay-load helper reports a failure by raising a structured exception. This extension is
+// built with exceptions disabled, so that would take the editor down rather than return.
+//
+// Loaded by full path rather than by name. Godot resolves the extension's own imports
+// against the folder it loaded it from, but a plain LoadLibrary later searches from the
+// running executable instead, which is Godot's folder and not this addon's.
+// LOAD_WITH_ALTERED_SEARCH_PATH is then what lets OpenImageDenoise_core.dll resolve as a
+// sibling. Once it is in, the delay-load helper finds it already loaded under that name and
+// reuses it.
+//
+// Asked again each time rather than remembered, so that a runtime downloaded into bin/ works
+// without restarting the editor. Costs a module-table lookup once it is there.
+bool oidn_runtime_loaded() {
+#ifdef _WIN32
+	if (GetModuleHandleW(L"OpenImageDenoise.dll") != nullptr) {
+		return true;
+	}
+	HMODULE self = nullptr;
+	if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+							   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				reinterpret_cast<LPCWSTR>(&oidn_runtime_loaded), &self) == 0) {
+		return false;
+	}
+	wchar_t buffer[MAX_PATH];
+	const DWORD length = GetModuleFileNameW(self, buffer, MAX_PATH);
+	if (length == 0 || length >= MAX_PATH) {
+		return false;
+	}
+	std::wstring path(buffer, length);
+	const size_t slash = path.find_last_of(L'\\');
+	if (slash == std::wstring::npos) {
+		return false;
+	}
+	path.replace(slash + 1, std::wstring::npos, L"OpenImageDenoise.dll");
+	return LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH) != nullptr;
+#else
+	return true;
+#endif
+}
 
 // Released on every path out, including the early ones, so that no return has to
 // remember two of them.
@@ -79,8 +130,17 @@ OIDNQuality quality_for(int64_t index) {
 
 } // namespace
 
+bool IWStageKernels::denoise_available() {
+	return oidn_runtime_loaded();
+}
+
 bool IWStageKernels::denoise(const Ref<IWPipelineContext> &ctx, int64_t quality, double blend) {
 	ERR_FAIL_COND_V(ctx.is_null(), false);
+	// The backstop. The stage asks denoise_available() and stands down long before this,
+	// so reaching it means something called the kernel directly.
+	ERR_FAIL_COND_V_MSG(!oidn_runtime_loaded(), false,
+			"Image Wrangler: the Open Image Denoise runtime is not in "
+			"addons/image_wrangler/bin/. Use Download Runtime on the Denoise stage.");
 
 	const int64_t pixel_count = ctx->pixel_count;
 	const int64_t width = ctx->width;

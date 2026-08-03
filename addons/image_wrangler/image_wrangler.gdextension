@@ -17,10 +17,14 @@ windows.release.x86_64 = "res://addons/image_wrangler/bin/image_wrangler.windows
 ; The Open Image Denoise runtime the Denoise stage links against, copied on export.
 ;
 ; Only consulted when exporting — in the editor the extension's own directory is already
-; on the DLL search path, which is why these are committed beside it rather than anywhere
-; tidier. The destination is deliberately empty: it means "next to the executable", and a
+; on the DLL search path, which is why these live beside it rather than anywhere tidier.
+; The destination is deliberately empty: it means "next to the executable", and a
 ; subdirectory would separate them from image_wrangler.dll and break both that search
 ; path and OIDN's own lookup of its device module. See thirdparty/oidn/README-vendored.md.
+;
+; These are downloaded rather than committed — press Download Runtime on the Denoise stage.
+; Export before fetching them and Godot warns that the files are missing; the exported game
+; then runs everything except Denoise, because the DLL is delay-loaded.
 ;
 ; Listed per configuration because that is the only granularity this section has. All
 ; three ship the same runtime.

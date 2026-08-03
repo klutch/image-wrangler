@@ -64,7 +64,9 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 
     for setting in operation.get_settings_schema():
         var property: StringName = setting.get("property", &"")
-        if property == &"":
+        # A folder fixed in code is the one entry with no setting behind it: what it shows
+        # is a path in code and all it does is fetch. Everything else must name a property.
+        if property == &"" and String(setting.get("folder", "")).is_empty():
             push_warning("Image Wrangler: setting schema entry is missing a property name.")
             continue
 
@@ -272,10 +274,14 @@ static func _build_model_folder(operation: IWOperation, property: StringName,
         setting: Dictionary) -> Control:
     var field := ModelFolder.new()
     field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    # The whole entry goes along: the control reads its label and where its model can be
-    # fetched from off the schema, so a second operation with a different model needs no
-    # edit here.
-    field.setup(operation, property, String(setting.get("default", "")), setting)
+    # The whole entry goes along either way: the control reads its label and where its model
+    # can be fetched from off the schema, so a second operation with a different model needs
+    # no edit here.
+    var fixed := String(setting.get("folder", ""))
+    if fixed.is_empty():
+        field.setup(operation, property, String(setting.get("default", "")), setting)
+    else:
+        field.setup_fixed(fixed, setting)
     return field
 
 
