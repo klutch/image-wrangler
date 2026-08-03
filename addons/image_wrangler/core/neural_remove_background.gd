@@ -238,13 +238,12 @@ func get_settings_schema() -> Array[Dictionary]:
             "type": SettingType.MODEL_FOLDER,
             # What the control falls back to, and writes in, when the setting is empty.
             "default": NeuralRemoveBackgroundSettings.default_model_dir(),
-            # This model's own archive, not the control's built-in one. Empty while no
-            # archive is published; the button says so instead of fetching the wrong model.
+            # This model's own archive, not the control's built-in one.
             "download_url": NeuralRemoveBackgroundSettings.MODEL_URL,
             "download_bytes": NeuralRemoveBackgroundSettings.MODEL_BYTES,
             # No Refresh button on this card: the preview follows on its own.
             "show_refresh": false,
-            "tooltip": "The folder holding the converted segmentation model.\n\nNo model ships with this addon. Convert the DIS project's isnet-general-use\nto ncnn's format yourself and point this at the folder holding it — any\n.param with a .bin of the same name beside it will do; see the README in the\ndefault folder for the recipe.\n\nUntil then this stage is offered but makes nothing, and says why.",
+            "tooltip": "The folder holding the converted segmentation model.\n\nNo model ships with this addon. Download Latest Model fetches one into this\nfolder, around eighty megabytes; the conversion recipe comes down beside it.\nOtherwise convert the DIS project's isnet-general-use to ncnn's format\nyourself and point this at the folder holding it — any .param with a .bin of\nthe same name beside it will do.\n\nUntil then this stage is offered but makes nothing, and says why.",
         },
         {
             "property": &"threshold",

@@ -213,18 +213,22 @@ adjust, since it works on the finished picture rather than running the network a
 ### First run
 
 Four features run on trained models or a separate runtime, and none of those ship with the
-addon — together they are around 145 MB, most of which most projects never need. Each is
-fetched by one button, in the place it is used, and only when you ask for it.
+addon. Each is fetched by one button, in the place it is used and only when you ask for it —
+around 225 MB between them, most of which most projects never need.
 
 | Feature | Button | Download |
 |:--|:--|:--|
 | **Denoise** operation | Download Runtime | 56 MB |
 | **Upscale** tab, per engine | Download Latest Model | 32 MB waifu2x, 43 MB Real-ESRGAN |
 | **Neural** normal map generator | Download Latest Model | 13 MB |
-| **Neural Remove Background** operation | — | convert a model yourself; the folder's README has the recipe |
+| **Neural Remove Background** operation | Download Latest Model | 81 MB |
 
 Everything else works straight away. A feature whose files are missing says so on its own
 card and leaves the rest of the addon alone.
+
+Each model folder can be pointed elsewhere if you would rather convert or supply your own.
+Any `.param` with a `.bin` of the same name beside it will do — nothing here cares what a
+model is called.
 
 ### Requirements
 

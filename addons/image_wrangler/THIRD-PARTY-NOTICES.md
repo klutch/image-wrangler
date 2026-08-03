@@ -161,13 +161,15 @@ Source: <https://github.com/KhronosGroup/glslang>
 
 Copyright Xuebin Qin and the DIS project contributors.
 
-What the Neural Remove Background stage runs. **No part of it ships with this addon**:
-the user downloads the converted model into `thirdparty/isnet-general/`, which is
-gitignored, and the addon stands down when the folder holds nothing. The archive carries
-the project's Apache-2.0 licence text beside the weights, and it stays with them.
+What the Neural Remove Background stage runs. **No part of it ships with this addon**: the
+Download Latest Model button on that stage fetches the converted model into
+`thirdparty/isnet-general/`, which is gitignored, and the stage stands down when the folder
+holds nothing. The archive carries the project's Apache-2.0 licence text beside the weights,
+and it stays with them.
 
 Source: <https://github.com/xuebinqin/DIS>
 Weights: <https://github.com/danielgatis/rembg/releases/tag/v0.0.0> (`isnet-general-use.onnx`)
+Converted to ncnn: <https://github.com/klutch/isnet-general-ncnn>
 
 ## godot-cpp — MIT
 

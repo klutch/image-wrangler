@@ -21,10 +21,14 @@ enum MatteSource {
 ## checkout — no model ships here. Download Latest Model is what fills it.
 const MODEL_SUBDIR := "res://addons/image_wrangler/thirdparty/isnet-general"
 
-## Where the converted model can be fetched from, and roughly what it weighs. Carried on
-## the Model Folder schema entry; see [IWModelFolder].
-const MODEL_URL := ""
-const MODEL_BYTES := 88 * 1024 * 1024
+## Where the converted model can be fetched from, and roughly what the archive weighs.
+## Carried on the Model Folder schema entry; see [IWModelFolder].
+##
+## The weight is the archive rather than the model inside it, because it is only ever used
+## to move a progress bar — and a forge builds a source archive as it serves it, so there is
+## no length in the header to measure against. The model unpacks to about 88 MB.
+const MODEL_URL := "https://github.com/klutch/isnet-general-ncnn/archive/refs/tags/main-release.zip"
+const MODEL_BYTES := 81463556
 
 
 ## The same folder as something that can be opened.
