@@ -1,13 +1,17 @@
 @tool
 extends VBoxContainer
 
-## The Neural layer's model folder: a path to type or browse for, what is wrong with it, and
-## a button that fetches a model into it.
+## A model folder: a path to type or browse for, what is wrong with it, and a button that
+## fetches a model into it.
 ##
-## [b]Its own control rather than a plain string row.[/b] The folder is the one setting in
-## the addon that can be filled in correctly and still be wrong, because what has to be in it
-## is a pair of files nothing ships. So the three things belong together: where to look, what
-## is missing, and the one press that fixes it.
+## [b]Its own control rather than a plain string row.[/b] A folder here can be filled in
+## correctly and still be wrong, because what has to be in it is files nothing ships. So the
+## three things belong together: where to look, what is missing, and the one press that fixes
+## it.
+##
+## Two arrangements, per [member _many_models]: a folder holding one model, or a folder
+## holding a folder per model. And two ways of naming it — a setting the user can edit, via
+## [method setup], or a path fixed in code, via [method setup_fixed].
 ##
 ## The download reports through Callables the dock hands over — see [method bind_download].
 ## Nothing here can reach the preview, and the preview is where a spinner belongs.
@@ -49,8 +53,8 @@ const LABEL_WIDTH := 92
 const DOWNLOAD_SHARE := 0.88
 const EXTRACT_SHARE := 0.11
 
-## Refused above this, so a redirect to something enormous cannot fill the disk. The model
-## is around thirteen megabytes.
+## Refused above this, so a redirect to something enormous cannot fill the disk. Well clear
+## of the largest archive anything here fetches, which is around forty-five megabytes.
 const MAX_DOWNLOAD_BYTES := 256 * 1024 * 1024
 
 ## What the archive is assumed to weigh when neither the schema nor the server says.
@@ -83,6 +87,14 @@ var _label := "Model Folder"
 var _url := MODEL_URL
 var _bytes := ESTIMATED_DOWNLOAD_BYTES
 
+## Whether the folder holds a folder per model rather than one model's files directly. See
+## [method _has_model].
+var _many_models := false
+
+## A folder fixed in code, which leaves the path row out entirely. Empty for a control whose
+## folder is a setting. See [method setup_fixed].
+var _fixed := ""
+
 ## Whether the row carries its own Refresh button. Off for a card whose preview follows
 ## settings on its own, where the button would be a second way to do nothing new.
 var _show_refresh := true
@@ -113,21 +125,38 @@ var _finish := Callable()
 
 
 ## [param setting] is the whole schema entry, read for what this control can carry per
-## operation: [code]label[/code], [code]download_url[/code] and [code]download_bytes[/code].
-## Each falls back to the constant above when the entry says nothing — except the URL,
-## where a key present but empty means no archive is published for this model yet.
+## operation: [code]label[/code], [code]download_url[/code], [code]download_bytes[/code],
+## [code]models_in_folders[/code] and [code]show_refresh[/code]. Each falls back to the value
+## above when the entry says nothing — except the URL, where a key present but empty means no
+## archive is published for this model yet.
 func setup(operation: IWOperation, property: StringName, fallback := "",
         setting: Dictionary = {}) -> void:
     _operation = operation
     _property = property
     _fallback = fallback
-    _label = String(setting.get("label", _label))
-    _url = String(setting.get("download_url", _url))
-    _bytes = int(setting.get("download_bytes", _bytes))
-    _show_refresh = bool(setting.get("show_refresh", _show_refresh))
+    _read_schema(setting)
     _settle()
     _build()
     refresh()
+
+
+## The same, for a folder fixed in code rather than held in a setting.
+##
+## No path row and nothing written back: [param folder] is where the model goes and the only
+## place it is looked for. [param setting] carries the keys [method setup] reads.
+func setup_fixed(folder: String, setting: Dictionary = {}) -> void:
+    _fixed = folder
+    _read_schema(setting)
+    _build()
+    refresh()
+
+
+func _read_schema(setting: Dictionary) -> void:
+    _label = String(setting.get("label", _label))
+    _url = String(setting.get("download_url", _url))
+    _bytes = int(setting.get("download_bytes", _bytes))
+    _many_models = bool(setting.get("models_in_folders", _many_models))
+    _show_refresh = bool(setting.get("show_refresh", _show_refresh))
 
 
 ## Puts the fallback into an empty setting, so nothing downstream has to know about it.
@@ -148,28 +177,31 @@ func bind_download(begin: Callable, step: Callable, finish: Callable) -> void:
 
 
 func _build() -> void:
-    var row := HBoxContainer.new()
-    add_child(row)
+    # Left out for a fixed folder: a path that cannot be edited is one more row saying
+    # something the warning below already says when it matters.
+    if _fixed.is_empty():
+        var row := HBoxContainer.new()
+        add_child(row)
 
-    var caption := Label.new()
-    caption.text = _label
-    caption.custom_minimum_size = Vector2(LABEL_WIDTH, 0)
-    caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-    row.add_child(caption)
+        var caption := Label.new()
+        caption.text = _label
+        caption.custom_minimum_size = Vector2(LABEL_WIDTH, 0)
+        caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+        row.add_child(caption)
 
-    _field = LineEdit.new()
-    _field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _field.text = _stored()
-    _field.text_changed.connect(_on_typed)
-    row.add_child(_field)
+        _field = LineEdit.new()
+        _field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        _field.text = _stored()
+        _field.text_changed.connect(_on_typed)
+        row.add_child(_field)
 
-    # Narrow and wordless. The row is already at the width the dock can give it, and a
-    # button saying "Browse" would take that width off the path it is about.
-    _browse = Button.new()
-    _browse.text = "..."
-    _browse.tooltip_text = "Pick the folder holding the model."
-    _browse.pressed.connect(_on_browse)
-    row.add_child(_browse)
+        # Narrow and wordless. The row is already at the width the dock can give it, and a
+        # button saying "Browse" would take that width off the path it is about.
+        _browse = Button.new()
+        _browse.text = "..."
+        _browse.tooltip_text = "Pick the folder holding the model."
+        _browse.pressed.connect(_on_browse)
+        row.add_child(_browse)
 
     _warning = Label.new()
     _warning.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -189,10 +221,14 @@ func _build() -> void:
 
     _download = Button.new()
     _download.text = "Download Latest Model"
+    var subject := "the models" if _many_models else "the model"
     if _url.is_empty():
         _download.tooltip_text = "No archive is published for this model yet.\nConvert one yourself and point the folder above at it."
     else:
-        _download.tooltip_text = "Fetches the converted model and unpacks it into the folder above.\n\nAround %s. Anything already there under the same name is\noverwritten." % String.humanize_size(_bytes)
+        _download.tooltip_text = "Fetches %s and unpacks them into %s.\n\nAround %s. Anything already there under the same name is\noverwritten." % [
+                subject,
+                "the folder above" if _fixed.is_empty() else _fixed,
+                String.humanize_size(_bytes)]
     _download.pressed.connect(_on_download)
     add_child(_download)
 
@@ -208,9 +244,11 @@ func _raw() -> String:
     return String(settings.get(_property)) if settings != null else ""
 
 
-## The folder this row is about: what the setting holds, or the fallback while it holds
-## nothing. See [member _fallback].
+## The folder this control is about: the fixed one, or what the setting holds, or the
+## fallback while it holds nothing. See [member _fixed] and [member _fallback].
 func _stored() -> String:
+    if not _fixed.is_empty():
+        return _fixed
     var held := _raw()
     return _fallback if held.strip_edges().is_empty() else held
 
@@ -266,9 +304,11 @@ func _resolved() -> String:
 ## Puts the row back in step with the setting behind it: the path, what is wrong with it, and
 ## what may be pressed.
 func refresh() -> void:
-    if _field == null:
+    # The download button is the one thing every arrangement of this control has, so it is
+    # what says whether _build has run.
+    if _download == null:
         return
-    if _field.text != _stored():
+    if _field != null and _field.text != _stored():
         _field.text = _stored()
     _update_warning()
     _update_buttons()
@@ -296,11 +336,36 @@ func _trouble() -> String:
         if _url.is_empty():
             return "%s does not exist yet." % _stored()
         return "%s does not exist yet. Download Latest Model will make it." % _stored()
-    if _model_in(dir).is_empty():
-        if _url.is_empty():
-            return "No model here. Point this at a folder holding a .param with a .bin of the same name beside it."
-        return "No model here. Press Download Latest Model, or point this at a folder holding a .param with a .bin of the same name beside it."
+    if not _has_model(dir):
+        return _nothing_here()
     return ""
+
+
+## What to say about a folder that is there and holds nothing this can load.
+##
+## Four ways of saying it, because two things change what can be done about it: whether an
+## archive is published to fetch, and whether the folder can be pointed somewhere else.
+func _nothing_here() -> String:
+    var subject := "No models here." if _many_models else "No model here."
+    var pointable := _fixed.is_empty()
+    if _url.is_empty():
+        if pointable:
+            return "%s Point this at a folder holding a .param with a .bin of the same name beside it." % subject
+        return "%s Nothing is published to fetch, so they have to be put there by hand." % subject
+    if pointable:
+        return "%s Press Download Latest Model, or point this at a folder holding a .param with a .bin of the same name beside it." % subject
+    return "%s Press Download Latest Model." % subject
+
+
+## Whether [param dir] holds what this control is about: a pair of files, or — when the
+## folder holds a folder per model — at least one folder holding a pair.
+func _has_model(dir: String) -> bool:
+    if not _many_models:
+        return not _model_in(dir).is_empty()
+    for folder in DirAccess.get_directories_at(dir):
+        if not _model_in(dir.path_join(folder)).is_empty():
+            return true
+    return false
 
 
 ## Whether this build has the network wrappers at all.
@@ -334,11 +399,12 @@ func set_controls_enabled(value: bool) -> void:
 
 
 func _update_buttons() -> void:
-    if _field == null:
+    if _download == null:
         return
     var live := _interactive and not _busy
-    _field.editable = live
-    _browse.disabled = not live
+    if _field != null:
+        _field.editable = live
+        _browse.disabled = not live
     if _refresh_button != null:
         _refresh_button.disabled = not live
     _download.disabled = not live or not _network_built() or _url.is_empty()
@@ -464,6 +530,9 @@ func _extract(zip: String) -> void:
         # one to trust with a write.
         if relative.begins_with("/") or relative.contains("..") or relative.contains(":"):
             continue
+        relative = _destination_for(relative)
+        if relative.is_empty():
+            continue
 
         var reached := float(i + 1) / maxf(float(entries.size()), 1.0)
         _tell(DOWNLOAD_SHARE + EXTRACT_SHARE * reached, reached,
@@ -499,17 +568,47 @@ func _extract(zip: String) -> void:
     await get_tree().process_frame
 
     # The repository decides how deep the pair sits, and the network only looks in the one
-    # folder it is given — so wherever they landed, they come up to the top.
-    var lifted := _lift_model()
+    # folder it is given — so wherever they landed, they come up to the top. Not needed for a
+    # folder per model, where _destination_for has already put every file where it belongs.
+    var lifted := "" if _many_models else _lift_model()
     _scrub(zip)
     _tell(1.0, 1.0, "Done")
 
-    if _model_in(_target_dir).is_empty():
+    if not _has_model(_target_dir):
         _done("The archive came down and unpacked, but holds no .param with a .bin beside it.",
                 false)
         return
     var where := _stored() if lifted.is_empty() else "%s, %s" % [_stored(), lifted]
-    _done("Model ready in %s." % where, true)
+    _done("%s ready in %s." % ["Models" if _many_models else "Model", where], true)
+
+
+## Where an entry out of the archive belongs under the model folder, or empty to leave it
+## out. [param relative] has already had any single top-level folder taken off it.
+##
+## A folder holding one model takes the archive as it comes. A folder holding a folder per
+## model keeps only the model files and sorts them into a folder each, which is what lets an
+## archive that ships them all together — beside a program, some samples and a couple of
+## libraries — land in the arrangement the loader expects.
+func _destination_for(relative: String) -> String:
+    if not _many_models:
+        return relative
+    var file := relative.get_file()
+    var extension := file.get_extension().to_lower()
+    if extension != "param" and extension != "bin":
+        return ""
+    return _model_folder_for(file.get_basename()).path_join(file)
+
+
+## The folder a model file belongs in, which is its name with any trailing ratio taken off.
+##
+## [code]realesr-animevideov3-x2[/code] goes in [code]realesr-animevideov3[/code] beside its
+## other two ratios, and [code]realesrgan-x4plus[/code] — whose 4 is part of the name rather
+## than a ratio on the end — names its own folder.
+static func _model_folder_for(base: String) -> String:
+    var cut := base.rfind("-x")
+    if cut < 0:
+        return base
+    return base.substr(0, cut) if base.substr(cut + 2).is_valid_int() else base
 
 
 ## The folder every entry in [param entries] sits under, or empty when they do not share one.

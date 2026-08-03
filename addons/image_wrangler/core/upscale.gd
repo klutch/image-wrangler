@@ -54,6 +54,21 @@ const MODEL_ROOTS := [
 ## default, and both are the one of their set that handles drawn line art best.
 const DEFAULT_MODELS := ["models-cunet", "realesr-animevideov3"]
 
+## Where each engine's models can be fetched from, and roughly what the archive weighs.
+##
+## Empty for waifu2x, whose models are small enough to ship with the addon. Real-ESRGAN's are
+## forty-four megabytes, so they are left out of the repository and the Upscale tab offers to
+## fetch them — see [method model_download_setting].
+##
+## [b]The archive is on the Real-ESRGAN repository, not on the ncnn port's.[/b] The port
+## publishes no models at all: it expects to find them beside its own program, and this
+## release is where they are actually published.
+const MODEL_SOURCES := [
+    "",
+    "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip",
+]
+const MODEL_SOURCE_BYTES := [0, 45474481]
+
 ## Denoise strengths, and what each is worth telling waifu2x. Real-ESRGAN has no equivalent
 ## — see [constant ENGINE_LABELS].
 ##
@@ -358,6 +373,29 @@ func models_root() -> String:
     return MODEL_ROOTS[engine()]
 
 
+## Whether this engine's models can be fetched rather than only found. See
+## [constant MODEL_SOURCES].
+func has_model_source() -> bool:
+    return not String(MODEL_SOURCES[engine()]).is_empty()
+
+
+## What the dock's model folder control needs to fetch this engine's models.
+##
+## Built here rather than in the dock, for the reason [constant MODEL_DESCRIPTIONS] is: the
+## folder, the archive and how the two are arranged are all one fact about the engine, and a
+## dock that carried half of it could offer a download that landed in the wrong place.
+func model_download_setting() -> Dictionary:
+    return {
+        "download_url": MODEL_SOURCES[engine()],
+        "download_bytes": MODEL_SOURCE_BYTES[engine()],
+        # A folder per model, which is how both engines arrange theirs and what
+        # refresh_models scans for.
+        "models_in_folders": true,
+        # The tab has a Refresh of its own, right under the preview.
+        "show_refresh": false,
+    }
+
+
 ## Every model folder this engine has, sorted.
 ##
 ## A folder counts when it holds a [code].param[/code] file, which is the network's
@@ -412,6 +450,14 @@ func model_name() -> String:
     if models.is_empty():
         return ""
     return models[clampi(settings.model_index, 0, models.size() - 1)]
+
+
+## One line about an engine with nothing to run, which points at the download when there is
+## one to point at.
+func no_models_note() -> String:
+    if has_model_source():
+        return "No models found in %s. Press Download Latest Model." % models_root()
+    return "No models found in %s." % models_root()
 
 
 ## What the chosen model is for, in a couple of sentences.
@@ -511,7 +557,7 @@ func noise_level() -> int:
 func combination_note() -> String:
     var model := model_name()
     if model.is_empty():
-        return "No models found in %s." % models_root()
+        return no_models_note()
     if engine() == ENGINE_REALESRGAN:
         if scale_ratios().is_empty():
             return "%s holds no network this can load. A Real-ESRGAN folder names its files after itself, with the ratio on the end for a model that ships more than one." % model
@@ -577,7 +623,7 @@ func _ensure_open() -> bool:
 
     var model := model_name()
     if model.is_empty():
-        last_error = "No models found in %s." % models_root()
+        last_error = no_models_note()
         return false
 
     var wanted := network_signature()

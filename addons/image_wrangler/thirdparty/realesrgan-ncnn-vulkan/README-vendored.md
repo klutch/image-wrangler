@@ -20,12 +20,38 @@ present next door.
 src/realesrgan.h        the class, upstream's interface
 src/realesrgan.cpp      the tiling, the padding, the alpha handling — upstream's, adapted
 src/realesrgan_*.comp   four compute shaders, embedded at build time
-models/                 three trained model directories, read at runtime by path
+models/                 three trained model directories, read at runtime by path —
+                        downloaded rather than committed, see below
 ```
 
 **The models used to live in `../waifu2x-ncnn-vulkan/models/`**, which was wrong: they are
 not waifu2x's, they are not covered by its licence, and nothing in that project can load
 them. They moved here unchanged.
+
+## The models are not in this repository
+
+`models/` holds 44 MB of trained networks — a quarter of everything the repository tracked.
+They are ignored by `addons/image_wrangler/.gitignore` and fetched on demand instead, the
+same way the Neural normal map layer's model is. `models/LICENSE` stays committed, because
+the licence has to be there whether or not the files it covers are.
+
+**Press Download Latest Model** in the Upscale tab, under the Model dropdown. It appears
+only when Real-ESRGAN is the selected engine, since waifu2x's models are small enough to
+ship and are still committed next door. Until the models arrive the tab says so and runs
+nothing.
+
+The archive is
+`realesrgan-ncnn-vulkan-20220424-windows.zip`, 45 MB, from the **Real-ESRGAN** releases —
+see `Upscale.MODEL_SOURCES` in `core/upscale.gd`. Not from the ncnn port's own releases:
+that repository has no `models/` folder at all and its release zips carry only the program.
+
+**The archive is not arranged the way this folder is.** It puts every model file together in
+one `models/` folder, beside a program, two runtime libraries, two sample images and a video.
+The download keeps only the `.param` and `.bin` files and sorts them into a folder each, by
+taking any trailing ratio off the file name — `realesr-animevideov3-x2` goes in
+`realesr-animevideov3`, and `realesrgan-x4plus`, whose 4 is part of the name rather than a
+ratio, names its own folder. See `IWModelFolder._destination_for` in
+`ui/iw_model_folder.gd`. Nothing else in the archive is written to disk.
 
 ## What was changed, and why
 

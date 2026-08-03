@@ -11,6 +11,7 @@ const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd"
 const HSVList := preload("res://addons/image_wrangler/ui/iw_hsv_list.gd")
 const BrushList := preload("res://addons/image_wrangler/ui/iw_brush_list.gd")
 const ExcludeTilesList := preload("res://addons/image_wrangler/ui/iw_exclude_tiles.gd")
+const ModelFolder := preload("res://addons/image_wrangler/ui/iw_model_folder.gd")
 const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
 const StackView := preload("res://addons/image_wrangler/ui/iw_stack_view.gd")
 const HistoryView := preload("res://addons/image_wrangler/ui/iw_history_view.gd")
@@ -994,6 +995,10 @@ func _build_upscale() -> void:
         _upscale_model_note.modulate = Color(1, 1, 1, 0.6)
     elif _upscale_model_note.get_parent() != null:
         _upscale_model_note.get_parent().remove_child(_upscale_model_note)
+    # Lifted out for the same reason, and for one more: a download in flight is a child of
+    # this node, so it has to survive the form being rebuilt around it.
+    if is_instance_valid(_upscale_download) and _upscale_download.get_parent() != null:
+        _upscale_download.get_parent().remove_child(_upscale_download)
     SettingsBuilder.build(_upscale, _upscale_box, _on_setting_changed, _fold_state, "upscale")
 
     # Under the model dropdown for the same reason Packing's note sits under its mode
@@ -1004,6 +1009,7 @@ func _build_upscale() -> void:
         _upscale_box.add_child(_upscale_model_note)
         _upscale_box.move_child(_upscale_model_note, _upscale_note_index())
     _refresh_upscale_note()
+    _build_upscale_download()
 
     # Said on the way in rather than waiting for the first run to fail. A build without the
     # native class is the ordinary state of a fresh checkout, and a form full of settings
@@ -1046,6 +1052,62 @@ func _refresh_upscale_note() -> void:
     if _upscale_model_note == null or _upscale == null:
         return
     _upscale_model_note.text = _upscale.model_description()
+
+
+## The Upscale tab's model download, for an engine whose models are not in the repository.
+##
+## Kept across rebuilds rather than made with the form, because a download in flight is a
+## child of this node. Null for an engine that has nothing to fetch.
+var _upscale_download: Control
+## Which engine [member _upscale_download] was made for, so a change of engine remakes it.
+var _upscale_download_engine := -1
+
+
+## Puts the download under the model dropdown, for an engine that has somewhere to fetch from.
+##
+## Nothing at all for waifu2x, whose models are small enough to ship with the addon — see
+## [constant Upscale.MODEL_SOURCES].
+func _build_upscale_download() -> void:
+    if _upscale == null:
+        return
+    if not _upscale.has_model_source():
+        _drop_upscale_download()
+        return
+
+    var for_engine: int = _upscale.engine()
+    if is_instance_valid(_upscale_download) and _upscale_download_engine != for_engine:
+        _drop_upscale_download()
+    if not is_instance_valid(_upscale_download):
+        _upscale_download = ModelFolder.new()
+        _upscale_download.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        # A folder fixed in code rather than a setting: these settings never outlive the
+        # session, so a path typed into one would be forgotten by the next launch.
+        _upscale_download.setup_fixed(_upscale.models_root(), _upscale.model_download_setting())
+        _upscale_download.bind_download(_on_download_begin, _on_download_step, _on_download_done)
+        _upscale_download.folder_changed.connect(_on_upscale_models_arrived)
+        _upscale_download_engine = for_engine
+
+    # Directly under the model note, since what it is about is the dropdown both sit below.
+    _upscale_box.add_child(_upscale_download)
+    _upscale_box.move_child(_upscale_download, _upscale_note_index() + 1)
+    _upscale_download.refresh()
+
+
+func _drop_upscale_download() -> void:
+    if is_instance_valid(_upscale_download):
+        _upscale_download.queue_free()
+    _upscale_download = null
+    _upscale_download_engine = -1
+
+
+## The models turned up. The dropdown is filled from the disk rather than from a list in
+## code, so the form has to be built again before anything can be chosen from it.
+##
+## Both deferred: we are inside the download control's own signal, and the rebuild moves the
+## node that raised it.
+func _on_upscale_models_arrived() -> void:
+    _build_upscale.call_deferred()
+    _schedule_upscale.call_deferred()
 
 
 ## Rebuilds the dock when one of this addon's scripts has been reloaded.
@@ -4627,7 +4689,9 @@ func _bind_model_folders(node: Node, announce: Callable) -> void:
 func _on_download_begin(title: String) -> void:
     if _preview != null:
         _preview.set_busy(true)
-    if _is_image_mode(_mode):
+    if _mode == Mode.UPSCALE:
+        _set_upscale_status("%s..." % title)
+    elif _is_image_mode(_mode):
         _set_status("%s..." % title)
     else:
         _set_packing_status("%s..." % title)
@@ -4647,6 +4711,11 @@ func _on_download_step(overall: float, fraction: float, label: String) -> void:
 func _on_download_done(message: String, ok: bool) -> void:
     if _preview != null:
         _preview.set_busy(false)
+    if _mode == Mode.UPSCALE:
+        # Nothing more to do on success: the arrival is what rebuilds the form and asks for a
+        # run, off the same control's folder_changed. See _on_upscale_models_arrived.
+        _set_upscale_status(message)
+        return
     if _is_image_mode(_mode):
         # A model that has just arrived un-blocks whichever stage was waiting on it, which
         # nothing else would notice — the setting did not move, what is behind it did.
