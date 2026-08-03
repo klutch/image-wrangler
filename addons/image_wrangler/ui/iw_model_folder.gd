@@ -91,6 +91,16 @@ var _bytes := ESTIMATED_DOWNLOAD_BYTES
 ## [method _has_model].
 var _many_models := false
 
+## Where the models sit inside the archive, when it keeps them in one folder. What is under
+## it lands in the model folder with its arrangement intact, and everything else in the
+## archive is left alone. See [method _destination_for].
+var _archive_subfolder := ""
+
+## Whether a model's folder is worked out from its file name rather than from where the
+## archive put it, for an archive that ships them all in one heap. See
+## [method _model_folder_for].
+var _folder_from_name := false
+
 ## A folder fixed in code, which leaves the path row out entirely. Empty for a control whose
 ## folder is a setting. See [method setup_fixed].
 var _fixed := ""
@@ -126,9 +136,10 @@ var _finish := Callable()
 
 ## [param setting] is the whole schema entry, read for what this control can carry per
 ## operation: [code]label[/code], [code]download_url[/code], [code]download_bytes[/code],
-## [code]models_in_folders[/code] and [code]show_refresh[/code]. Each falls back to the value
-## above when the entry says nothing — except the URL, where a key present but empty means no
-## archive is published for this model yet.
+## [code]models_in_folders[/code], [code]archive_subfolder[/code],
+## [code]folder_from_file_name[/code] and [code]show_refresh[/code]. Each falls back to the
+## value above when the entry says nothing — except the URL, where a key present but empty
+## means no archive is published for this model yet.
 func setup(operation: IWOperation, property: StringName, fallback := "",
         setting: Dictionary = {}) -> void:
     _operation = operation
@@ -156,6 +167,8 @@ func _read_schema(setting: Dictionary) -> void:
     _url = String(setting.get("download_url", _url))
     _bytes = int(setting.get("download_bytes", _bytes))
     _many_models = bool(setting.get("models_in_folders", _many_models))
+    _archive_subfolder = String(setting.get("archive_subfolder", _archive_subfolder))
+    _folder_from_name = bool(setting.get("folder_from_file_name", _folder_from_name))
     _show_refresh = bool(setting.get("show_refresh", _show_refresh))
 
 
@@ -585,12 +598,21 @@ func _extract(zip: String) -> void:
 ## Where an entry out of the archive belongs under the model folder, or empty to leave it
 ## out. [param relative] has already had any single top-level folder taken off it.
 ##
-## A folder holding one model takes the archive as it comes. A folder holding a folder per
-## model keeps only the model files and sorts them into a folder each, which is what lets an
-## archive that ships them all together — beside a program, some samples and a couple of
-## libraries — land in the arrangement the loader expects.
+## Three ways round, because the archives are not arranged alike:
+##
+## [b]An archive with a models folder of its own[/b] has everything under it copied across as
+## it stands, and everything outside it dropped. The folder names are the archive's.
+##
+## [b]An archive that ships its models in one heap[/b] keeps only the model files and works
+## out a folder for each from its name, since there is no other record of where it belongs.
+##
+## [b]Anything else[/b] is taken as it comes, which is right for an archive holding one model
+## and nothing else worth refusing.
 func _destination_for(relative: String) -> String:
-    if not _many_models:
+    if not _archive_subfolder.is_empty():
+        var prefix := _archive_subfolder + "/"
+        return relative.substr(prefix.length()) if relative.begins_with(prefix) else ""
+    if not _folder_from_name:
         return relative
     var file := relative.get_file()
     var extension := file.get_extension().to_lower()

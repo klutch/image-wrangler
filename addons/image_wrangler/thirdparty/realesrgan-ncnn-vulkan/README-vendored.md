@@ -35,10 +35,10 @@ They are ignored by `addons/image_wrangler/.gitignore` and fetched on demand ins
 same way the Neural normal map layer's model is. `models/LICENSE` stays committed, because
 the licence has to be there whether or not the files it covers are.
 
-**Press Download Latest Model** in the Upscale tab, under the Model dropdown. It appears
-only when Real-ESRGAN is the selected engine, since waifu2x's models are small enough to
-ship and are still committed next door. Until the models arrive the tab says so and runs
-nothing.
+**Press Download Latest Model** in the Upscale tab, under the Model dropdown, with
+Real-ESRGAN as the selected engine. waifu2x's models are fetched the same way from their own
+archive, so the button is there on both engines and fetches whichever one is selected. Until
+the models arrive the tab says so and runs nothing.
 
 The archive is
 `realesrgan-ncnn-vulkan-20220424-windows.zip`, 45 MB, from the **Real-ESRGAN** releases —

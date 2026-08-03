@@ -21,7 +21,8 @@ thirdparty/ncnn-shaders/
 # .gitignore, the way thirdparty/deepbump/ does; this line is the backstop.
 thirdparty/isnet-general/
 
-# Real-ESRGAN's models, 44 MB and fetched by the Upscale tab's Download Latest Model
-# button. A folder per model, so only the folders are ignored — models/LICENSE is the
-# models' own licence text and stays committed.
+# The Upscale tab's models, 78 MB between them and fetched by its Download Latest Model
+# button. A folder per model, so only the folders are ignored — models/LICENSE in each is
+# the models' own licence text and stays committed.
 thirdparty/realesrgan-ncnn-vulkan/models/*/
+thirdparty/waifu2x-ncnn-vulkan/models/*/

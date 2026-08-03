@@ -54,20 +54,31 @@ const MODEL_ROOTS := [
 ## default, and both are the one of their set that handles drawn line art best.
 const DEFAULT_MODELS := ["models-cunet", "realesr-animevideov3"]
 
-## Where each engine's models can be fetched from, and roughly what the archive weighs.
+## Where each engine's models come from, keyed by engine and handed to the dock's model
+## folder control. Empty for an engine whose models ship with the addon; neither does.
 ##
-## Empty for waifu2x, whose models are small enough to ship with the addon. Real-ESRGAN's are
-## forty-four megabytes, so they are left out of the repository and the Upscale tab offers to
-## fetch them — see [method model_download_setting].
+## Together they are seventy-eight megabytes, which is why they are not in the repository —
+## the Upscale tab fetches them instead. See [method model_download_setting].
 ##
-## [b]The archive is on the Real-ESRGAN repository, not on the ncnn port's.[/b] The port
-## publishes no models at all: it expects to find them beside its own program, and this
-## release is where they are actually published.
+## [b]The two archives are not arranged alike, so each says how to unpack itself.[/b]
+## waifu2x's is the upstream source at a tag, which carries a [code]models[/code] folder laid
+## out exactly as this one is — its submodules are not in a source archive, so what comes down
+## is little more than the models. Real-ESRGAN's is a release of the [i]main[/i] repository
+## rather than of the ncnn port: the port publishes no models at all, and this archive ships
+## them in one heap beside a program, so each file's folder has to be worked out from its
+## name.
 const MODEL_SOURCES := [
-    "",
-    "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip",
+    {
+        "download_url": "https://github.com/nihui/waifu2x-ncnn-vulkan/archive/refs/tags/20250915.zip",
+        "download_bytes": 34036503,
+        "archive_subfolder": "models",
+    },
+    {
+        "download_url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip",
+        "download_bytes": 45474481,
+        "folder_from_file_name": true,
+    },
 ]
-const MODEL_SOURCE_BYTES := [0, 45474481]
 
 ## Denoise strengths, and what each is worth telling waifu2x. Real-ESRGAN has no equivalent
 ## — see [constant ENGINE_LABELS].
@@ -376,7 +387,7 @@ func models_root() -> String:
 ## Whether this engine's models can be fetched rather than only found. See
 ## [constant MODEL_SOURCES].
 func has_model_source() -> bool:
-    return not String(MODEL_SOURCES[engine()]).is_empty()
+    return not Dictionary(MODEL_SOURCES[engine()]).is_empty()
 
 
 ## What the dock's model folder control needs to fetch this engine's models.
@@ -385,15 +396,12 @@ func has_model_source() -> bool:
 ## folder, the archive and how the two are arranged are all one fact about the engine, and a
 ## dock that carried half of it could offer a download that landed in the wrong place.
 func model_download_setting() -> Dictionary:
-    return {
-        "download_url": MODEL_SOURCES[engine()],
-        "download_bytes": MODEL_SOURCE_BYTES[engine()],
-        # A folder per model, which is how both engines arrange theirs and what
-        # refresh_models scans for.
-        "models_in_folders": true,
-        # The tab has a Refresh of its own, right under the preview.
-        "show_refresh": false,
-    }
+    var out: Dictionary = Dictionary(MODEL_SOURCES[engine()]).duplicate()
+    # True of both engines, and what refresh_models scans for.
+    out["models_in_folders"] = true
+    # The tab has a Refresh of its own, right under the preview.
+    out["show_refresh"] = false
+    return out
 
 
 ## Every model folder this engine has, sorted.
