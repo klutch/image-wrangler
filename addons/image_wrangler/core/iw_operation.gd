@@ -55,6 +55,14 @@ enum SettingType {
     ## [code]show_refresh[/code] false drops the row's own Refresh button, for a card
     ## whose preview follows settings on its own.
     MODEL_FOLDER,
+    ## Free text over several lines. The property must hold a [String]. The entry may carry
+    ## a [code]lines[/code] key saying how tall the box starts.
+    TEXT,
+    ## A fixed choice whose value is the chosen text rather than its position. The entry
+    ## must carry an [code]options[/code] key and the property must hold a [String]. For a
+    ## list that comes from somewhere free to reorder it — the model names a server hands
+    ## over — where an index would quietly come to mean something else.
+    CHOICE,
 }
 
 

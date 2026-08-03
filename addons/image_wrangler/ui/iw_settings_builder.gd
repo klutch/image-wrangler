@@ -40,6 +40,14 @@ const META_SHOWN_VALUES := &"iw_shown_values"
 ## Where a readout keeps the name of the settings method that produces its line.
 const META_TEXT_FROM := &"iw_text_from"
 
+## Where a string dropdown keeps the values behind its rows, so a refill can find where a
+## stored string now sits. Its presence is also what tells a refresh which kind of dropdown
+## it is looking at.
+const META_CHOICE_VALUES := &"iw_choice_values"
+
+## Height one line of a text box is given, before the box's own margins.
+const TEXT_LINE_HEIGHT := 18
+
 
 ## Replaces the contents of [param container] with controls for every setting
 ## [param operation] declares. [param on_changed] is called after each edit.
@@ -115,6 +123,10 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
                 control = _build_exclude_tiles(operation, property)
             IWOperation.SettingType.MODEL_FOLDER:
                 control = _build_model_folder(operation, property, setting)
+            IWOperation.SettingType.TEXT:
+                control = _build_text(operation, property, label, setting, on_changed)
+            IWOperation.SettingType.CHOICE:
+                control = _build_choice(operation, property, label, setting, on_changed)
             _:
                 control = _build_number(operation, property, label, setting, false, on_changed)
 
@@ -345,6 +357,85 @@ static func _build_string(operation: IWOperation, property: StringName, label: S
     return _labelled_row(label, field)
 
 
+## A caption above its editor rather than beside it, for a control too tall or too wide to
+## sit in a [method _labelled_row] — a paragraph of prompt is both.
+static func _captioned_column(label: String, editor: Control) -> Control:
+    var column := VBoxContainer.new()
+    column.add_theme_constant_override("separation", 0)
+    var caption := Label.new()
+    caption.text = label
+    caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+    column.add_child(caption)
+    editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    column.add_child(editor)
+    return column
+
+
+## Several lines of free text.
+##
+## A [LineEdit] scrolling sideways is unreadable at the length a description runs to, which
+## is the whole reason this type exists.
+static func _build_text(operation: IWOperation, property: StringName, label: String, setting: Dictionary, on_changed: Callable) -> Control:
+    var field := TextEdit.new()
+    field.text = String(operation.get_settings().get(property))
+    field.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+    field.custom_minimum_size = Vector2(0, int(setting.get("lines", 4)) * TEXT_LINE_HEIGHT)
+    field.set_meta(META_PROPERTY, property)
+    # TextEdit's signal carries nothing, unlike LineEdit's, so the field is read instead.
+    field.text_changed.connect(
+        func() -> void:
+            var settings := operation.get_settings()
+            if settings == null:
+                return
+            settings.set(property, field.text)
+            on_changed.call()
+    )
+    return _captioned_column(label, field)
+
+
+## A dropdown holding the chosen text rather than its position.
+##
+## See [constant IWOperation.SettingType.CHOICE]. The values are kept on the control as
+## well as in the schema, so a refresh can find where a stored string now sits without
+## reading the schema again.
+static func _build_choice(operation: IWOperation, property: StringName, label: String, setting: Dictionary, on_changed: Callable) -> Control:
+    var choice := OptionButton.new()
+    _fill_choice(choice, setting.get("options", []),
+            String(operation.get_settings().get(property)))
+    choice.set_meta(META_PROPERTY, property)
+    choice.item_selected.connect(
+        func(index: int) -> void:
+            var settings := operation.get_settings()
+            var values: Array = choice.get_meta(META_CHOICE_VALUES, [])
+            if settings == null or index < 0 or index >= values.size():
+                return
+            settings.set(property, String(values[index]))
+            on_changed.call()
+    )
+    return _labelled_row(label, choice)
+
+
+## Fills [param choice] with [param options] and picks [param held].
+##
+## A held value the list does not have is added at the end and picked rather than dropped.
+## A model the server has lost must not quietly become whichever one happens to sit in that
+## position now — the name stays, and the tab says the server has not got it.
+static func _fill_choice(choice: OptionButton, options: Array, held: String) -> void:
+    var values := []
+    choice.clear()
+    for option in options:
+        values.append(String(option))
+        choice.add_item(String(option))
+    var at := values.find(held)
+    if at < 0 and not held.is_empty():
+        values.append(held)
+        choice.add_item(held)
+        at = values.size() - 1
+    choice.set_meta(META_CHOICE_VALUES, values)
+    if at >= 0:
+        choice.select(at)
+
+
 static func _build_enum(operation: IWOperation, property: StringName, label: String, setting: Dictionary, on_changed: Callable) -> Control:
     var choice := OptionButton.new()
     var options: Array = setting.get("options", [])
@@ -457,6 +548,42 @@ static func refresh_visibility(operation: IWOperation, container: Node) -> void:
     _readouts_into(settings, container)
 
 
+## Fills every string dropdown from what the schema now offers, keeping what each holds.
+##
+## For a list that only arrives after the form was built — the model names a server hands
+## over. Rebuilding the form would work, but it would take the caret out of whatever text
+## box was being typed in, and the lists land a moment after the tab is opened.
+##
+## A setting still holding nothing takes the first thing offered, so a form that has just
+## met a server comes up with a model picked rather than a blank row.
+static func refresh_choices(operation: IWOperation, container: Node) -> void:
+    var settings := operation.get_settings()
+    if settings == null:
+        return
+    var offered := {}
+    for setting in operation.get_settings_schema():
+        if int(setting.get("type", -1)) == IWOperation.SettingType.CHOICE:
+            offered[StringName(setting.get("property", &""))] = setting.get("options", [])
+    if offered.is_empty():
+        return
+    _choices_into(settings, offered, container)
+
+
+static func _choices_into(settings: Resource, offered: Dictionary, node: Node) -> void:
+    for child in node.get_children():
+        if child is OptionButton and child.has_meta(META_CHOICE_VALUES) \
+                and child.has_meta(META_PROPERTY):
+            var property: StringName = child.get_meta(META_PROPERTY)
+            if offered.has(property):
+                var options: Array = offered[property]
+                var held := String(settings.get(property))
+                if held.is_empty() and not options.is_empty():
+                    held = String(options[0])
+                    settings.set(property, held)
+                _fill_choice(child as OptionButton, options, held)
+        _choices_into(settings, offered, child)
+
+
 static func _visibility_into(settings: Resource, node: Node) -> void:
     for child in node.get_children():
         if child is Control and child.has_meta(META_HIDDEN_WHEN):
@@ -495,11 +622,24 @@ static func _refresh_into(settings: Resource, node: Node) -> void:
                 (child as Control).queue_redraw()
             elif child is OptionButton:
                 var choice := child as OptionButton
-                var index := int(value)
-                if index >= 0 and index < choice.item_count:
-                    choice.select(index)
+                if choice.has_meta(META_CHOICE_VALUES):
+                    # Holds the chosen text rather than its position; see _build_choice.
+                    var values: Array = choice.get_meta(META_CHOICE_VALUES, [])
+                    var at := values.find(String(value))
+                    if at >= 0:
+                        choice.select(at)
+                else:
+                    var index := int(value)
+                    if index >= 0 and index < choice.item_count:
+                        choice.select(index)
             elif child is LineEdit:
                 (child as LineEdit).text = String(value)
+            elif child is TextEdit:
+                var edit := child as TextEdit
+                # Compared first: assigning the text puts the caret back to the start and
+                # raises the changed signal, both of which fight anyone typing into it.
+                if edit.text != String(value):
+                    edit.text = String(value)
             elif child is ColorPickerButton:
                 # The one control here that cannot be set quietly; see
                 # _build_color for why that turns out to be harmless.

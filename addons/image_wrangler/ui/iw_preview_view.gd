@@ -46,6 +46,14 @@ signal vertex_dragged(polygon: int, vertex: int, to: Vector2i)
 ## than on every motion event above.
 signal vertex_drag_ended
 
+## Emitted when a pivot drag ends, while [member pivot_pick] is on.
+##
+## [param at] is the pixel the press landed on, which says both where the pivot goes and
+## which sprite it belongs to. [param delta] is how far the drag ran from there, in image
+## pixels, and is left raw — [method Pivot.direction_from] is what turns it into a
+## direction, and a drag that never moved is a zero this way rather than a made-up vector.
+signal pivot_drawn(at: Vector2i, delta: Vector2)
+
 ## Emitted whenever the zoom level changes, from any source.
 signal zoom_changed(percent: float)
 
@@ -148,6 +156,31 @@ const HANDLE_GRAB := 7.0
 ## Opacity of the shading inside a finished polygon. Enough to read as filled,
 ## little enough to judge the art underneath.
 const POLYGON_WIDTH := 1.5
+
+## A pivot: a yellow dot in a dark orange rim where it sits, a cyan arm to the way it
+## faces, and a light grey dot on a dark grey backing at the end of that arm.
+##
+## Two dots that cannot be confused with each other, since one is a position and one is a
+## direction and dragging the wrong one is the mistake this overlay can invite.
+const PIVOT_COLOR := Color(1.0, 0.85, 0.2)
+const PIVOT_RIM_COLOR := Color(0.55, 0.27, 0.0)
+const PIVOT_ARM_COLOR := Color(0.2, 0.9, 1.0)
+const PIVOT_TIP_COLOR := Color(0.85, 0.85, 0.85)
+const PIVOT_TIP_BACK_COLOR := Color(0.15, 0.15, 0.15)
+
+## How the pivot marks are sized, in screen pixels at every zoom.
+##
+## The arm has to be a screen length rather than an image one: the vector it stands for is
+## one pixel long, which at any ordinary zoom is nothing to see and nothing to grab.
+const PIVOT_RADIUS := 3.5
+const PIVOT_TIP_RADIUS := 3.0
+const PIVOT_RIM_WIDTH := 1.5
+const PIVOT_ARM_LENGTH := 30.0
+const PIVOT_ARM_WIDTH := 1.5
+
+## How much larger the highlighted pivot's dot is drawn, so the row picked in the list can
+## be found on a sheet with a hundred of them.
+const PIVOT_SELECTED_SCALE := 1.5
 
 ## The busy overlay: how far the image behind it is dimmed, and the shape of the
 ## bar drawn over it.
@@ -295,6 +328,21 @@ var stroke_pick := false:
         stroke_pick = value
         # A drag in flight belongs to the tool that had the crosshair, the same as a sweep.
         _cancel_stroke()
+
+## While set, the sheet's pivots are drawn and a left drag redefines one.
+##
+## Its own property beside the three above rather than one of them: nothing else here
+## works on a packed sheet, and a gesture that reports both a point and a direction is not
+## a click, a sweep or a stroke.
+var pivot_pick := false:
+    set(value):
+        if pivot_pick == value:
+            return
+        pivot_pick = value
+        _pivot_anchor = Vector2i(-1, -1)
+        _update_cursor()
+        if _canvas != null:
+            _canvas.queue_redraw()
 
 ## Whether the overlays — island boxes and drawn regions — are drawn at all.
 ##
@@ -457,6 +505,18 @@ var _selected_polygon := -1
 ## Row being drawn, or -1. Drawn as an open path with a rubber band rather than
 ## as a closed shape, since it is not one yet.
 var _draft_polygon := -1
+
+## Every sprite's pivot, in sheet pixels, and which way each faces. Already resolved by
+## the dock, so a sprite nobody edited is in here at the middle of its rectangle.
+var _pivot_positions := PackedVector2Array()
+var _pivot_directions := PackedVector2Array()
+## Sprite whose row is highlighted in the Pivots list, or -1.
+var _selected_pivot := -1
+
+## Pixel a pivot drag was pressed on, and where the pointer has reached in image
+## coordinates. The anchor is (-1, -1) while no drag is in flight.
+var _pivot_anchor := Vector2i(-1, -1)
+var _pivot_cursor := Vector2.ZERO
 
 ## Image pixel under the pointer, for the rubber band. Only tracked while a draft
 ## is open, so ordinary hovering does not queue a redraw per motion event.
@@ -709,6 +769,26 @@ func set_polygons(
     if draft < 0:
         _hover_pixel = Vector2i(-1, -1)
     _canvas.queue_redraw()
+
+
+## Shows where every sprite's pivot sits and which way it faces, in sheet pixels.
+##
+## Both arrays run one entry per sprite and come out of [method PivotList.resolve], so the
+## defaults are already filled in here — this draws what it is given rather than working
+## out what a sprite with no pivot should get. [param selected] is the sprite whose row is
+## highlighted, or -1.
+##
+## Only drawn while [member pivot_pick] is on. Pass empty arrays to clear them.
+func set_pivots(positions: PackedVector2Array, directions: PackedVector2Array,
+        selected: int) -> void:
+    # Copied rather than aliased, for the reason the markers are: the caller's arrays
+    # belong to the packing run and can change underneath us without a redraw being asked
+    # for.
+    _pivot_positions = positions.duplicate()
+    _pivot_directions = directions.duplicate()
+    _selected_pivot = selected
+    if _canvas != null:
+        _canvas.queue_redraw()
 
 
 ## Shows the highlighted stroke's own pixels over [param region] of the image.
@@ -1047,6 +1127,8 @@ func _on_canvas_gui_input(event: InputEvent) -> void:
         return
     if _handle_region_pick(event):
         return
+    if _handle_pivot_drag(event):
+        return
 
     # Tracked only while a shape is open, so ordinary hovering over the image does
     # not queue a redraw for every motion event.
@@ -1179,6 +1261,61 @@ func _handle_stroke_pick(event: InputEvent) -> bool:
     return true
 
 
+## Redefines a pivot with the left button while [member pivot_pick] is set. Returns whether
+## the event was consumed.
+##
+## The press places the pivot and the drag aims it, so a click that never moves is a pivot
+## moved and left facing the way it already did rather than a gesture of nothing.
+func _handle_pivot_drag(event: InputEvent) -> bool:
+    if not pivot_pick:
+        return false
+
+    var button := event as InputEventMouseButton
+    if button != null and button.button_index == MOUSE_BUTTON_LEFT:
+        if button.pressed:
+            # Starting off the sheet is a miss: the press is what says which sprite this
+            # pivot belongs to, and there is no sprite out there.
+            var pixel := _pixel_at(button.position)
+            if pixel.x < 0:
+                return false
+            _pivot_anchor = pixel
+            _pivot_cursor = Vector2(pixel)
+            _canvas.queue_redraw()
+            _canvas.accept_event()
+            return true
+        if _pivot_anchor.x < 0:
+            return false
+        _finish_pivot()
+        _canvas.accept_event()
+        return true
+
+    if _pivot_anchor.x < 0 or not (event is InputEventMouseMotion):
+        return false
+
+    # A release swallowed elsewhere — an alt-tab mid-drag — would otherwise leave the arm
+    # stuck to the cursor. The drag is reported rather than dropped: it happened, and only
+    # its ending went missing.
+    if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+        _finish_pivot()
+        return false
+
+    # Unclamped, unlike a sweep or a stroke. Only a direction is being read off it, and a
+    # pointer taken past the edge of the sheet still says which way it went.
+    _pivot_cursor = _image_position(event.position)
+    _canvas.queue_redraw()
+    _canvas.accept_event()
+    return true
+
+
+## Ends the pivot drag and reports it.
+func _finish_pivot() -> void:
+    var at := _pivot_anchor
+    var delta := _pivot_cursor - Vector2(at)
+    _pivot_anchor = Vector2i(-1, -1)
+    _canvas.queue_redraw()
+    pivot_drawn.emit(at, delta)
+
+
 ## Drops the drag without reporting an ending, for the cases where the tool it belonged to
 ## has gone away underneath it.
 func _cancel_stroke() -> void:
@@ -1304,7 +1441,7 @@ func _handle_pan(event: InputEvent) -> bool:
         # drags the view; with one active it belongs to the tool and Ctrl is the
         # way back to panning.
         var left_pans := button.button_index == MOUSE_BUTTON_LEFT \
-                and (button.ctrl_pressed or not pick_mode)
+                and (button.ctrl_pressed or not (pick_mode or pivot_pick))
         if button.button_index == MOUSE_BUTTON_MIDDLE or left_pans:
             _set_panning(true)
             _canvas.accept_event()
@@ -1357,7 +1494,7 @@ func _update_cursor() -> void:
         return
     if _panning:
         _canvas.mouse_default_cursor_shape = Control.CURSOR_DRAG
-    elif pick_mode:
+    elif pick_mode or pivot_pick:
         _canvas.mouse_default_cursor_shape = Control.CURSOR_CROSS
     else:
         _canvas.mouse_default_cursor_shape = Control.CURSOR_ARROW
@@ -1374,6 +1511,15 @@ func _pixel_at(local_position: Vector2) -> Vector2i:
     if pixel.x < 0 or pixel.y < 0 or pixel.x >= _image_size.x or pixel.y >= _image_size.y:
         return Vector2i(-1, -1)
     return pixel
+
+
+## Where a position in the drawing area falls in image coordinates, kept fractional and
+## unbounded — for the pivot arm, which reads a direction rather than a pixel.
+func _image_position(local_position: Vector2) -> Vector2:
+    var scale := _scale()
+    if scale <= 0.0:
+        return Vector2.ZERO
+    return (local_position - _content_origin) / scale
 
 
 ## Image pixel under a position, pulled to the nearest edge pixel when the
@@ -1432,6 +1578,9 @@ func _draw_canvas() -> void:
     _draw_polygons()
     _draw_brush()
     _draw_region_band()
+    # Over the tile patches and the marks, since a pivot is a point on one sprite and has
+    # to be findable on a sheet those have already covered.
+    _draw_pivots()
     # Over everything, including the overlays, since it is about the whole view
     # rather than about anything drawn on it.
     _draw_busy()
@@ -1640,6 +1789,40 @@ func _draw_polygons() -> void:
             _draw_draft(screen, color)
         elif markers_visible:
             _draw_finished(screen, color, selected, on)
+
+
+## Every sprite's pivot, and the one being dragged over the top of them.
+##
+## Shown only while the Pivots section is armed. They belong to a gesture rather than to
+## the result, so they are not on the Show Indicators switch the marks are.
+func _draw_pivots() -> void:
+    if not pivot_pick:
+        return
+    var scale := _scale()
+    for i in _pivot_positions.size():
+        var at := _content_origin + _pivot_positions[i] * scale
+        var facing := Pivot.as_image_vector(_pivot_directions[i]) if i < _pivot_directions.size() \
+                else Pivot.as_image_vector(Pivot.DEFAULT_DIRECTION)
+        _draw_pivot(at, at + facing * PIVOT_ARM_LENGTH, i == _selected_pivot)
+
+    # Last, so the one being aimed is on top of whatever it is being aimed over. Its arm
+    # runs to the pointer rather than to a fixed length, which is the whole of the gesture.
+    if _pivot_anchor.x >= 0:
+        _draw_pivot(_content_origin + Vector2(_pivot_anchor) * scale,
+                _content_origin + _pivot_cursor * scale, true)
+
+
+## One pivot: the dot at [param at], the arm to [param tip], and the dot on the end of it.
+func _draw_pivot(at: Vector2, tip: Vector2, selected: bool) -> void:
+    var radius := PIVOT_RADIUS * (PIVOT_SELECTED_SCALE if selected else 1.0)
+    # The arm first, so both dots sit over it rather than being cut by it.
+    _canvas.draw_line(at, tip, PIVOT_ARM_COLOR, PIVOT_ARM_WIDTH, true)
+    _canvas.draw_circle(tip, PIVOT_TIP_RADIUS + PIVOT_RIM_WIDTH, PIVOT_TIP_BACK_COLOR)
+    _canvas.draw_circle(tip, PIVOT_TIP_RADIUS, PIVOT_TIP_COLOR)
+    # The rim is a filled circle under the dot rather than an outline on it, so it holds
+    # up at the width a hairline outline loses on a light sheet.
+    _canvas.draw_circle(at, radius + PIVOT_RIM_WIDTH, PIVOT_RIM_COLOR)
+    _canvas.draw_circle(at, radius, PIVOT_COLOR)
 
 
 ## Image-space points as canvas positions, taken from pixel centres so a corner

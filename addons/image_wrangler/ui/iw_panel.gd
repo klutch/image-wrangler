@@ -11,10 +11,12 @@ const PolygonList := preload("res://addons/image_wrangler/ui/iw_polygon_list.gd"
 const HSVList := preload("res://addons/image_wrangler/ui/iw_hsv_list.gd")
 const BrushList := preload("res://addons/image_wrangler/ui/iw_brush_list.gd")
 const ExcludeTilesList := preload("res://addons/image_wrangler/ui/iw_exclude_tiles.gd")
+const PivotListView := preload("res://addons/image_wrangler/ui/iw_pivot_list.gd")
 const ModelFolder := preload("res://addons/image_wrangler/ui/iw_model_folder.gd")
 const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
 const StackView := preload("res://addons/image_wrangler/ui/iw_stack_view.gd")
 const HistoryView := preload("res://addons/image_wrangler/ui/iw_history_view.gd")
+const ComfyServer := preload("res://addons/image_wrangler/core/iw_comfy_server.gd")
 
 ## Every [IWStackOperation] the stack can hold, in the order the dropdown offers them.
 ## Add new stack operations here.
@@ -141,6 +143,11 @@ const PACKING_SCRIPT := "res://addons/image_wrangler/core/iw_packing.gd"
 ## the whole run — where every stage's describe the image they are dialled in against.
 const UPSCALE_SCRIPT := "res://addons/image_wrangler/core/upscale.gd"
 
+## Generate is the fourth, and the only one that takes no image at all — it makes one from
+## a written description. Everything about the picture arrives from its own form, so there
+## is nothing for it to be a stage of.
+const GENERATE_SCRIPT := "res://addons/image_wrangler/core/iw_generate.gd"
+
 ## Extensions [method Image.load_from_file] can read.
 const SUPPORTED_EXTENSIONS := ["png", "jpg", "jpeg", "bmp", "tga", "webp"]
 
@@ -254,6 +261,16 @@ const EXPORT_FOLD_PACKING := "export/packing"
 const EXPORT_FOLD_NORMALS := "export/normals"
 const EXPORT_FOLD_PIVOTS := "export/pivots"
 
+## The same, for the Generate tab's hand-built server section.
+const GENERATE_FOLD_SERVER := "generate/server"
+
+## Where the Generate tab's settings are kept.
+##
+## A fixed name rather than one keyed on the batch, unlike the Export tab's: a description
+## is not about the files in the list, and keying it on them would throw a prompt away the
+## moment an image was added.
+const GENERATE_CONFIG_PATH := "user://image_wrangler/generate.iwc"
+
 ## How long the Upscale tab waits after a change before running the network again.
 ##
 ## The same as Packing's, and for the same reason — a spinner being dragged reports a change
@@ -267,6 +284,13 @@ const UPSCALE_DEBOUNCE := 0.6
 ## small image at 32x is an enormous one, and the cost of the run follows the pixels coming
 ## out. Refresh still asks for it, which is how anything above the line gets looked at.
 const UPSCALE_AUTO_PIXEL_LIMIT := 4_194_304
+
+## How long the Generate tab waits after a change before writing its settings out.
+##
+## [b]There is deliberately no debounce for running one.[/b] Every other tab follows its
+## form and rebuilds itself; a generation costs a minute of graphics card, so this one runs
+## only when it is asked. Generate and Refresh are the two ways of asking.
+const GENERATE_SAVE_DEBOUNCE := 0.5
 
 ## How close a zoom has to be to a ladder rung to count as that rung rather than
 ## as a value of its own. Comfortably under the smallest gap in the ladder.
@@ -318,7 +342,12 @@ file untouched, so it keeps whatever format it already had."""
 ## Upscale goes last because it comes last: it is the one tab whose input is what the others
 ## produced, and reading the strip left to right is then the order a batch actually goes
 ## through.
-enum Mode { IMAGE, HISTORY, RENAME, PACKING, UPSCALE }
+##
+## Generate then sits past the end of that reading rather than at the front of it, where
+## what it makes would say it belongs. The value is the tab index, so moving it would
+## renumber every other tab — and nothing here is written to disk, so the move stays cheap
+## if the reading order turns out to matter more.
+enum Mode { IMAGE, HISTORY, RENAME, PACKING, UPSCALE, GENERATE }
 
 var _mode := Mode.IMAGE
 
@@ -348,6 +377,25 @@ var _packing: IWOperation
 ## things no operation answers — what ratio is dialled in, how large that makes the result,
 ## and whether the last run failed. Naming the subclass is what gets those checked.
 var _upscale: Upscale
+
+## The Generate tab's own operation, and the server it talks to.
+##
+## Both outlive a form rebuild: the operation carries the description being written, and the
+## server may have a run in flight. See [method _rebuild_ui], which frees every other child
+## of the dock.
+var _generate: IWGenerate
+var _comfy: IWComfyServer
+
+## What the last run made, and which of them the viewport is showing.
+##
+## Kept rather than written straight out: a generation is asked for and then stands, the way
+## a packed sheet does, and Save Current is what puts it on disk.
+var _generate_images: Array[Image] = []
+var _generate_index := 0
+
+## Whether a run is in flight. Its own flag rather than asking the server, because the
+## button and the busy overlay both follow it and the server is null while the dock builds.
+var _generate_running := false
 
 ## The sheet Packing last built, shown in the viewport while its tab is up.
 ##
@@ -434,9 +482,14 @@ var _upscale_pending := false
 ## See [method _processed_image].
 var _upscale_failure := ""
 
-## Set between asking where to put the packed sheet and being told, so the one file dialog
-## the dock has knows which of its two callers it is answering.
-var _saving_sheet := false
+## What the save dialog is answering, between asking where to put something and being told.
+##
+## The dock has one dialog and three callers: an ordinary processed image, a packed sheet
+## and a generated picture. A flag per caller invites two of them being true at once, so it
+## is one name instead. Empty means the ordinary path.
+const SAVE_KIND_SHEET := &"sheet"
+const SAVE_KIND_GENERATED := &"generated"
+var _save_kind: StringName = &""
 var _sources: PackedStringArray = PackedStringArray()
 var _source_image: Image
 var _result_image: Image
@@ -623,7 +676,23 @@ var _packing_normal_toggle: CheckBox
 ## two above, and shown only once there is a stack for them to be about.
 var _packing_clean_toggle: CheckBox
 var _packing_reach_slider: EditorSpinSlider
+## The Pivots section's own list, under the normal map stack on the Export tab.
+var _pivot_view: Control
+## Whether the Pivots section holds the preview. Its own flag rather than a member of
+## [member _pick_controls]: that set is built from the stack's forms, and this control is
+## not one of them.
+var _pivot_editing := false
+## Set while the Pivots section is taking the preview, so the release it asks for on the way
+## in does not hand it straight back.
+var _arming_pivots := false
 var _upscale_box: VBoxContainer
+## The Generate tab's form, the button that starts a run, and the line under both.
+var _generate_box: VBoxContainer
+var _generate_button: Button
+var _generate_status: Label
+## The address of the server, and what it last said about itself.
+var _comfy_url_edit: LineEdit
+var _comfy_status: Label
 ## Says how the last upscale went, or why it could not run at all.
 var _upscale_status: Label
 ## Says what the selected model is for, sitting under its dropdown.
@@ -665,6 +734,9 @@ var _autosave: Timer
 ## Writes the Export tab's own settings file. Separate from [member _autosave] because it is
 ## keyed on the whole list of images rather than on whichever one is highlighted.
 var _export_save: Timer
+## Writes the Generate tab's settings file. Separate again, and for the same reason: it
+## belongs to the editor rather than to any image or any batch.
+var _generate_save: Timer
 var _open_dialog: FileDialog
 var _output_dialog: FileDialog
 var _save_dialog: FileDialog
@@ -740,10 +812,30 @@ func _ready() -> void:
     _build_rename()
     _build_packing()
     _build_upscale()
+    _build_comfy()
+    _build_generate()
     _apply_stack_for("")
     _select_mode(Mode.IMAGE)
     _refresh_file_list()
     _update_controls()
+
+
+## Makes the server object, once for the life of the dock.
+##
+## Not a control, so it is not rebuilt with them — a run in flight would go with it. See
+## [method _rebuild_ui], which lifts it out before freeing everything else.
+func _build_comfy() -> void:
+    if _comfy != null:
+        return
+    _comfy = ComfyServer.new()
+    _comfy.name = "ComfyServer"
+    add_child(_comfy)
+    _comfy.state_changed.connect(_on_comfy_state)
+    _comfy.info_ready.connect(_on_comfy_info)
+    _comfy.progress.connect(_on_comfy_progress)
+    _comfy.finished.connect(_on_comfy_finished)
+    _comfy.failed.connect(_on_comfy_failed)
+    _comfy.set_url(IWAddonSettings.comfy_url())
 
 
 ## The dock's keyboard shortcuts: Escape and Backspace close and unwind a drawn
@@ -834,6 +926,15 @@ func _unhandled_key_input(event: InputEvent) -> void:
         accept_event()
         return
 
+    # Escape puts the pivot tool away, the same as it does the brush: a pivot is finished
+    # the moment the button comes up, so holding the tool with nothing half-drawn is the
+    # ordinary state to be in.
+    if _pivot_editing and key.keycode == KEY_ESCAPE:
+        _release_pivots()
+        _set_status("")
+        accept_event()
+        return
+
     # Escape puts the brush away. Unlike the polygon it does not wait for a shape to be
     # open: a stroke is finished the moment the button comes up, so a brush with no draft
     # is the ordinary state to be in while still holding the tool.
@@ -870,6 +971,7 @@ func _exit_tree() -> void:
 
     _flush_autosave()
     _flush_export_save()
+    _flush_generate_save()
     _preview_pending = false
     if _preview_worker_op != null:
         _preview_worker_op.cancelled = true
@@ -882,6 +984,10 @@ func _exit_tree() -> void:
     # editor goes on running after the dock has gone.
     if _upscale != null:
         _upscale.close()
+    # A run in flight is let go rather than stopped. The reply would arrive after the dock
+    # has gone, and the picture is written to ComfyUI's own output folder either way.
+    if _comfy != null:
+        _comfy.shut_down()
     # The segmentation network is held statically for the same reason the upscaler is held
     # open, so it is let go on the same path — iw_ncnn::shutdown() stands down while
     # anything is still open, and static teardown order is not guaranteed.
@@ -942,6 +1048,12 @@ func _build_packing() -> void:
     _packing_normal_key = _packing_normal_signature()
     _refresh_green_toggle()
     _update_normal_toggle()
+    # Outside the form the builder just rewrote, and bound rather than rebuilt: it reads
+    # the list off the settings on every access, so pointing it at the operation once is
+    # enough however often the settings behind it are swapped.
+    if _pivot_view != null:
+        _pivot_view.setup(_packing, &"pivots")
+    _update_pivot_overlay()
 
 
 ## Puts [param note] directly under whichever row carries [param property].
@@ -1025,6 +1137,28 @@ func _build_upscale() -> void:
         _set_upscale_status(blocked)
     elif not Upscale.gpu_available():
         _set_upscale_status("No Vulkan device found, so this will run on the processor. Expect minutes rather than seconds.")
+
+
+## The same, for the tab that makes a picture rather than changing one.
+##
+## The operation is made once and kept, like Upscale's. What it holds is the description
+## being written, and a rebuild that dropped it would throw that away.
+func _build_generate() -> void:
+    if _generate == null:
+        var script: GDScript = load(GENERATE_SCRIPT)
+        if script == null:
+            push_error("Image Wrangler: could not load operation script at %s" % GENERATE_SCRIPT)
+            return
+        _generate = script.new()
+        # Only on the first make. A rebuild is showing settings that are already in hand,
+        # and reading the file again would undo whatever has not been written out yet.
+        _load_generate_config()
+    SettingsBuilder.build(_generate, _generate_box, _on_setting_changed, _fold_state, "generate")
+    if _generate.has_catalogue():
+        SettingsBuilder.refresh_choices(_generate, _generate_box)
+    if _comfy_url_edit != null and _comfy != null:
+        _comfy_url_edit.text = _comfy.url()
+    _refresh_comfy_status()
 
 
 ## What the Upscale form was built for, so a settings change that changes the form itself is
@@ -1183,6 +1317,7 @@ func _rebuild_ui() -> void:
     # resolves it against the current mode, so it goes before any of this.
     _flush_autosave()
     _flush_export_save()
+    _flush_generate_save()
 
     # A run in flight reports into controls that are about to be freed. Cancelled exactly
     # as [method _exit_tree] does it: it cannot be waited on, but the cancel reaches it at
@@ -1206,6 +1341,11 @@ func _rebuild_ui() -> void:
     # at the same operation instances rather than at fresh ones carrying defaults.
     _store_stack(path)
 
+    # Lifted out before the sweep below, which frees every child. It is not a control and
+    # may be carrying a run, so it survives the rebuild and goes back afterwards.
+    if _comfy != null and _comfy.get_parent() == self:
+        remove_child(_comfy)
+
     # Removed before being freed, not merely queued: a queue_free alone leaves the old
     # columns in the tree for the rest of the frame, laid out alongside the new ones.
     for child in get_children():
@@ -1217,6 +1357,11 @@ func _rebuild_ui() -> void:
     _build_rename()
     _build_packing()
     _build_upscale()
+    if _comfy != null:
+        add_child(_comfy)
+    else:
+        _build_comfy()
+    _build_generate()
 
     _indicators = indicators
     _preview.markers_visible = _indicators != Indicators.NONE
@@ -1277,6 +1422,14 @@ func _forget_controls() -> void:
     _packing_normal_toggle = null
     _packing_clean_toggle = null
     _packing_reach_slider = null
+    _pivot_view = null
+    _pivot_editing = false
+    # The controls only. _comfy and _generate outlive a rebuild, like _upscale does.
+    _generate_box = null
+    _generate_button = null
+    _generate_status = null
+    _comfy_url_edit = null
+    _comfy_status = null
     _upscale_box = null
     _upscale_status = null
     _upscale_model_note = null
@@ -1298,6 +1451,7 @@ func _forget_controls() -> void:
     _upscale_debounce = null
     _autosave = null
     _export_save = null
+    _generate_save = null
     _open_dialog = null
     _output_dialog = null
     _save_dialog = null
@@ -1356,6 +1510,14 @@ func _build_ui() -> void:
     # to know it was not asked for by Refresh.
     _upscale_debounce.timeout.connect(_run_upscale_now.bind(false))
     add_child(_upscale_debounce)
+
+    # Writes the Generate tab's settings out. There is no timer that runs one — see
+    # GENERATE_SAVE_DEBOUNCE.
+    _generate_save = Timer.new()
+    _generate_save.one_shot = true
+    _generate_save.wait_time = GENERATE_SAVE_DEBOUNCE
+    _generate_save.timeout.connect(_flush_generate_save)
+    add_child(_generate_save)
 
     _autosave = Timer.new()
     _autosave.one_shot = true
@@ -1527,6 +1689,7 @@ func _build_preview_column() -> Control:
     _preview.region_picked.connect(_on_region_picked)
     _preview.stroke_point.connect(_on_stroke_point)
     _preview.stroke_finished.connect(_on_stroke_finished)
+    _preview.pivot_drawn.connect(_on_pivot_drawn)
     _preview.pick_cancelled.connect(_on_pick_cancelled)
     _preview.vertex_dragged.connect(_on_vertex_dragged)
     _preview.vertex_drag_ended.connect(_on_vertex_drag_ended)
@@ -1768,9 +1931,15 @@ func _build_operation_column() -> Control:
     _packing_reach_slider.value_changed.connect(_on_inner_reach_changed)
     extras.add_child(_packing_reach_slider)
 
-    # Empty for now: the heading is here so the section it will hold has a place to go.
-    SettingsBuilder.begin_group(packing_page, "Pivots", true, _fold_state,
+    var pivot_section := SettingsBuilder.begin_group(packing_page, "Pivots", true, _fold_state,
             EXPORT_FOLD_PIVOTS)
+
+    _pivot_view = PivotListView.new()
+    _pivot_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _pivot_view.edit_toggled.connect(_on_pivot_edit_toggled)
+    _pivot_view.pivots_changed.connect(_on_pivots_changed)
+    _pivot_view.selection_changed.connect(_update_pivot_overlay)
+    pivot_section.add_child(_pivot_view)
 
     _packing_status = Label.new()
     _packing_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1801,6 +1970,8 @@ func _build_operation_column() -> Control:
     _upscale_status.modulate = Color(1, 1, 1, 0.6)
     upscale_column.add_child(_upscale_status)
 
+    _build_generate_page()
+
     _modes.set_tab_tooltip(Mode.IMAGE, "Build a stack of operations that rewrite the pixels.")
     _modes.set_tab_tooltip(Mode.HISTORY,
             "Every edit made to this image's stack this session.\nClick one to rewind to it. Held in memory only, and never saved.")
@@ -1810,6 +1981,8 @@ func _build_operation_column() -> Control:
             "Lay the objects from every open image out on one sheet.\nShown in the viewport; Save Current writes it.")
     _modes.set_tab_tooltip(Mode.UPSCALE,
             "Enlarge every open image with waifu2x, which invents the pixels\nrather than stretching them. Runs on what each image's stack made,\nnot on the file it came from.")
+    _modes.set_tab_tooltip(Mode.GENERATE,
+            "Make a new picture from a written description, using ComfyUI.\nShown in the viewport; Save Current writes it.")
 
     column.add_child(HSeparator.new())
     column.add_child(_build_output_section())
@@ -1870,9 +2043,73 @@ func _select_mode(mode: int) -> void:
         # it stops being trustworthy.
         _upscale_raw = null
         _schedule_upscale()
+    elif mode == Mode.GENERATE:
+        # Nothing is made on arrival — that costs a minute and a graphics card, and opening
+        # a tab is not asking for one. What does happen is a look at the server, so the
+        # dropdowns are filled by the time the button is pressed.
+        if _comfy != null and not _comfy.is_running():
+            _comfy.probe()
+        # A run started here and left running belongs to this tab, so its overlay comes back
+        # with it — and never went up over anybody else's.
+        _preview.set_busy(_generate_running)
     # Which of the two Save buttons has anything to do depends on the tab, so the switch
     # itself has to say so — nothing else runs on the way in.
     _update_controls()
+
+
+## The Generate tab's page: where the server is, the form, and the button.
+##
+## The server rows are hand-built rather than declared in the schema, for the reason the
+## Export tab's toggles are: an address is not a setting of the picture and does not belong
+## in the settings Resource the form writes to.
+func _build_generate_page() -> void:
+    var page := ScrollContainer.new()
+    page.name = "Generate"
+    page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    _modes.add_child(page)
+
+    var column := VBoxContainer.new()
+    column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    page.add_child(column)
+
+    var server := SettingsBuilder.begin_group(column, "Server", false, _fold_state,
+            GENERATE_FOLD_SERVER)
+
+    var address := HBoxContainer.new()
+    server.add_child(address)
+
+    _comfy_url_edit = LineEdit.new()
+    _comfy_url_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _comfy_url_edit.tooltip_text = "Where ComfyUI is answering.\n\nIts own default is http://127.0.0.1:8188. Start ComfyUI yourself, then press\nConnect."
+    _comfy_url_edit.text_submitted.connect(func(_text: String) -> void: _on_comfy_connect())
+    _comfy_url_edit.focus_exited.connect(_store_comfy_url)
+    address.add_child(_comfy_url_edit)
+
+    var connect_button := Button.new()
+    connect_button.text = "Connect"
+    connect_button.tooltip_text = "Ask that address whether ComfyUI is there, and what models it has."
+    connect_button.pressed.connect(_on_comfy_connect)
+    address.add_child(connect_button)
+
+    _comfy_status = Label.new()
+    _comfy_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    _comfy_status.modulate = Color(1, 1, 1, 0.6)
+    server.add_child(_comfy_status)
+
+    _generate_box = VBoxContainer.new()
+    _generate_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    column.add_child(_generate_box)
+
+    _generate_button = Button.new()
+    _generate_button.text = "Generate"
+    _generate_button.tooltip_text = "Make a picture from the description above.\n\nNothing here runs on its own the way the other tabs do — a generation takes a\nminute and a graphics card, so it happens only when asked. Refresh asks too."
+    _generate_button.pressed.connect(_run_generate)
+    column.add_child(_generate_button)
+
+    _generate_status = Label.new()
+    _generate_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    _generate_status.modulate = Color(1, 1, 1, 0.6)
+    column.add_child(_generate_status)
 
 
 func _on_tab_changed(tab: int) -> void:
@@ -1963,10 +2200,10 @@ func _build_dialogs() -> void:
     _save_dialog.title = "Save Processed Image"
     _save_dialog.add_filter("*.png", "PNG Image")
     _save_dialog.file_selected.connect(_on_save_file_chosen)
-    # Cleared on the way out as well as on the way through: the flag says which of the two
-    # callers the dialog is answering, and one left set by a cancel would send the next
-    # ordinary save down the packed-sheet path.
-    _save_dialog.canceled.connect(func() -> void: _saving_sheet = false)
+    # Cleared on the way out as well as on the way through: it says which caller the dialog
+    # is answering, and one left set by a cancel would send the next ordinary save down
+    # somebody else's path.
+    _save_dialog.canceled.connect(func() -> void: _save_kind = &"")
     add_child(_save_dialog)
 
     _overwrite_dialog = ConfirmationDialog.new()
@@ -2262,6 +2499,10 @@ func _blank_preview() -> void:
     _preview.set_polygons([], -1, -1)
     _preview.set_ghosts([], [])
     _push_brush_overlay(null)
+    # A generated picture was made from a description rather than from the list, so an empty
+    # list is no reason to take it off screen. It is deliberately not forgotten above.
+    if _mode == Mode.GENERATE:
+        _update_preview_texture()
 
 
 func _on_file_selected(index: int) -> void:
@@ -3201,6 +3442,8 @@ func _active_operation() -> IWOperation:
     # runs; see [method _processed_image].
     if _mode == Mode.UPSCALE:
         return _upscale
+    if _mode == Mode.GENERATE:
+        return _generate
     var pipeline := IWPipeline.new()
     for stage: IWStackOperation in _stack_view.stages():
         pipeline.stages.append(stage)
@@ -3277,10 +3520,14 @@ func _restore_pick(address: Dictionary) -> void:
 
 
 ## Drops out of pick mode, leaving every control's button unpressed.
+##
+## The Pivots section is released with the rest, but only when it is not the thing doing the
+## releasing — arming it calls this to clear the others out of the way.
 func _release_pick() -> void:
     _pick_target = null
     _preview.pick_mode = false
     _preview.region_pick = false
+    _release_pivots()
     for control: Control in _pick_controls:
         if control is PolygonList:
             # Committed rather than abandoned: leaving a half-drawn shape open would
@@ -3479,6 +3726,7 @@ func _on_pick_toggled(enabled: bool, source: Control) -> void:
     # The ones that did not just get pressed are released, rather than left looking
     # pressed over a picker no click will reach. The source's own button is already
     # down, which is what raised this signal.
+    _release_pivots()
     for control: Control in _pick_controls:
         if control == source:
             continue
@@ -4053,6 +4301,8 @@ func _on_setting_changed() -> void:
         SettingsBuilder.refresh_visibility(_packing, _packing_box)
     elif _mode == Mode.UPSCALE:
         SettingsBuilder.refresh_visibility(_upscale, _upscale_box)
+    elif _mode == Mode.GENERATE:
+        SettingsBuilder.refresh_visibility(_generate, _generate_box)
     else:
         for entry: Control in _stack_view.entries():
             SettingsBuilder.refresh_visibility(entry.stage, entry.settings_box())
@@ -4061,6 +4311,11 @@ func _on_setting_changed() -> void:
         _refresh_notes()
         _capture_history()
     _schedule_autosave()
+    if _mode == Mode.GENERATE:
+        # Its own file rather than any image's sidecar, so _schedule_autosave above did
+        # nothing for it. Nothing is run: see GENERATE_SAVE_DEBOUNCE.
+        _schedule_generate_save()
+        return
     if _mode == Mode.PACKING:
         # The note under the dropdown is the one part of this form that is not a setting,
         # so nothing else would notice the mode had moved.
@@ -4154,6 +4409,10 @@ func _on_refresh_pressed() -> void:
         _run_packing_now()
     elif _mode == Mode.UPSCALE:
         _run_upscale_now(true)
+    elif _mode == Mode.GENERATE:
+        # Refresh means "do it now on whichever tab is up", and here that is exactly what
+        # the Generate button means — so the two are one call rather than two ideas.
+        _run_generate()
     else:
         _run_preview()
 
@@ -4541,6 +4800,298 @@ func _forget_packed_sheet() -> void:
     _packing_rects = []
     _packing_normal_image = null
     _packing_normal_key = ""
+
+
+# --- Pivots --------------------------------------------------------------
+
+## Hands the sheet to the Pivots section, or takes it back.
+##
+## The other pickers are released with it. They belong to the stack's forms on another tab
+## and cannot be clicked from here, but one left armed would still be holding the preview
+## when the Operations tab came back up.
+func _on_pivot_edit_toggled(enabled: bool) -> void:
+    if enabled:
+        # Held while the others are cleared out, so the release does not take back what is
+        # being handed over.
+        _arming_pivots = true
+        _release_pick()
+        _arming_pivots = false
+        _pivot_view.set_pick_active(true)
+        _set_status("Press inside a sprite to place its pivot, then drag to aim it.")
+        _set_packing_status("Press inside a sprite to place its pivot, then drag to aim it.")
+    _pivot_editing = enabled
+    _preview.pivot_pick = enabled
+    _update_pivot_overlay()
+
+
+## Takes the preview off the Pivots section, leaving its Edit button unpressed.
+func _release_pivots() -> void:
+    if not _pivot_editing or _arming_pivots:
+        return
+    _pivot_editing = false
+    _preview.pivot_pick = false
+    _pivot_view.set_pick_active(false)
+    _update_pivot_overlay()
+
+
+## A pivot drawn over the sheet: [param at] is the pixel pressed, [param delta] how far the
+## drag ran from it.
+##
+## The press says which sprite as well as where, so a press that landed between sprites is
+## nothing rather than a pivot on the sheet belonging to nobody.
+func _on_pivot_drawn(at: Vector2i, delta: Vector2) -> void:
+    if not _pivot_editing or _pivot_view == null:
+        return
+    var sprite := _sprite_at(at)
+    if sprite < 0:
+        _set_packing_status("No sprite there — press inside one to give it a pivot.")
+        return
+    var rect: Rect2i = _packing_rects[sprite]
+    _pivot_view.set_pivot(sprite, Vector2(at - rect.position), Pivot.direction_from(delta))
+
+
+## Which sprite covers [param pixel] on the sheet, or -1 for none.
+##
+## Last match wins, so a sprite laid over another's padding is the one a press there means.
+## Sprites that were never placed are rectangles of no area and cannot be hit.
+func _sprite_at(pixel: Vector2i) -> int:
+    var found := -1
+    for i in _packing_rects.size():
+        var rect: Rect2i = _packing_rects[i]
+        if rect.size.x > 0 and rect.size.y > 0 and rect.has_point(pixel):
+            found = i
+    return found
+
+
+## Saves the pivots and redraws them. Deliberately no repack: a pivot is read at save time
+## out of a plan already made and changes nothing about the pixels.
+func _on_pivots_changed() -> void:
+    _schedule_export_save()
+    _update_pivot_overlay()
+
+
+## Hands the preview every sprite's pivot, or clears them.
+##
+## Worked out here rather than in the preview, so the defaults come from the same place the
+## lookup table's do — see [method PivotList.resolve].
+func _update_pivot_overlay() -> void:
+    if _preview == null or _pivot_view == null:
+        return
+    if not _pivot_editing or _mode != Mode.PACKING or _packing_rects.is_empty():
+        _preview.set_pivots(PackedVector2Array(), PackedVector2Array(), -1)
+        return
+    var pivots: PivotList = _packing.get_settings().pivots if _packing != null else null
+    var resolved: Array = (pivots if pivots != null else PivotList.new()).resolve(_packing_rects)
+    _preview.set_pivots(resolved[0], resolved[1], _pivot_view.selected_sprite())
+
+
+# --- Generate ------------------------------------------------------------
+
+## The picture the viewport is showing, or null.
+func _current_generate_image() -> Image:
+    if _generate_index < 0 or _generate_index >= _generate_images.size():
+        return null
+    return _generate_images[_generate_index]
+
+
+func _set_generate_status(text: String) -> void:
+    if _generate_status != null:
+        _generate_status.text = text
+
+
+## Says where the server is and what it said, under the address row.
+func _refresh_comfy_status() -> void:
+    if _comfy_status == null:
+        return
+    if _comfy == null:
+        _comfy_status.text = ""
+        return
+    match _comfy.state():
+        ComfyServer.State.RUNNING:
+            _comfy_status.text = "Working."
+        ComfyServer.State.READY:
+            if _generate != null and _generate.has_catalogue():
+                _comfy_status.text = "Connected. %d checkpoints." % _generate.checkpoints.size()
+            else:
+                _comfy_status.text = "Connected."
+        _:
+            _comfy_status.text = "Not connected. Start ComfyUI, then press Connect."
+
+
+func _store_comfy_url() -> void:
+    if _comfy == null or _comfy_url_edit == null:
+        return
+    _comfy.set_url(_comfy_url_edit.text)
+    IWAddonSettings.set_comfy_url(_comfy.url())
+    _comfy_url_edit.text = _comfy.url()
+
+
+func _on_comfy_connect() -> void:
+    if _comfy == null:
+        return
+    _store_comfy_url()
+    _set_generate_status("Asking %s what it has." % _comfy.url())
+    _comfy.probe()
+
+
+func _on_comfy_state(_state: int) -> void:
+    _refresh_comfy_status()
+    _update_controls()
+
+
+## Takes the lists the server offered and puts them in the dropdowns.
+##
+## Refilled rather than rebuilt: the lists land a moment after the tab is opened, which is
+## exactly when somebody may be typing a description.
+func _on_comfy_info(lists: Dictionary) -> void:
+    if _generate == null:
+        return
+    _generate.set_catalogue(lists)
+    if _generate_box != null:
+        SettingsBuilder.refresh_choices(_generate, _generate_box)
+    _refresh_comfy_status()
+    _update_controls()
+    if _generate.checkpoints.is_empty():
+        _set_generate_status("The server has no checkpoints. Put one in ComfyUI's models/checkpoints folder and press Connect again.")
+    else:
+        _set_generate_status("")
+    # Picking the first checkpoint counts as a change worth keeping.
+    _schedule_generate_save()
+
+
+func _on_comfy_progress(fraction: float, note: String) -> void:
+    # Only while this tab is up. Another tab's viewport is showing something else, and a bar
+    # over it would be about work that has nothing to do with what is on screen.
+    if _mode == Mode.GENERATE and _preview != null and fraction >= 0.0:
+        _preview.set_progress(fraction)
+    _set_generate_status(note)
+
+
+func _on_comfy_finished(images: Array) -> void:
+    _generate_running = false
+    if _preview != null:
+        _preview.set_busy(false)
+    _generate_images.assign(images)
+    _generate_index = 0
+    var made := _current_generate_image()
+    if made != null:
+        _set_generate_status("Made %d x %d." % [made.get_width(), made.get_height()])
+        _set_status("Generated %d x %d." % [made.get_width(), made.get_height()])
+    # The viewport only follows if this tab is up. Coming back to it runs this again, so
+    # nothing is lost by leaving another tab's picture alone.
+    if _mode == Mode.GENERATE:
+        _update_preview_texture()
+        if made != null:
+            _preview.fit_to_view()
+    _refresh_comfy_status()
+    _update_controls()
+
+
+func _on_comfy_failed(reason: String) -> void:
+    _generate_running = false
+    if _preview != null:
+        _preview.set_busy(false)
+    _set_generate_status(reason)
+    _refresh_comfy_status()
+    _update_controls()
+
+
+## Sends the form to the server, or says why it cannot.
+func _run_generate() -> void:
+    if _generate == null or _comfy == null or _generate_running:
+        return
+    if _comfy.state() == ComfyServer.State.OFFLINE:
+        _set_generate_status("Not connected to ComfyUI. Set the address above and press Connect.")
+        return
+    var settings: IWGenerateSettings = _generate.get_settings()
+    var trouble := IWComfyGraph.trouble(settings)
+    if not trouble.is_empty():
+        _set_generate_status(trouble)
+        return
+
+    # Drawn here rather than by the server, and written back, so the number that made the
+    # picture on screen is the one sitting in the box.
+    var seed_value := settings.seed
+    if settings.randomize_seed:
+        seed_value = randi() & IWComfyGraph.MAX_SEED
+        settings.seed = seed_value
+        SettingsBuilder.refresh_values(_generate, _generate_box)
+        _schedule_generate_save()
+
+    _generate_running = true
+    if _preview != null:
+        _preview.set_busy(true)
+    _update_controls()
+    _comfy.submit(IWComfyGraph.build(settings, seed_value))
+
+
+## Asks where to put the picture. It is not one of the sources, so it goes the short way,
+## exactly as a packed sheet does.
+func _save_generated_image() -> void:
+    if _current_generate_image() == null:
+        _set_status("Nothing generated yet.")
+        return
+    _save_kind = SAVE_KIND_GENERATED
+    _save_source = ""
+    # Named for the seed that made it, which is the one thing about a generated picture
+    # worth carrying in its name — it is what makes the picture again.
+    var settings: IWGenerateSettings = _generate.get_settings()
+    _save_dialog.current_file = "generated_%d.png" % settings.seed
+    _save_dialog.popup_centered_ratio(0.6)
+
+
+func _write_generated_image(destination: String) -> void:
+    var made := _current_generate_image()
+    if made == null:
+        return
+    var directory := destination.get_base_dir()
+    if not DirAccess.dir_exists_absolute(directory):
+        if DirAccess.make_dir_recursive_absolute(directory) != OK:
+            _set_status("Could not make %s." % directory)
+            return
+    if made.save_png(destination) != OK:
+        _set_status("Could not write %s." % destination.get_file())
+        return
+    _set_status("Saved %s." % destination.get_file())
+    _set_generate_status("Saved %s." % destination.get_file())
+    if Engine.is_editor_hint():
+        EditorInterface.get_resource_filesystem().scan()
+
+
+# --- The Generate tab's own settings file --------------------------------
+
+## Reads back the description and the sampler settings from last time.
+func _load_generate_config() -> void:
+    if _generate == null or not FileAccess.file_exists(GENERATE_CONFIG_PATH):
+        return
+    var registry := {_generate.get_operation_id(): load(GENERATE_SCRIPT)}
+    var records := SettingsIO.load_stack_from(GENERATE_CONFIG_PATH, registry)
+    for record: Dictionary in records:
+        if record["id"] == _generate.get_operation_id():
+            _generate.set_settings(record["settings"])
+            return
+
+
+func _schedule_generate_save() -> void:
+    if _shutting_down or _generate_save == null:
+        return
+    _generate_save.start()
+
+
+func _flush_generate_save() -> void:
+    if _generate_save != null:
+        _generate_save.stop()
+    if _generate == null:
+        return
+    DirAccess.make_dir_recursive_absolute(GENERATE_CONFIG_PATH.get_base_dir())
+    var records := [{
+        "id": _generate.get_operation_id(),
+        "enabled": true,
+        "folded": false,
+        "settings": _generate.get_settings(),
+    }]
+    if SettingsIO.save_stack_to(GENERATE_CONFIG_PATH, records) != OK:
+        push_warning("Image Wrangler: could not write %s." % GENERATE_CONFIG_PATH)
 
 
 ## Asks for the normal map shortly, for a change that only the map reads.
@@ -5323,15 +5874,24 @@ func _update_preview_texture() -> void:
         # sprite ends and the next begins — which is the one thing a packed sheet cannot be
         # read off itself.
         _preview.set_tile_bounds(_packing_rects if _packing_image != null else [])
+        # The pivots sit on those rectangles, so a sheet that moved them moves these.
+        _update_pivot_overlay()
         return
     # Every other tab clears them, since a sheet's tiles mean nothing on another image and
     # the preview is the same control throughout.
     _preview.set_tile_bounds([])
+    _update_pivot_overlay()
     # Upscale shows what it made, and no original underneath: the result is a different
     # size from the source, so there is nothing for the fade slider to lay one over the
     # other — it would be comparing two pictures that do not line up.
     if _mode == Mode.UPSCALE:
         _preview.set_image(_upscale_image if _upscale_source == _source_image else null)
+        _preview.set_original(null)
+        return
+    # No original underneath: nothing was made from anything, so the fade slider has no
+    # second picture to lay over the first.
+    if _mode == Mode.GENERATE:
+        _preview.set_image(_current_generate_image())
         _preview.set_original(null)
         return
     if _source_image == null:
@@ -5457,9 +6017,23 @@ func _update_controls() -> void:
     # writes the sheet and Save All has nothing to mean. Disabled rather than hidden: a
     # button that comes and goes with a tab reads as a bug in the layout, where a dead one
     # reads as "not from here".
+    # Nothing to put a pivot on until there is a sheet with sprites on it.
+    if _pivot_view != null:
+        _pivot_view.set_controls_enabled(not _packing_rects.is_empty())
     if _mode == Mode.PACKING:
         _process_selected_button.disabled = _packing_image == null
         _process_all_button.disabled = true
+        return
+    # One picture, made from nothing and not a file from the list — so Save Current writes
+    # it and Save All has nothing to mean. The same shape as Packing.
+    if _mode == Mode.GENERATE:
+        _process_selected_button.disabled = _current_generate_image() == null
+        _process_all_button.disabled = true
+        if _generate_button != null:
+            _generate_button.disabled = _generate_running or _comfy == null \
+                    or _comfy.state() == ComfyServer.State.OFFLINE \
+                    or _generate == null or not _generate.has_catalogue()
+            _generate_button.text = "Generating..." if _generate_running else "Generate"
         return
     # Upscale is the other way round: every image comes out as its own file, so both
     # buttons mean what they mean everywhere else. They only stand down when nothing they
@@ -5482,6 +6056,9 @@ func _on_process_selected() -> void:
     if _mode == Mode.PACKING:
         _save_packed_sheet()
         return
+    if _mode == Mode.GENERATE:
+        _save_generated_image()
+        return
     var index := _selected_index()
     if index < 0:
         return
@@ -5493,11 +6070,16 @@ func _on_process_selected() -> void:
 
 
 func _on_save_file_chosen(destination: String) -> void:
-    # The sheet is not one of the sources and has nothing to be processed from, so it
-    # takes the short way out rather than through the job list below.
-    if _saving_sheet:
-        _saving_sheet = false
+    # Neither the sheet nor a generated picture is one of the sources, and neither has
+    # anything to be processed from, so both take the short way out rather than going
+    # through the job list below.
+    var kind := _save_kind
+    _save_kind = &""
+    if kind == SAVE_KIND_SHEET:
         _write_packed_sheet(destination)
+        return
+    if kind == SAVE_KIND_GENERATED:
+        _write_generated_image(destination)
         return
     var source := _save_source
     _save_source = ""
@@ -5519,7 +6101,7 @@ func _save_packed_sheet() -> void:
     if _packing_image == null or _sources.is_empty():
         _set_status("Nothing packed yet.")
         return
-    _saving_sheet = true
+    _save_kind = SAVE_KIND_SHEET
     _save_source = ""
     var first := _sources[0]
     _save_dialog.current_dir = first.get_base_dir()
@@ -5595,7 +6177,9 @@ func _write_lookup_table(sheet_path: String) -> String:
     if _packing_rects.is_empty():
         return ""
     var destination := IWPacking.lookup_path_for(sheet_path)
-    var table := IWPacking.build_lookup_texture(_packing_rects)
+    var settings: PackingSettings = _packing.get_settings() if _packing != null else null
+    var table := IWPacking.build_lookup_texture(_packing_rects,
+            settings.pivots if settings != null else null)
     if ResourceSaver.save(table, destination) != OK:
         return ""
     return destination.get_file()

@@ -608,17 +608,21 @@ static func lookup_size(count: int) -> Vector2i:
 ## alpha a unit vector for which way it points. Everything is in sheet pixels rather than
 ## normalized — divide by the sheet's size in the shader if UVs are what is wanted.
 ##
-## Until the pivot editor exists, every pivot is the middle of its rectangle pointing
-## [code](0, 1)[/code].
+## [param pivots] is what the Pivots section on the Export tab holds, or null for none. A
+## sprite it says nothing about takes the middle of its rectangle facing [constant
+## Pivot.DEFAULT_DIRECTION].
 ##
 ## [b]RGBAF, so the numbers survive.[/b] A coordinate on a 2048-wide sheet needs more than
 ## the 256 steps a byte per channel gives, and full floats hold a whole pixel count exactly
 ## with nothing to unpack at the other end. A sprite that was not placed keeps both pixels
 ## at zero — no area, and a pivot direction of no length — as does everything past the
 ## last sprite.
-static func build_lookup_image(rects: Array) -> Image:
+static func build_lookup_image(rects: Array, pivots: PivotList = null) -> Image:
     var size := lookup_size(rects.size())
     var image := Image.create_empty(size.x, size.y, false, Image.FORMAT_RGBAF)
+    var resolved: Array = (pivots if pivots != null else PivotList.new()).resolve(rects)
+    var positions: PackedVector2Array = resolved[0]
+    var directions: PackedVector2Array = resolved[1]
     for i in rects.size():
         var rect: Rect2i = rects[i]
         if rect.size.x <= 0 or rect.size.y <= 0:
@@ -628,8 +632,8 @@ static func build_lookup_image(rects: Array) -> Image:
         var at := Vector2i(base % size.x, base / size.x)
         image.set_pixel(at.x, at.y,
                 Color(rect.position.x, rect.position.y, rect.size.x, rect.size.y))
-        var pivot := Vector2(rect.position) + Vector2(rect.size) * 0.5
-        image.set_pixel(at.x + 1, at.y, Color(pivot.x, pivot.y, 0.0, 1.0))
+        image.set_pixel(at.x + 1, at.y, Color(positions[i].x, positions[i].y,
+                directions[i].x, directions[i].y))
     return image
 
 
@@ -639,8 +643,8 @@ static func build_lookup_image(rects: Array) -> Image:
 ## a shader's texture slot — and saved as a binary [code].res[/code], which keeps the float
 ## format exactly. A PNG could not: the image importer only ever hands back bytes, and
 ## Detect 3D would quietly re-compress it the first time a 3D material touched it.
-static func build_lookup_texture(rects: Array) -> ImageTexture:
-    return ImageTexture.create_from_image(build_lookup_image(rects))
+static func build_lookup_texture(rects: Array, pivots: PivotList = null) -> ImageTexture:
+    return ImageTexture.create_from_image(build_lookup_image(rects, pivots))
 
 
 # --- The normal map ------------------------------------------------------

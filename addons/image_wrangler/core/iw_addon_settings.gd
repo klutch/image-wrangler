@@ -24,6 +24,9 @@ const PATH := "user://image_wrangler/settings.json"
 ## The folder the last successful Add came from. See [method last_add_dir].
 const KEY_ADD_DIR := "add_dir"
 
+## Where the Generate tab looks for a ComfyUI server. See [method comfy_url].
+const KEY_COMFY_URL := "comfy_url"
+
 ## How the file is indented. Spaces rather than a tab, to match everything else here.
 const INDENT := "    "
 
@@ -91,3 +94,16 @@ static func last_add_dir() -> String:
 static func set_last_add_dir(dir: String) -> void:
     if not dir.is_empty():
         set_value(KEY_ADD_DIR, dir)
+
+
+## Where the Generate tab looks for a ComfyUI server.
+##
+## A machine belongs here rather than in any settings file that travels: the address is
+## about this computer, and a project opened somewhere else has its own answer.
+static func comfy_url() -> String:
+    var url := String(get_value(KEY_COMFY_URL, "")).strip_edges()
+    return url if not url.is_empty() else IWComfyServer.DEFAULT_URL
+
+
+static func set_comfy_url(url: String) -> void:
+    set_value(KEY_COMFY_URL, url.strip_edges())

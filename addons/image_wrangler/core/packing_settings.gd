@@ -66,11 +66,25 @@ extends Resource
 ## applied once to the finished stack. See [method IWPacking.build_normal_map].
 @export var normal_green_down: bool = false
 
+## Pivots set by hand on the sheet, one entry per sprite that was edited. See [PivotList].
+##
+## Only the lookup table reads these — a pivot changes nothing about the pixels. Sprites
+## with no entry take the middle of their rectangle facing [constant
+## Pivot.DEFAULT_DIRECTION].
+@export var pivots: PivotList
+
+
+func _init() -> void:
+    pivots = PivotList.new()
+
 
 ## A copy that belongs to no image.
 ##
-## Nothing here is a coordinate, so the plain duplicate is the whole of it — but this is
-## never actually asked for, since the packing settings describe the batch rather than any
-## one image. It is here because the dock's codec walks every settings Resource alike.
+## The pivots are the one part that is coordinates, and they are copied rather than shared
+## so the two settings cannot edit each other's. This is never actually asked for, since the
+## packing settings describe the batch rather than any one image. It is here because the
+## dock's codec walks every settings Resource alike.
 func duplicate_for_new_image() -> PackingSettings:
-    return duplicate()
+    var copy: PackingSettings = duplicate()
+    copy.pivots = pivots.duplicate_pivots() if pivots != null else PivotList.new()
+    return copy
