@@ -180,8 +180,22 @@ def main():
     if not os.path.isfile(os.path.join(NCNN_SOURCE, "CMakeLists.txt")):
         raise SystemExit(
                 "No ncnn source at %s.\n"
-                "It is committed to this repository rather than fetched, so this means the\n"
-                "checkout is incomplete." % NCNN_SOURCE)
+                "\n"
+                "It is not part of this addon: it is a thousand files that only somebody\n"
+                "rebuilding the extension needs, and the built DLLs in bin/ already have it\n"
+                "linked in. Put it there yourself to build it.\n"
+                "\n"
+                "  git clone --depth 1 --branch 20250916 --recurse-submodules \\\n"
+                "      https://github.com/Tencent/ncnn.git \\\n"
+                "      \"%s\"\n"
+                "\n"
+                "Version 20250916 is what the committed DLLs were built against, and\n"
+                "--recurse-submodules matters: glslang is one, and ncnn does not build\n"
+                "without it.\n"
+                "\n"
+                "Skipping this is fine. SConstruct leaves the Upscale tab and both neural\n"
+                "stages out and says so; everything else builds."
+                % (NCNN_SOURCE, NCNN_SOURCE))
 
     if shutil.which("cmake") is None:
         raise SystemExit("CMake is not on PATH. Install it from https://cmake.org/download/")

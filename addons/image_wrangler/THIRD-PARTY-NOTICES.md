@@ -1,9 +1,13 @@
 # Third-party notices
 
-Image Wrangler itself is MIT licensed — see `LICENSE`. It also ships or links against the
-components below, each under its own permissive licence. None of them place any condition
-on the licence of Image Wrangler's own code; all they ask is that these notices travel
-with the binaries.
+Image Wrangler itself is MIT licensed — see `LICENSE`. It also ships, downloads or links
+against the components below, each under its own permissive licence. None of them place any
+condition on the licence of Image Wrangler's own code; all they ask is that these notices
+travel with the binaries.
+
+Some components are fetched on demand rather than committed: the Open Image Denoise runtime
+and the trained models. **Their licence texts are committed here regardless**, so this file
+and everything it points at are complete whether or not those downloads have been done.
 
 If you redistribute this addon, keep this file and the licence texts it points at. Every
 path below is relative to this folder, which is self-contained: copying it into another
@@ -13,7 +17,8 @@ Godot project brings the notices along with the binaries they cover.
 
 Copyright Intel Corporation.
 
-Used by the Denoise stage. Shipped unmodified as prebuilt binaries in `bin/`:
+Used by the Denoise stage. Downloaded unmodified as prebuilt binaries into `bin/`, by the
+button on that stage's card:
 
 - `OpenImageDenoise.dll`
 - `OpenImageDenoise_core.dll` (includes the pretrained CNN weights, also Apache-2.0)
@@ -33,7 +38,7 @@ links against the import library in `thirdparty/oidn/lib/`. See
 Copyright Intel Corporation.
 
 A runtime dependency of Open Image Denoise's CPU device, not used directly by Image
-Wrangler. Shipped unmodified in `bin/`:
+Wrangler. Arrives unmodified in `bin/` with it, out of the same archive:
 
 - `tbb12.dll`
 - `tbbbind.dll`, `tbbbind_2_0.dll`, `tbbbind_2_5.dll`
@@ -78,15 +83,16 @@ does not fail to load; it crashes partway through, with nothing said about why.
 
 Past that, `src/iw_waifu2x.cpp` calls the `Waifu2x` class and reimplements the two decisions
 its command-line front end makes — which model file a noise level and ratio resolve to, and
-how a ratio above 2 is reached. See `thirdparty/waifu2x-ncnn-vulkan/README-vendored.md`.
+how a ratio above 2 is reached.
 
 ## waifu2x trained models — MIT
 
 Copyright (C) 2015 nagadomi.
 
-The models in `thirdparty/waifu2x-ncnn-vulkan/models/` are read at runtime and ship as they
-came. They are the waifu2x project's rather than the ncnn port's, and a different author's —
-so they have their own text, beside them:
+Downloaded unmodified into `thirdparty/waifu2x-ncnn-vulkan/models/` by the Upscale tab, and
+read from there at runtime. They are the waifu2x project's rather than the ncnn port's, and
+a different author's — so they have their own text, which stays committed beside them
+whether or not the models are there:
 
 Licence text: `thirdparty/waifu2x-ncnn-vulkan/models/LICENSE`
 
@@ -115,9 +121,10 @@ was added, which upstream has none of. Every change is marked in the source with
 
 Copyright (c) 2021, Xintao Wang. All rights reserved.
 
-The models in `thirdparty/realesrgan-ncnn-vulkan/models/` are read at runtime and ship as
-they came. They are the Real-ESRGAN project's rather than the ncnn wrapper's, and carry a
-different licence to it — so they have their own text, beside them:
+Downloaded unmodified into `thirdparty/realesrgan-ncnn-vulkan/models/` by the Upscale tab,
+and read from there at runtime. They are the Real-ESRGAN project's rather than the ncnn
+wrapper's, and carry a different licence to it — so they have their own text, which stays
+committed beside them whether or not the models are there:
 
 Licence text: `thirdparty/realesrgan-ncnn-vulkan/models/LICENSE`
 
@@ -127,11 +134,12 @@ Source: <https://github.com/xinntao/Real-ESRGAN>
 
 Copyright (C) 2017 Tencent. All rights reserved.
 
-The neural network inference library underneath both upscalers, built from source by
-`tools/build_ncnn.py` and linked statically into `image_wrangler.windows.*.dll`. Not called
-directly by this addon.
+The neural network inference library underneath both upscalers and both neural stages,
+linked statically into `image_wrangler.windows.*.dll`. Not called directly by this addon.
+Version `20250916`. Its source is not part of this addon; `tools/build_ncnn.py` builds it
+when you supply it.
 
-Licence text: `thirdparty/waifu2x-ncnn-vulkan/src/ncnn/LICENSE.txt`, which also lists the
+Licence text: `thirdparty/ncnn-licenses/ncnn-LICENSE.txt`, which also lists the
 third-party components inside ncnn and their own terms.
 
 Source: <https://github.com/Tencent/ncnn>
@@ -141,11 +149,11 @@ Source: <https://github.com/Tencent/ncnn>
 Copyright (c) 2002-2005 3Dlabs Inc. Ltd., and others.
 
 Bundled inside ncnn, which uses it to compile its shaders — and both upscalers' pre- and
-post-processing shaders — to SPIR-V at runtime. Linked
-statically into `image_wrangler.windows.*.dll`. Not called directly by this addon.
+post-processing shaders — to SPIR-V at runtime. Linked statically into
+`image_wrangler.windows.*.dll`. Not called directly by this addon. Version 15.3.0.
 
-Licence text: `thirdparty/waifu2x-ncnn-vulkan/src/ncnn/glslang/LICENSE.txt`, which covers
-several licences — the file lists which applies to what.
+Licence text: `thirdparty/ncnn-licenses/glslang-LICENSE.txt`, which covers several
+licences — the file lists which applies to what.
 
 Source: <https://github.com/KhronosGroup/glslang>
 

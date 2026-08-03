@@ -79,17 +79,18 @@ one pass, so no stage sees a half-finished image. The Add dropdown lists them al
 | Operation | What it does |
 |:--|:--|
 | **Brush Edit** | Paints alpha up or down along strokes dragged over the preview. |
-| **Denoise** | Runs Intel Open Image Denoise over the source. Lifts grain and compression noise, leaving edges where it found them. |
+| **Denoise** | Runs Intel Open Image Denoise over the source. Lifts grain and compression noise, leaving edges where it found them. Needs its runtime fetched once — see [First run](#first-run). |
 | **Edge Cleanup** | Restores antialiasing on an edge that came back hard, and can outline it. |
 | **Exclude Tiles** | Click whole objects to hold them back, or to keep only those. |
 | **Fill Pinholes** | Closes small transparent specks inside a subject, matching each to its surroundings. |
 | **HSV Adjustment** | Pick rectangles off the preview. Each gets its own hue, saturation and value sliders. Regions may overlap. |
-| **Island Picker** | Click a region to remove or protect it, one at a time. For patches no colour rule can single out. |
+| **Matte Remove Background** | Recovers per-pixel coverage from an antialiased edge instead of thresholding it, so the silhouette stays soft rather than fringed or jagged. Keys off a flat background colour. |
+| **Neural Remove Background** | Hands the image to a trained network and lets it decide what is subject. Reaches background the colour key cannot: enclosed areas, and subjects too close in colour to the background. Needs a model — see [First run](#first-run). |
 | **Polygon Edit** | Draw a shape and force everything inside it transparent or opaque. For watermarks and scan edges. |
 | **Posterize** | Cuts the image down to a small set of colours, either an even ladder or the best colours found in the picture — one palette per object by default, so a sheet of unrelated sprites does not average into one muddy set. Optional Floyd-Steinberg dither. |
 | **Random HSV Tiles** | Finds every separate object and gives each a random colour. |
 | **Refine Edges** | A guided filter that tidies alpha while following the picture's own edges. No softening. |
-| **Remove Background** | Recovers per-pixel coverage from an antialiased edge instead of thresholding it, so the silhouette stays soft rather than fringed or jagged. |
+| **Remove Colors** | Drag a rectangle over the preview and every pixel in it seeds a flood through nearby colours. Removes what it reaches, or forces it opaque. For patches no colour rule can single out — an area enclosed by the subject, or one a loose tolerance ate. |
 | **Remove Crevice** | Squeezes background into nooks too narrow for the flood fill to reach. |
 | **Remove Lines** | Erases anything too thin to be real — hairlines, scan borders, leftover grid rules. |
 | **Remove Minimum Area** | Removes every separate shape below a given area. Keyer crumbs are rarely thin, just small. |
@@ -140,7 +141,7 @@ made.
 | **Round Edges** | Rounds each sprite off from its outline inwards. The silhouette only, so a flat shape comes out looking carved. |
 | **Color Regions** | The same rounding, plus every colour boundary inside the sprite, so each flat area of colour lifts on its own. |
 | **Brightness** | Reads the sprite's own light and dark as high and low. Picks up line work and large form. |
-| **Neural** | Hands each sprite to a trained network. Needs a ncnn-compatible model. Tested using [deepbump-ncnn](https://github.com/klutch/deepbump-ncnn). |
+| **Neural** | Hands each sprite to a trained network. Needs a ncnn-compatible model — see [First run](#first-run). Tested using [deepbump-ncnn](https://github.com/klutch/deepbump-ncnn). |
 
 Four switches act on the whole map rather than one generator. **Green Points Down** flips
 the green channel for DirectX-style engines; off is what Godot wants. **Show Normal Map**
@@ -149,8 +150,8 @@ outermost rim with the shape found just inside it, as deep as **Inner Reach** sa
 
 > [!TIP]
 > **Getting the Neural model.** Add a Neural generator and press **Download Latest Model**.
-> It fetches the model, about thirteen megabytes, and unpacks it into the folder named
-> above the button. It can also be downloaded by hand from
+> It fetches about thirteen megabytes and unpacks it into the folder named above the button.
+> It can also be downloaded by hand from
 > [deepbump-ncnn](https://github.com/klutch/deepbump-ncnn), with the folder pointed
 > at wherever you put it.
 
@@ -175,6 +176,11 @@ guessed at.
 Alpha survives: it rides across on a bicubic resize beside the network, so a keyed sprite
 comes out keyed. **Sharpen** tidies the ramp that leaves behind and costs nothing to
 adjust, since it works on the finished picture rather than running the network again.
+
+> [!TIP]
+> **Getting the models.** Pick an engine and press **Download Latest Model** under the Model
+> dropdown. 32 MB for waifu2x, 43 MB for Real-ESRGAN, fetched from their own projects.
+> Each engine has its own button; fetching one does not fetch the other.
 
 ---
 
@@ -204,6 +210,22 @@ adjust, since it works on the finished picture rather than running the network a
 2. In Godot, open **Project → Project Settings → Plugins** and tick **Image Wrangler**.
 3. An **Image Wrangler** tab appears in the editor.
 
+### First run
+
+Four features run on trained models or a separate runtime, and none of those ship with the
+addon — together they are around 145 MB, most of which most projects never need. Each is
+fetched by one button, in the place it is used, and only when you ask for it.
+
+| Feature | Button | Download |
+|:--|:--|:--|
+| **Denoise** operation | Download Runtime | 56 MB |
+| **Upscale** tab, per engine | Download Latest Model | 32 MB waifu2x, 43 MB Real-ESRGAN |
+| **Neural** normal map generator | Download Latest Model | 13 MB |
+| **Neural Remove Background** operation | — | convert a model yourself; the folder's README has the recipe |
+
+Everything else works straight away. A feature whose files are missing says so on its own
+card and leaves the rest of the addon alone.
+
 ### Requirements
 
 - **Godot 4.7 or newer**
@@ -212,25 +234,39 @@ adjust, since it works on the finished picture rather than running the network a
   `godot-cpp` submodule checked out).
 
 > [!NOTE]
-> **No GPU is needed.** A Vulkan driver only makes two things faster: the Upscale tab and
-> the Neural normal map generator. Without one both still run on the processor. Upscale
-> takes minutes rather than seconds and says so on the tab; the Neural generator slows down
-> without comment. Everything else is processor-only to begin with.
+> **No GPU is needed.** A Vulkan driver only makes the network-backed features faster: the
+> Upscale tab, the Neural normal map generator, and Neural Remove Background. Without one
+> they still run on the processor. Upscale takes minutes rather than seconds and says so on
+> the tab; the other two slow down without comment. Everything else is processor-only to
+> begin with, Denoise included.
 
-Building the extension needs one step before `scons`, because the inference library the
-upscalers and the Neural generator run on ships as source rather than binaries. That source
-is committed here, so a plain clone already has it:
+### Building from source
+
+Only needed to change the C++ or to target another platform. The DLLs in
+`addons/image_wrangler/bin/` are already built with everything in.
 
 ```sh
+git submodule update --init --recursive     # godot-cpp
 cd addons/image_wrangler
-python tools/build_ncnn.py     # once, needs CMake
 scons target=editor
 ```
 
-Skip it and everything still builds. The Upscale tab says what to run, and the Neural
-generator stays out of its dropdown. The other three generators need none of this. See
-[`thirdparty/waifu2x-ncnn-vulkan/README-vendored.md`](addons/image_wrangler/thirdparty/waifu2x-ncnn-vulkan/README-vendored.md)
-and [`thirdparty/realesrgan-ncnn-vulkan/README-vendored.md`](addons/image_wrangler/thirdparty/realesrgan-ncnn-vulkan/README-vendored.md).
+**That build leaves out the Upscale tab and both Neural features.** They run on ncnn, which
+is a CMake project built separately into `thirdparty/ncnn/`, and neither that build nor its
+source is in the repository. `scons` notices, says so, and produces a working extension
+without them.
+
+To include them, put ncnn's source at `thirdparty/waifu2x-ncnn-vulkan/src/ncnn/` — version
+`20250916` is what the committed DLLs were built against — then:
+
+```sh
+python tools/build_ncnn.py     # once, needs CMake; expect around twenty minutes
+scons target=editor
+```
+
+The Vulkan SDK is not needed; ncnn resolves the driver by name at runtime. See
+[`thirdparty/realesrgan-ncnn-vulkan/README-vendored.md`](addons/image_wrangler/thirdparty/realesrgan-ncnn-vulkan/README-vendored.md)
+and [`thirdparty/oidn/README-vendored.md`](addons/image_wrangler/thirdparty/oidn/README-vendored.md).
 
 ---
 
@@ -238,7 +274,9 @@ and [`thirdparty/realesrgan-ncnn-vulkan/README-vendored.md`](addons/image_wrangl
 
 MIT — see [`addons/image_wrangler/LICENSE`](addons/image_wrangler/LICENSE).
 
-Third-party components (Intel Open Image Denoise, oneTBB, waifu2x-ncnn-vulkan and
-Real-ESRGAN-ncnn-vulkan with their trained models, ncnn, glslang, godot-cpp, and the editor
-icon set) carry their own licenses, listed in
-[`addons/image_wrangler/THIRD-PARTY-NOTICES.md`](addons/image_wrangler/THIRD-PARTY-NOTICES.md).
+Third-party components carry their own licenses, listed in
+[`addons/image_wrangler/THIRD-PARTY-NOTICES.md`](addons/image_wrangler/THIRD-PARTY-NOTICES.md):
+Intel Open Image Denoise, oneTBB, waifu2x-ncnn-vulkan, Real-ESRGAN-ncnn-vulkan, ncnn,
+glslang, godot-cpp, and the editor icon set. The trained models and the Open Image Denoise
+runtime are downloaded rather than shipped, and are covered by the same notices — the
+license text for each sits beside where its files land.
