@@ -132,6 +132,24 @@ def ncnn_libraries():
 have_ncnn = os.path.isdir(os.path.join(NCNN_PREFIX, "include", "ncnn")) and ncnn_libraries()
 
 
+def truthy(value):
+    """A command-line flag as a yes or a no. `allow_reduced=no` is a no, not a string."""
+    return str(value).strip().lower() in ("1", "y", "yes", "true", "on")
+
+
+def holds_ncnn(path):
+    """Whether the extension already at [path] was built with the ncnn wrappers in it.
+
+    Read out of the file rather than inferred, because the DLL in bin/ usually came from a
+    checkout rather than from a build here, and nothing else records what went into it.
+    `IWWaifu2x` is registered by one of the wrappers and appears nowhere else.
+    """
+    if not os.path.isfile(path):
+        return False
+    with open(path, "rb") as handle:
+        return b"IWWaifu2x" in handle.read()
+
+
 def preprocess_shader(target, source, env):
     """Turns one .comp into the hex array waifu2x.cpp expects to #include.
 
@@ -227,8 +245,30 @@ if have_ncnn:
 else:
     sources = [source for source in sources
                if os.path.basename(str(source)) not in NCNN_WRAPPERS]
-    print("Image Wrangler: thirdparty/ncnn is not built, so the Upscale tab is left out.")
-    print("               Run `python tools/build_ncnn.py` to build it, then build again.")
+
+    built = "bin/image_wrangler{}{}".format(env["suffix"], env["SHLIBSUFFIX"])
+    if holds_ncnn(built) and not truthy(ARGUMENTS.get("allow_reduced", "no")):
+        raise SCons.Errors.UserError(
+                "This build would replace %s with a smaller one.\n"
+                "\n"
+                "thirdparty/ncnn is not built here, so the Upscale tab, the Neural normal\n"
+                "map generator and Neural Remove Background would all be left out. The DLL\n"
+                "already in bin/ has them, and linking over it is not something to do by\n"
+                "accident.\n"
+                "\n"
+                "To keep them, build ncnn first. It needs ncnn's source, which is not part\n"
+                "of this addon. Run `python tools/build_ncnn.py`, which says where to put\n"
+                "it and why.\n"
+                "\n"
+                "To build without them anyway:\n"
+                "\n"
+                "    scons allow_reduced=yes\n"
+                "\n"
+                "`git checkout %s` puts the committed one back afterwards." % (built, built))
+
+    print("Image Wrangler: thirdparty/ncnn is not built, so the Upscale tab and both")
+    print("                neural stages are left out.")
+    print("                See `python tools/build_ncnn.py`, which says what it needs.")
 
 library = env.SharedLibrary(
     "bin/image_wrangler{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
