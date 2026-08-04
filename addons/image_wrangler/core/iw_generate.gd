@@ -4,9 +4,12 @@ extends IWOperation
 
 ## Makes a new picture from a written description, using a ComfyUI server.
 ##
-## The odd one out among the operations: it takes no image in. Nothing here processes
-## pixels — the settings describe a job, [IWComfyGraph] turns them into a graph, and
-## [IWComfyServer] runs it. See [method transforms_pixels].
+## The odd one out among the operations: nothing here processes pixels. The settings
+## describe a job, [IWComfyGraph] turns them into a graph, and [IWComfyServer] runs it. See
+## [method transforms_pixels].
+##
+## [member IWGenerateSettings.use_source] only records that a run should start from the
+## highlighted image. Fetching and scaling it is the dock's job.
 ##
 ## The dropdowns are filled from whatever the server says it has. Until it has been asked
 ## they are empty, and the tab says why rather than offering a guess.
@@ -193,6 +196,25 @@ func get_settings_schema() -> Array[Dictionary]:
             "tooltip": "The number the noise is made from.\n\nThe same seed with the same settings gives the same picture back. Change one\nword of the description and it will not.",
         },
         {
+            "property": &"use_source",
+            "label": "Start From Selected Image",
+            "type": SettingType.BOOL,
+            "group": "Picture",
+            "tooltip": "Starts the run from the highlighted image instead of from nothing.\n\nIt is sent with its stack already applied, so what goes over is what the other\ntabs show. The result comes back at the size it went in at, whatever the two\nboxes below say.",
+        },
+        {
+            "property": &"denoise",
+            "label": "Change",
+            "type": SettingType.FLOAT,
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.01,
+            "group": "Picture",
+            "shown_when": &"use_source",
+            "shown_values": [true],
+            "tooltip": "How much of the original is thrown away.\n\nAround 0.4 keeps the layout and repaints the surface. Past about 0.8 there is\nlittle of the original left, and at 1 there is none.",
+        },
+        {
             "property": &"width",
             "label": "Width",
             "type": SettingType.INT,
@@ -200,7 +222,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "max": MAX_SIZE,
             "step": IWComfyGraph.SIZE_STEP,
             "group": "Picture",
-            "tooltip": "How wide the picture is, in pixels.\n\nRounded down to a multiple of %d. Models are trained at a size — around 512 for\nthe older ones, 1024 for SDXL — and asking for much more than that gives you\nthe same picture twice in one frame rather than more detail." % IWComfyGraph.SIZE_STEP,
+            "tooltip": "How wide the picture is, in pixels.\n\nRounded down to a multiple of %d. Models are trained at a size — around 512 for\nthe older ones, 1024 for SDXL — and asking for much more than that gives you\nthe same picture twice in one frame rather than more detail.\n\nStarting from a selected image, this is only the size the server works at: the\nsource is scaled to it on the way over and the result is put back on the way\nhome." % IWComfyGraph.SIZE_STEP,
         },
         {
             "property": &"height",

@@ -20,6 +20,9 @@ const DEFAULT_URL := "http://127.0.0.1:8188"
 const ASK_TIMEOUT := 10.0
 const FETCH_TIMEOUT := 60.0
 
+## What separates the parts of an upload. Anything the file itself cannot contain will do.
+const UPLOAD_BOUNDARY := "ImageWranglerUpload"
+
 ## How often the run is asked whether it has finished.
 const POLL_SECONDS := 1.0
 
@@ -177,11 +180,22 @@ func probe() -> void:
         await _fetch_lists()
 
 
+## Where a picture this dock sends lands in the server's input folder.
+##
+## One name, overwritten every run, so a session leaves no pile of copies. The client id is
+## in it so two docks on one server cannot tread on each other.
+func source_filename() -> String:
+    return "%s_source.png" % _client_id()
+
+
 ## Sends a graph and follows it to its end.
+##
+## [param source] is the picture the run starts from, or null for a run from noise. It goes
+## up first, under [method source_filename] — the name the graph must already be using.
 ##
 ## One run at a time. A second press while one is going is refused rather than queued: a
 ## generation costs a minute of graphics card, and nobody asks for two by accident.
-func submit(graph: Dictionary) -> void:
+func submit(graph: Dictionary, source: Image = null) -> void:
     if _shutting_down or _state == State.RUNNING:
         return
     if _state == State.OFFLINE:
@@ -193,6 +207,16 @@ func submit(graph: Dictionary) -> void:
     _prompt_id = ""
     _last_life_msec = Time.get_ticks_msec()
     _set_state(State.RUNNING)
+
+    if source != null:
+        progress.emit(-1.0, "Sending the picture")
+        var upload_trouble := await _upload_source(source)
+        if _stale(run):
+            return
+        if not upload_trouble.is_empty():
+            _end_run(upload_trouble)
+            return
+
     progress.emit(-1.0, "Sending the job")
 
     # Opened before the job is sent rather than after, so the frames for its first steps
@@ -507,27 +531,61 @@ static func _options_of(node: Dictionary, input: String) -> Array:
     return first if first is Array else []
 
 
+# --- Sending a picture ---------------------------------------------------
+
+## Puts [param image] in the server's input folder. Returns why it could not, or empty.
+func _upload_source(image: Image) -> String:
+    var png := image.save_png_to_buffer()
+    if png.is_empty():
+        return "Could not encode the picture to send."
+    var headers := PackedStringArray([
+        "Content-Type: multipart/form-data; boundary=%s" % UPLOAD_BOUNDARY])
+    # The picture timeout, since this is megabytes going the other way.
+    var reply := await _request(_url + "/upload/image", FETCH_TIMEOUT,
+            HTTPClient.METHOD_POST, _upload_body(png, source_filename()), headers, false)
+    if not reply["ok"]:
+        return "Could not send the picture. %s" % reply["note"]
+    return ""
+
+
+## The upload's body: the file, then the flag that lets it land on last run's copy.
+static func _upload_body(png: PackedByteArray, filename: String) -> PackedByteArray:
+    var head := "--%s\r\nContent-Disposition: form-data; name=\"image\"; filename=\"%s\"\r\nContent-Type: image/png\r\n\r\n" % [UPLOAD_BOUNDARY, filename]
+    var tail := "\r\n--%s\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n--%s--\r\n" % [UPLOAD_BOUNDARY, UPLOAD_BOUNDARY]
+    var body := head.to_utf8_buffer()
+    body.append_array(png)
+    body.append_array(tail.to_utf8_buffer())
+    return body
+
+
 # --- Requests ------------------------------------------------------------
 
 ## Named [code]_ask[/code] rather than the obvious thing: [code]_get[/code] is [Object]'s
 ## own property hook, and overriding it with another signature will not compile.
 func _ask(url: String, timeout: float, want_bytes := false) -> Dictionary:
-    return await _request(url, timeout, HTTPClient.METHOD_GET, "", want_bytes)
+    return await _request(url, timeout, HTTPClient.METHOD_GET, PackedByteArray(),
+            PackedStringArray(), want_bytes)
 
 
 func _send(url: String, body: String, timeout: float) -> Dictionary:
-    return await _request(url, timeout, HTTPClient.METHOD_POST, body, false)
+    var headers := PackedStringArray()
+    if not body.is_empty():
+        headers.append("Content-Type: application/json")
+    return await _request(url, timeout, HTTPClient.METHOD_POST, body.to_utf8_buffer(),
+            headers, false)
 
 
 ## One request, made and thrown away. Returns [code]ok[/code], [code]code[/code],
 ## [code]json[/code], [code]body[/code] and a [code]note[/code] fit for a status line.
 ##
+## The body is bytes rather than text, because an upload is a PNG.
+##
 ## A node each rather than one reused: an [HTTPRequest] carries one request at a time, and
 ## a probe landing on the same node as a run in flight would take the run's reply. These
 ## are paced by the user rather than by the frame, so a node per call costs nothing worth
 ## saving.
-func _request(url: String, timeout: float, method: int, body: String,
-        want_bytes: bool) -> Dictionary:
+func _request(url: String, timeout: float, method: int, body: PackedByteArray,
+        headers: PackedStringArray, want_bytes: bool) -> Dictionary:
     if _shutting_down or not is_inside_tree():
         return {"ok": false, "code": 0, "json": null, "body": PackedByteArray(),
                 "note": "The dock is closing."}
@@ -538,10 +596,7 @@ func _request(url: String, timeout: float, method: int, body: String,
     http.use_threads = true
     add_child(http)
 
-    var headers := PackedStringArray()
-    if not body.is_empty():
-        headers.append("Content-Type: application/json")
-    var error := http.request(url, headers, method, body)
+    var error := http.request_raw(url, headers, method, body)
     if error != OK:
         http.queue_free()
         return {"ok": false, "code": 0, "json": null, "body": PackedByteArray(),

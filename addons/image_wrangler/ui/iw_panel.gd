@@ -397,6 +397,13 @@ var _generate_index := 0
 ## button and the busy overlay both follow it and the server is null while the dock builds.
 var _generate_running := false
 
+## What size the picture a run started from was, before it was scaled to what the server
+## works at. Zero for a run from noise.
+##
+## What comes back is put back to this, so a result lands on top of its source rather than
+## at whatever size the form said.
+var _generate_source_size := Vector2i.ZERO
+
 ## The sheet Packing last built, shown in the viewport while its tab is up.
 ##
 ## Null until the button is pressed. Packing is not a preview that follows what you type —
@@ -4984,6 +4991,12 @@ func _on_comfy_finished(images: Array) -> void:
     _generate_running = false
     if _preview != null:
         _preview.set_busy(false)
+    # Back to the size it came from, whatever the server was asked to work at.
+    if _generate_source_size != Vector2i.ZERO:
+        for image: Image in images:
+            if image.get_size() != _generate_source_size:
+                image.resize(_generate_source_size.x, _generate_source_size.y,
+                        Image.INTERPOLATE_LANCZOS)
     _generate_images.assign(images)
     _generate_index = 0
     var made := _current_generate_image()
@@ -5041,10 +5054,19 @@ func _run_generate() -> void:
         _set_generate_status("Not connected to ComfyUI. Set the address above and press Connect.")
         return
     var settings: IWGenerateSettings = _generate.get_settings()
-    var trouble := IWComfyGraph.trouble(settings)
+    var trouble := IWComfyGraph.trouble(settings, _source_image != null)
     if not trouble.is_empty():
         _set_generate_status(trouble)
         return
+
+    # Before the seed is drawn, so a source that could not be read costs nothing.
+    var source: Image = null
+    _generate_source_size = Vector2i.ZERO
+    if settings.use_source:
+        source = _generate_source(settings)
+        if source == null:
+            _set_generate_status("Could not process %s to send." % _current_path().get_file())
+            return
 
     # Drawn here rather than by the server, and written back, so the number that made the
     # picture on screen is the one sitting in the box.
@@ -5059,7 +5081,28 @@ func _run_generate() -> void:
     if _preview != null:
         _preview.set_busy(true)
     _update_controls()
-    _comfy.submit(IWComfyGraph.build(settings, seed_value))
+    var source_name := _comfy.source_filename() if source != null else ""
+    _comfy.submit(IWComfyGraph.build(settings, seed_value, source_name), source)
+
+
+## The highlighted image with its stack applied, scaled to what the server works at, or
+## null when it could not be processed.
+##
+## The size before that scaling is left in [member _generate_source_size].
+func _generate_source(settings: IWGenerateSettings) -> Image:
+    if _source_image == null:
+        return null
+    var processed := _processed_image(_current_path(), _source_image)
+    if processed == null:
+        return null
+    _generate_source_size = processed.get_size()
+    var working := IWComfyGraph.working_size(settings)
+    if processed.get_size() == working:
+        return processed
+    # A copy: an empty stack hands back the source's own pixels.
+    var scaled := processed.duplicate() as Image
+    scaled.resize(working.x, working.y, Image.INTERPOLATE_LANCZOS)
+    return scaled
 
 
 ## Asks where to put the picture. It is not one of the sources, so it goes the short way,

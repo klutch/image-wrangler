@@ -44,7 +44,12 @@ extends Resource
 ## [member seed], so the picture on screen can always be made again.
 @export var randomize_seed: bool = true
 
-## How big the picture is, in pixels. Multiples of [constant IWComfyGraph.SIZE_STEP].
+## Whether the run starts from the highlighted image, with its stack applied, rather than
+## from noise. [member denoise] decides how much of it survives.
+@export var use_source: bool = false
+
+## How big the picture is, in pixels. Multiples of [constant IWComfyGraph.SIZE_STEP], and
+## only the size the server works at when [member use_source] is on.
 @export var width: int = 1024
 @export var height: int = 1024
 
