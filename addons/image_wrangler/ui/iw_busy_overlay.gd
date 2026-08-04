@@ -43,6 +43,19 @@ const SPIN_SWEEP := 0.28
 ## weight would leave the user working out which is which every time they looked.
 const STAGE_FILL_DARKEN := 0.35
 
+## The byte that opens a terminal control sequence.
+const ESC := "\u001b"
+
+## The sixteen classic terminal colours, dim then bright, keyed by their code.
+## Picked to read on the dark panel rather than to match any one terminal — which is
+## why "black" comes out grey.
+const ANSI_COLORS := {
+    30: "808080", 31: "ff5c57", 32: "5af78e", 33: "f3f99d",
+    34: "57c7ff", 35: "ff6ac1", 36: "9aedfe", 37: "f1f1f0",
+    90: "7f8c98", 91: "ff5c57", 92: "5af78e", 93: "f3f99d",
+    94: "57c7ff", 95: "ff6ac1", 96: "9aedfe", 97: "ffffff",
+}
+
 ## Room the panel and its padding claim around the contents, for the fit below.
 const EDGE_ROOM := 60.0
 
@@ -180,10 +193,13 @@ func set_stage_progress(fraction: float, label: String) -> void:
 
 
 ## Adds [param text] to the lines under the bars, keeping the newest few.
+##
+## Each line becomes bbcode on the way in: terminal colour codes turn into tags, and
+## literal brackets are escaped so a raw line shows exactly as it was printed.
 func append_log(text: String) -> void:
     _bind()
     for line: String in text.split("\n", false):
-        _log.append(line)
+        _log.append(_line_to_bbcode(line))
     while _log.size() > LOG_LINES:
         _log.remove_at(0)
     _log_label.text = "\n".join(_log)
@@ -237,6 +253,83 @@ func _fit() -> void:
         taken += _log_label.get_combined_minimum_size().y + 10.0
     var ring := clampf(minf(room.x, room.y - taken), 0.0, RING_SIZE)
     _spinner.custom_minimum_size = Vector2(ring, ring)
+
+
+## One line of terminal output as bbcode.
+##
+## Colour codes become tags; every other control sequence is stripped; literal
+## brackets in the text become [lb] so they show as themselves. Whatever a code left
+## open is closed at the end of the line, so a colour the server never reset cannot
+## bleed down the list.
+static func _line_to_bbcode(line: String) -> String:
+    var out := ""
+    var closers := PackedStringArray()
+    var i := 0
+    while i < line.length():
+        var esc := line.find(ESC, i)
+        if esc < 0:
+            out += line.substr(i).replace("[", "[lb]")
+            break
+        out += line.substr(i, esc - i).replace("[", "[lb]")
+        i = esc + 1
+        if i >= line.length() or line[i] != "[":
+            continue
+        # Walk the sequence to its final byte. Only "m" — a style — means anything here.
+        var end := i + 1
+        while end < line.length() \
+                and (line.unicode_at(end) < 0x40 or line.unicode_at(end) > 0x7e):
+            end += 1
+        if end < line.length() and line[end] == "m":
+            out += _sgr_to_tags(line.substr(i + 1, end - i - 1), closers)
+        i = end + 1
+    for j in range(closers.size() - 1, -1, -1):
+        out += closers[j]
+    return out
+
+
+## The numbers of one style sequence, turned into tags. What they open goes onto
+## [param closers], newest last, so the caller can close it all in order.
+##
+## Handles reset, bold, italic, underline, the sixteen classic colours and a direct
+## r;g;b foreground. The palette kinds are swallowed rather than half-read, so their
+## numbers cannot be mistaken for more codes.
+static func _sgr_to_tags(params: String, closers: PackedStringArray) -> String:
+    var out := ""
+    var codes := params.split(";")
+    var at := 0
+    while at < codes.size():
+        # An empty slot means zero, which is how a bare reset arrives.
+        var code := int(codes[at])
+        at += 1
+        if code == 0:
+            for j in range(closers.size() - 1, -1, -1):
+                out += closers[j]
+            closers.clear()
+        elif code == 1:
+            out += "[b]"
+            closers.append("[/b]")
+        elif code == 3:
+            out += "[i]"
+            closers.append("[/i]")
+        elif code == 4:
+            out += "[u]"
+            closers.append("[/u]")
+        elif ANSI_COLORS.has(code):
+            out += "[color=#%s]" % ANSI_COLORS[code]
+            closers.append("[/color]")
+        elif code == 38 or code == 48:
+            var kind := int(codes[at]) if at < codes.size() else 0
+            if kind == 5:
+                at += 2
+            elif kind == 2:
+                if code == 38 and at + 3 < codes.size():
+                    out += "[color=#%02x%02x%02x]" % [
+                            int(codes[at + 1]), int(codes[at + 2]), int(codes[at + 3])]
+                    closers.append("[/color]")
+                at += 4
+            else:
+                at += 1
+    return out
 
 
 ## The spinner: a faint full ring under a bright arc running round it. The ring is
