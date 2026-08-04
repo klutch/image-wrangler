@@ -719,6 +719,10 @@ var _generate_status: Label
 ## The address of the server, and what it last said about itself.
 var _comfy_url_edit: LineEdit
 var _comfy_status: Label
+## The two rows that only matter until there is a server answering. Both go away once there
+## is one: the address worked, and the folder is only ever read by Start.
+var _comfy_address_row: HBoxContainer
+var _comfy_install_row: HBoxContainer
 ## Where ComfyUI is installed, what was made of that folder, and the two buttons that use
 ## it. Stop follows [method IWComfyServer.owns_process] and nothing else.
 var _comfy_root_edit: LineEdit
@@ -770,6 +774,10 @@ var _export_save: Timer
 ## Writes the Generate tab's settings file. Separate again, and for the same reason: it
 ## belongs to the editor rather than to any image or any batch.
 var _generate_save: Timer
+
+## Asks the server whether it is still there, on repeat. Runs only while the Generate tab is
+## up. See [method IWComfyServer.heartbeat].
+var _comfy_heartbeat: Timer
 var _open_dialog: FileDialog
 var _output_dialog: FileDialog
 var _save_dialog: FileDialog
@@ -1204,6 +1212,8 @@ func _build_generate() -> void:
         _comfy_root_edit.text = IWAddonSettings.comfy_root()
     _refresh_comfy_install()
     _refresh_comfy_status()
+    # A rebuild can land while a server is already answering, and the rows come back visible.
+    _update_comfy_controls()
 
 
 ## What the Upscale form was built for, so a settings change that changes the form itself is
@@ -1475,6 +1485,8 @@ func _forget_controls() -> void:
     _generate_status = null
     _comfy_url_edit = null
     _comfy_status = null
+    _comfy_address_row = null
+    _comfy_install_row = null
     _comfy_root_edit = null
     _comfy_install_note = null
     _comfy_start_button = null
@@ -1502,6 +1514,7 @@ func _forget_controls() -> void:
     _autosave = null
     _export_save = null
     _generate_save = null
+    _comfy_heartbeat = null
     _open_dialog = null
     _output_dialog = null
     _save_dialog = null
@@ -1569,6 +1582,13 @@ func _build_ui() -> void:
     _generate_save.wait_time = GENERATE_SAVE_DEBOUNCE
     _generate_save.timeout.connect(_flush_generate_save)
     add_child(_generate_save)
+
+    # Repeating, and only while the Generate tab is up: nothing else reads the answer, and
+    # the address may be another machine.
+    _comfy_heartbeat = Timer.new()
+    _comfy_heartbeat.wait_time = ComfyServer.HEARTBEAT_SECONDS
+    _comfy_heartbeat.timeout.connect(_on_comfy_heartbeat)
+    add_child(_comfy_heartbeat)
 
     _autosave = Timer.new()
     _autosave.one_shot = true
@@ -2083,6 +2103,9 @@ func _select_mode(mode: int) -> void:
     _update_detail_label()
     if _is_image_mode(mode) and _auto_preview_allowed():
         _schedule_preview()
+    # Stopped for every tab, and started again below by the one that reads it.
+    if _comfy_heartbeat != null:
+        _comfy_heartbeat.stop()
     # Arriving on the tab is itself a reason to build one: an empty viewport under a form
     # full of settings reads as a tool that has not worked rather than one that has not
     # been asked.
@@ -2103,6 +2126,9 @@ func _select_mode(mode: int) -> void:
             # Or a flag left up by a run that was dropped without a word would put the
             # overlay back over a tab with nothing going on. See _cancel_generate.
             _generate_running = false
+        # Only while the tab is up. See where it is made.
+        if _comfy_heartbeat != null:
+            _comfy_heartbeat.start()
         # A run started here and left running belongs to this tab, so its overlay comes back
         # with it — and never went up over anybody else's.
         _preview.set_busy(_generate_running)
@@ -2129,8 +2155,9 @@ func _build_generate_page() -> void:
     var server := SettingsBuilder.begin_group(column, "Server", false, _fold_state,
             GENERATE_FOLD_SERVER)
 
-    var address := HBoxContainer.new()
-    server.add_child(address)
+    _comfy_address_row = HBoxContainer.new()
+    server.add_child(_comfy_address_row)
+    var address := _comfy_address_row
 
     _comfy_url_edit = LineEdit.new()
     _comfy_url_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2145,8 +2172,9 @@ func _build_generate_page() -> void:
     connect_button.pressed.connect(_on_comfy_connect)
     address.add_child(connect_button)
 
-    var install := HBoxContainer.new()
-    server.add_child(install)
+    _comfy_install_row = HBoxContainer.new()
+    server.add_child(_comfy_install_row)
+    var install := _comfy_install_row
 
     _comfy_root_edit = LineEdit.new()
     _comfy_root_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -5049,8 +5077,8 @@ func _set_generate_status(text: String) -> void:
 
 ## Says why a run will not start, in both places.
 ##
-## The tab's own line is dim and sits under the button, which is a fine place for progress
-## and a poor one for the answer to a press that otherwise looks ignored.
+## The tab's own line is dim and easily missed, and a press that looks ignored is worse than
+## a noisy one.
 func _refuse_generate(note: String) -> void:
     _set_generate_status(note)
     _set_status(note)
@@ -5095,18 +5123,29 @@ func _on_comfy_connect() -> void:
     _comfy.probe()
 
 
-## Start and Stop against what the server is doing now.
+## The whole Server section against what the server is doing now.
 ##
-## Stop follows ownership and nothing else, so a server that was already up when the dock
-## found it can never be taken away by this.
-func _update_comfy_buttons() -> void:
+## The three ways of finding one — address, folder, Start — go away once there is one, and
+## come back if it drops. Stop follows ownership and nothing else.
+func _update_comfy_controls() -> void:
     if _comfy_start_button == null or _comfy_stop_button == null:
         return
     var state: int = _comfy.state() if _comfy != null else ComfyServer.State.OFFLINE
+    var connected := state == ComfyServer.State.READY or state == ComfyServer.State.RUNNING
+    if _comfy_address_row != null:
+        _comfy_address_row.visible = not connected
+    if _comfy_install_row != null:
+        _comfy_install_row.visible = not connected
+    if _comfy_install_note != null:
+        _comfy_install_note.visible = not connected
+
+    _comfy_start_button.visible = not connected
     _comfy_start_button.disabled = _comfy == null \
             or state != ComfyServer.State.OFFLINE \
             or not bool(_comfy_install.get("found", false))
     _comfy_start_button.text = "Starting" if state == ComfyServer.State.STARTING else "Start"
+    # Shown dead rather than hidden: that is what says the server is not ours to close.
+    _comfy_stop_button.visible = connected
     _comfy_stop_button.disabled = _comfy == null or not _comfy.owns_process()
 
 
@@ -5158,6 +5197,12 @@ func _on_comfy_stop() -> void:
         return
     _comfy.stop()
     _set_generate_status("Stopped ComfyUI.")
+
+
+## Whether the server is still where it was. See [method IWComfyServer.heartbeat].
+func _on_comfy_heartbeat() -> void:
+    if _comfy != null and _mode == Mode.GENERATE:
+        _comfy.heartbeat()
 
 
 func _on_comfy_stop_on_exit_toggled(pressed: bool) -> void:
@@ -5250,10 +5295,8 @@ func _on_generate_pressed() -> void:
 func _cancel_generate() -> void:
     if _comfy == null or not _generate_running:
         return
-    # The flag goes up before submit's first await, so a run dropped without a word — one
-    # overtaken by another, or cut off by a shutdown — leaves it up with nothing behind it.
-    # Pressing the button is when that has to be noticed, or it stays stuck on Cancel and
-    # every press after it does nothing.
+    # The flag goes up before submit's first await, so a run dropped without a word leaves
+    # it up with nothing behind it. Unnoticed, the button stays stuck on Cancel.
     if not _comfy.is_running():
         _end_generate_run("")
         return
@@ -6339,7 +6382,7 @@ func _update_controls() -> void:
     if _mode == Mode.GENERATE:
         _process_selected_button.disabled = _current_generate_image() == null
         _process_all_button.disabled = true
-        _update_comfy_buttons()
+        _update_comfy_controls()
         if _generate_button != null:
             # Never disabled while a run is going: it is the way to stop one.
             _generate_button.disabled = not _generate_running and (_comfy == null \

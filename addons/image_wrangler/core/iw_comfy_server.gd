@@ -32,6 +32,9 @@ const UPLOAD_BOUNDARY := "ImageWranglerUpload"
 ## How often the run is asked whether it has finished.
 const POLL_SECONDS := 1.0
 
+## How often the dock looks to see whether the server is still there. See [method heartbeat].
+const HEARTBEAT_SECONDS := 10.0
+
 ## How many polls in a row may fail before the run is called lost.
 ##
 ## More than one, deliberately. A single dropped request over loopback while the graphics
@@ -105,6 +108,10 @@ var _socket: WebSocketPeer
 ## When something last happened, for the watchdog. Any frame off the socket counts, since
 ## the server only sends one while it is working.
 var _last_life_msec := 0
+
+## Set while a heartbeat is in the air, so a slow answer cannot be overlapped by the next
+## tick of the timer. See [method heartbeat].
+var _heartbeat_busy := false
 
 
 func _exit_tree() -> void:
@@ -272,6 +279,41 @@ func _port() -> int:
     if not host.contains(":"):
         return DEFAULT_PORT
     return maxi(host.get_slice(":", 1).to_int(), 1)
+
+
+## Looks to see whether the server is still where it was, quietly.
+##
+## [b]Only the two changes are reported: it came back, or it went.[/b] Still missing is not
+## news, and this runs on a timer.
+##
+## Left alone while a run or a start is in flight, since both already poll.
+func heartbeat() -> void:
+    if _shutting_down or _busy_state() or _heartbeat_busy:
+        return
+    _heartbeat_busy = true
+    var before := _state
+    var reply := await _ask(_url + "/system_stats", ASK_TIMEOUT)
+    _heartbeat_busy = false
+    # Anything that moved while the question was in the air knows more than this does.
+    if _shutting_down or _busy_state() or _state != before:
+        return
+
+    var alive: bool = reply["ok"] and reply["json"] is Dictionary \
+            and (reply["json"] as Dictionary).has("system")
+    if alive and before == State.OFFLINE:
+        _set_state(State.READY)
+        if _lists.is_empty():
+            await _fetch_lists()
+        return
+    if not alive and before == State.READY:
+        _lists = {}
+        _set_state(State.OFFLINE)
+        failed.emit("Lost ComfyUI. It may have closed — check its console.")
+
+
+## Whether something with a poll of its own is already in charge.
+func _busy_state() -> bool:
+    return _state == State.RUNNING or _state == State.STARTING
 
 
 ## Asks whether the server is there, and what it has.
