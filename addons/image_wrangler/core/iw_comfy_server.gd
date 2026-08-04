@@ -35,6 +35,11 @@ const POLL_SECONDS := 1.0
 ## How often the dock looks to see whether the server is still there. See [method heartbeat].
 const HEARTBEAT_SECONDS := 10.0
 
+## How often the started server's output is taken off its pipes, and how much per go. On a
+## timer rather than per frame: a frame's worth of nothing still allocates to ask.
+const LOG_SECONDS := 0.2
+const LOG_CHUNK := 8192
+
 ## How many polls in a row may fail before the run is called lost.
 ##
 ## More than one, deliberately. A single dropped request over loopback while the graphics
@@ -72,6 +77,9 @@ signal finished(images: Array)
 ## Emitted when a run could not be made or could not be finished. [param reason] is one
 ## sentence fit for a status line.
 signal failed(reason: String)
+
+## Emitted with whatever a server this dock started has printed, in whole lines.
+signal log_output(text: String)
 
 ## Emitted when a run was stopped on purpose.
 ##
@@ -125,9 +133,75 @@ var _last_life_msec := 0
 ## tick of the timer. See [method heartbeat].
 var _heartbeat_busy := false
 
+## What a server this dock started prints, and the bytes of a line not yet finished.
+##
+## [b]These have to be read for as long as the process lives.[/b] An unread pipe fills, and
+## a full one stops python dead the next time it prints.
+var _log_out: FileAccess
+var _log_err: FileAccess
+var _log_bytes := PackedByteArray()
+var _log_timer: Timer
+
+
+func _ready() -> void:
+    _log_timer = Timer.new()
+    _log_timer.wait_time = LOG_SECONDS
+    _log_timer.timeout.connect(_drain_log)
+    add_child(_log_timer)
+
 
 func _exit_tree() -> void:
     shut_down()
+
+
+# --- What a started server prints ----------------------------------------
+
+## Takes whatever is waiting on the pipes and passes on the whole lines.
+##
+## Runs for as long as the process does, whether or not anybody is looking: see the note on
+## [member _log_out].
+func _drain_log() -> void:
+    if _log_out == null and _log_err == null:
+        _log_timer.stop()
+        return
+
+    _take_from(_log_out)
+    _take_from(_log_err)
+    # Only up to the last line ending. A chunk can stop in the middle of a line or of a
+    # character, and either shown as it stands would be shown wrong.
+    var cut := _log_bytes.rfind(10, _log_bytes.size() - 1)
+    if cut >= 0:
+        var whole := _log_bytes.slice(0, cut + 1)
+        _log_bytes = _log_bytes.slice(cut + 1, _log_bytes.size())
+        var text := whole.get_string_from_utf8()
+        if not text.is_empty():
+            log_output.emit(text)
+
+    # Only after that last read. What a process says on its way out is the half worth
+    # having, and closing first would throw it away.
+    if not owns_process():
+        _close_log()
+
+
+func _take_from(pipe: FileAccess) -> void:
+    if pipe == null or not pipe.is_open():
+        return
+    var chunk := pipe.get_buffer(LOG_CHUNK)
+    if not chunk.is_empty():
+        _log_bytes.append_array(chunk)
+
+
+func _close_log() -> void:
+    if _log_timer != null:
+        _log_timer.stop()
+    # A last line with no ending on it still says something.
+    if not _log_bytes.is_empty():
+        var last := _log_bytes.get_string_from_utf8()
+        if not last.is_empty():
+            log_output.emit(last + "\n")
+    _log_out = null
+    _log_err = null
+    _log_bytes = PackedByteArray()
 
 
 ## Pumps the socket. On only while one is open, which is only while a run is in flight.
@@ -227,16 +301,22 @@ func start(root: String) -> void:
         await _fetch_lists()
         return
 
-    # A console of its own, which is the log tail for free. It takes the focus on the way up;
-    # the dock takes it straight back. Never through cmd: the id would be cmd's, and killing
-    # that orphans python on the graphics card.
-    var pid := OS.create_process(String(install["python"]),
-            PackedStringArray([String(install["main"]), "--port", str(_port())]), true)
+    # Through pipes rather than a console, so what it says can be shown in the dock. The
+    # false is what makes the pipes non-blocking, without which reading one would stall the
+    # editor. Never through cmd: the id would be cmd's, and killing that orphans python on
+    # the graphics card.
+    var pipe := OS.execute_with_pipe(String(install["python"]),
+            PackedStringArray([String(install["main"]), "--port", str(_port())]), false)
+    var pid := int(pipe.get("pid", -1))
     if pid <= 0:
         _set_state(State.OFFLINE)
         failed.emit("Could not start %s." % String(install["python"]).get_file())
         return
     _owned_pid = pid
+    _log_out = pipe.get("stdio")
+    _log_err = pipe.get("stderr")
+    _log_bytes = PackedByteArray()
+    _log_timer.start()
     await _wait_for_start(run)
 
 
@@ -251,6 +331,7 @@ func cancel_start() -> void:
     if owns_process():
         OS.kill(_owned_pid)
         _owned_pid = -1
+    _close_log()
     _lists = {}
     _set_state(State.OFFLINE)
 
@@ -263,6 +344,7 @@ func stop() -> void:
     _close_socket()
     OS.kill(_owned_pid)
     _owned_pid = -1
+    _close_log()
     _lists = {}
     _prompt_id = ""
     _set_state(State.OFFLINE)
@@ -281,9 +363,12 @@ func _wait_for_start(run: int) -> void:
         # Gone before it ever answered. Why is in the console it opened, which is still on
         # screen because it was started with one.
         if not OS.is_process_running(_owned_pid):
+            # Before the pid goes, so what it said on the way out reaches the box.
+            _drain_log()
             _owned_pid = -1
+            _close_log()
             _set_state(State.OFFLINE)
-            failed.emit("ComfyUI stopped before it was ready. Its console window says why.")
+            failed.emit("ComfyUI stopped before it was ready. What it printed is above.")
             return
 
         var reply := await _ask(_url + "/system_stats", ASK_TIMEOUT)
@@ -514,6 +599,7 @@ func shut_down() -> void:
     if stop_on_exit and owns_process():
         OS.kill(_owned_pid)
     _owned_pid = -1
+    _close_log()
 
 
 # --- The progress socket -------------------------------------------------

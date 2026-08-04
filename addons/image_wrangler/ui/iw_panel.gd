@@ -268,8 +268,13 @@ const GENERATE_FOLD_SERVER := "generate/server"
 ## the spinner is the whole of it.
 const STARTING_CAPTION := "Waiting for ComfyUI Server"
 
+## How tall the start log is, and how many lines of it are kept. Trimmed from the front, so
+## a start that says a great deal cannot grow without end.
+const COMFY_LOG_HEIGHT := 120
+const COMFY_LOG_LINES := 400
+
 ## Held here because the button swaps between this and the one for Cancel.
-const START_TOOLTIP := "Runs ComfyUI from the folder above, in a console window of its own.\n\nThat console is its log. It takes the focus as it opens and the dock takes it\nstraight back, so it ends up behind the editor rather than in front of it.\n\nStart looks first for one already answering and joins that instead, so pressing\nthis with ComfyUI already up costs nothing.\n\nThe first start of the day loads the whole of PyTorch. Give it a minute."
+const START_TOOLTIP := "Runs ComfyUI from the folder above, in a console window of its own.\n\nThat console is its log, and it opens in front of the editor.\n\nStart looks first for one already answering and joins that instead, so pressing\nthis with ComfyUI already up costs nothing.\n\nThe first start of the day loads the whole of PyTorch. Give it a minute."
 
 ## Where the Generate tab's settings are kept.
 ##
@@ -392,10 +397,6 @@ var _upscale: Upscale
 ## of the dock.
 var _generate: IWGenerate
 var _comfy: IWComfyServer
-
-## Set while a start is being waited on, so the first loss of focus after it — the console
-## ComfyUI opens — is taken straight back. See [method _notification].
-var _reclaiming_focus := false
 
 ## What the last batch made, one entry per picture, filled as they arrive.
 ##
@@ -752,6 +753,11 @@ var _comfy_install_note: Label
 var _comfy_start_button: Button
 var _comfy_stop_button: Button
 var _comfy_stop_toggle: CheckBox
+
+## What a started server has printed, and whether it is worth showing. Shown from pressing
+## Start until the server answers, and left up when a start fails so the reason survives.
+var _comfy_log: TextEdit
+var _comfy_log_wanted := false
 ## Says how the last upscale went, or why it could not run at all.
 var _upscale_status: Label
 ## Says what the selected model is for, sitting under its dropdown.
@@ -897,6 +903,7 @@ func _build_comfy() -> void:
     _comfy.state_changed.connect(_on_comfy_state)
     _comfy.info_ready.connect(_on_comfy_info)
     _comfy.progress.connect(_on_comfy_progress)
+    _comfy.log_output.connect(_on_comfy_log)
     _comfy.image_ready.connect(_on_comfy_image_ready)
     _comfy.finished.connect(_on_comfy_finished)
     _comfy.failed.connect(_on_comfy_failed)
@@ -1072,25 +1079,6 @@ func _exit_tree() -> void:
 func _notification(what: int) -> void:
     if what == NOTIFICATION_APPLICATION_FOCUS_IN:
         _refresh_paste_all_button()
-    elif what == NOTIFICATION_APPLICATION_FOCUS_OUT and _reclaiming_focus:
-        # Once only. Whatever took the focus during a start is the console ComfyUI opened,
-        # and a second grab would be fighting somebody who meant to leave.
-        _reclaiming_focus = false
-        # Deferred, because the window that took it is still coming up and asking in the
-        # same frame loses the race.
-        _reclaim_focus.call_deferred()
-
-
-## Takes the focus back from the console ComfyUI opened on its way up.
-##
-## Windows only lets a program that just had the focus take it back, which is exactly the
-## case here. It may still refuse, in which case the console stays in front.
-func _reclaim_focus() -> void:
-    var window := get_window()
-    if window == null:
-        return
-    window.move_to_foreground()
-    window.grab_focus()
 
 
 ## Builds the file operation and its form. One instance for the session, since a
@@ -1534,6 +1522,7 @@ func _forget_controls() -> void:
     _comfy_start_button = null
     _comfy_stop_button = null
     _comfy_stop_toggle = null
+    _comfy_log = null
     _upscale_box = null
     _upscale_status = null
     _upscale_model_note = null
@@ -2264,6 +2253,17 @@ func _build_generate_page() -> void:
     _comfy_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     _comfy_status.modulate = Color(1, 1, 1, 0.6)
     server.add_child(_comfy_status)
+
+    # Only up while a server this dock started is coming up. It is the one time there is
+    # nothing else to look at and every reason a start can fail is in here.
+    _comfy_log = TextEdit.new()
+    _comfy_log.editable = false
+    _comfy_log.custom_minimum_size = Vector2(0, COMFY_LOG_HEIGHT)
+    _comfy_log.scroll_fit_content_height = false
+    _comfy_log.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+    _comfy_log.tooltip_text = "What ComfyUI is printing as it starts.\n\nIt goes away once the server answers. If a start fails, it stays up with the\nreason in it."
+    _comfy_log.visible = false
+    server.add_child(_comfy_log)
 
     _generate_box = VBoxContainer.new()
     _generate_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -5243,6 +5243,12 @@ func _update_comfy_controls() -> void:
         _comfy_install_row.visible = not connected
     if _comfy_install_note != null:
         _comfy_install_note.visible = not connected
+    # A server that answered has nothing left to explain, so the log goes with the rest of
+    # the finding-one controls. A failed start keeps it up: that is where the reason is.
+    if connected:
+        _comfy_log_wanted = false
+    if _comfy_log != null:
+        _comfy_log.visible = _comfy_log_wanted and not _comfy_log.text.is_empty()
 
     # While a start is being waited on it is the only thing worth pressing, so it becomes the
     # way out of one rather than a dead button saying what is already on screen.
@@ -5304,6 +5310,10 @@ func _on_comfy_start() -> void:
         _comfy.cancel_start()
         _refuse_generate("Stopped waiting for ComfyUI.")
         return
+    # A fresh start starts a fresh log. Last time's reason for failing is not this one's.
+    _comfy_log_wanted = true
+    if _comfy_log != null:
+        _comfy_log.text = ""
     # The typed folder counts even if focus never left the box, so pressing Start straight
     # after typing does what it looks like it does.
     _store_comfy_root()
@@ -5319,6 +5329,20 @@ func _on_comfy_stop() -> void:
     _set_generate_status("Stopped ComfyUI.")
 
 
+## Takes what a started server printed and puts it in the box.
+func _on_comfy_log(text: String) -> void:
+    if _comfy_log == null:
+        return
+    _comfy_log.text += text
+    var lines := _comfy_log.get_line_count()
+    if lines > COMFY_LOG_LINES:
+        var kept := _comfy_log.text.split("\n")
+        _comfy_log.text = "\n".join(kept.slice(lines - COMFY_LOG_LINES))
+    # Follows the newest line, since the reason a start failed is always the last thing said.
+    _comfy_log.scroll_vertical = _comfy_log.get_line_count()
+    _update_comfy_controls()
+
+
 ## Whether the server is still where it was. See [method IWComfyServer.heartbeat].
 func _on_comfy_heartbeat() -> void:
     if _comfy != null and _mode == Mode.GENERATE:
@@ -5331,10 +5355,7 @@ func _on_comfy_stop_on_exit_toggled(pressed: bool) -> void:
         _comfy.stop_on_exit = pressed
 
 
-func _on_comfy_state(state: int) -> void:
-    # Armed for the length of a start, and spent on the first loss of focus after it. See
-    # _notification.
-    _reclaiming_focus = state == ComfyServer.State.STARTING
+func _on_comfy_state(_state: int) -> void:
     _refresh_comfy_status()
     _refresh_generate_busy()
     _update_controls()
