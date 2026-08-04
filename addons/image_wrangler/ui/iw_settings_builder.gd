@@ -14,6 +14,7 @@ const HSVList := preload("res://addons/image_wrangler/ui/iw_hsv_list.gd")
 const BrushList := preload("res://addons/image_wrangler/ui/iw_brush_list.gd")
 const ExcludeTilesList := preload("res://addons/image_wrangler/ui/iw_exclude_tiles.gd")
 const ModelFolder := preload("res://addons/image_wrangler/ui/iw_model_folder.gd")
+const RangeSlider := preload("res://addons/image_wrangler/ui/iw_range_slider.gd")
 
 ## Left indent applied to the contents of a named group.
 const GROUP_INDENT := 8
@@ -127,6 +128,8 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
                 control = _build_text(operation, property, label, setting, on_changed)
             IWOperation.SettingType.CHOICE:
                 control = _build_choice(operation, property, label, setting, on_changed)
+            IWOperation.SettingType.FLOAT_RANGE:
+                control = _build_range(operation, property, label, setting, on_changed)
             _:
                 control = _build_number(operation, property, label, setting, false, on_changed)
 
@@ -517,6 +520,28 @@ static func _build_number(operation: IWOperation, property: StringName, label: S
     return slider
 
 
+## Two grabbers on one track, for a setting held as a [Vector2] span.
+##
+## See [constant IWOperation.SettingType.FLOAT_RANGE].
+static func _build_range(operation: IWOperation, property: StringName, label: String, setting: Dictionary, on_changed: Callable) -> Control:
+    var slider := RangeSlider.new()
+    slider.setup(
+            operation.get_settings().get(property),
+            setting.get("min", 0.0),
+            setting.get("max", 1.0),
+            setting.get("step", 0.01),
+            label)
+    slider.range_changed.connect(
+        func(low: float, high: float) -> void:
+            var settings := operation.get_settings()
+            if settings == null:
+                return
+            settings.set(property, Vector2(low, high))
+            on_changed.call()
+    )
+    return slider
+
+
 ## Pushes the operation's current settings into the controls [method build]
 ## created, without firing their change signals — with one exception noted in
 ## [method _build_color], which has no way to be set quietly.
@@ -654,4 +679,6 @@ static func _refresh_into(settings: Resource, node: Node) -> void:
                 (child as BrushList).refresh()
             elif child is ModelFolder:
                 (child as ModelFolder).refresh()
+            elif child is RangeSlider:
+                (child as RangeSlider).set_span(value)
         _refresh_into(settings, child)

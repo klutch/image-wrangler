@@ -224,20 +224,21 @@ public:
     //
     // Takes numbers rather than a list of regions, which is the one kernel here that
     // works the other way round: the caller cannot name the regions because it does not
-    // know them yet — finding them is the job. Hue is how far it may wander either way, 0
-    // to 1. Saturation and value are the far end each may be pulled towards, 0 to 2 and 0
-    // to 3, with 1 leaving them alone. Colorize is how far an island may be mixed towards
-    // one flat hue, 0 to 1. Every one of the four is a ceiling, not a setting: each island
-    // draws its own number between no change and that end. The seed makes the same image
-    // come out the same way twice.
+    // know them yet — finding them is the job.
+    //
+    // `spans` is eight numbers, a low and a high for each of hue, saturation, value and
+    // colorize in that order. Each island draws its own number between the two ends of
+    // every span, so a span with both ends together applies one fixed adjustment and a
+    // wide one spreads the sheet out. Hue is a turn, -0.5 to 0.5; saturation and value are
+    // multipliers, 0 to 2 and 0 to 3; colorize is a mix, 0 to 1. The seed makes the same
+    // image come out the same way twice.
     //
     // Returns x, y, w, h per island: the smallest rectangle containing each one. Reads
     // the alpha the run currently shows, so where it sits in the stack decides what
     // counts as an object. Rewrites the source pixels, so the caller owes the run a
     // rebuild of the distance map afterwards.
     static PackedInt32Array random_hsv_tiles(const Ref<IWPipelineContext> &ctx,
-            int64_t rng_seed, double hue_amount, double saturation_amount,
-            double value_amount, double colorize_amount);
+            int64_t rng_seed, const PackedFloat64Array &spans);
 
     // Posterize.process_context: cuts the image down to a small set of colours.
     //

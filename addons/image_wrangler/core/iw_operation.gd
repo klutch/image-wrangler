@@ -63,6 +63,10 @@ enum SettingType {
     ## list that comes from somewhere free to reorder it — the model names a server hands
     ## over — where an index would quietly come to mean something else.
     CHOICE,
+    ## A span of two floats on one track, which cannot cross. The property must hold a
+    ## [Vector2], x the low end and y the high. [code]min[/code], [code]max[/code] and
+    ## [code]step[/code] read the same way they do for a plain number.
+    FLOAT_RANGE,
 }
 
 
@@ -219,12 +223,21 @@ func clamp_settings_to_schema(settings: Resource = null) -> void:
         var type: int = entry.get("type", SettingType.FLOAT)
         if property == &"":
             continue
-        if type != SettingType.INT and type != SettingType.FLOAT:
+        if type != SettingType.INT and type != SettingType.FLOAT \
+                and type != SettingType.FLOAT_RANGE:
             continue
         if not entry.has("min") and not entry.has("max"):
             continue
         var low: float = entry.get("min", -INF)
         var high: float = entry.get("max", INF)
+        if type == SettingType.FLOAT_RANGE:
+            # Ordered as well as clamped: a span whose ends had been swapped would draw
+            # inside out and read as empty.
+            var span: Vector2 = settings.get(property)
+            var lower := clampf(minf(span.x, span.y), low, high)
+            var upper := clampf(maxf(span.x, span.y), low, high)
+            settings.set(property, Vector2(lower, upper))
+            continue
         var value := clampf(float(settings.get(property)), low, high)
         settings.set(property, int(value) if type == SettingType.INT else value)
 

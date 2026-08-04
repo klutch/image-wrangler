@@ -9,9 +9,9 @@ extends IWStackOperation
 ## each region gets a random hue, saturation, value and colorize of its own. A sheet of
 ## forty flowers becomes forty colours from one seed and four sliders.
 ##
-## [b]Every slider is a ceiling, not a setting.[/b] Each object draws its own number
-## between no change and wherever the slider sits, so turning one up widens the spread
-## rather than moving every object the same distance.
+## [b]Every slider is a span, not a number.[/b] Each has a low end and a high end, and each
+## object draws its own number between the two. Pull the ends apart to spread a sheet out,
+## or put them together to give every object the same fixed adjustment.
 ##
 ## [b]An island is whatever the alpha says it is.[/b] The stage reads what the run
 ## currently shows — the source's own transparency, times whatever the stages above have
@@ -102,40 +102,40 @@ func get_settings_schema() -> Array[Dictionary]:
             "tooltip": "Which set of random colours comes out.\n\nThe same seed on the same image always gives the same answer, so a sheet can\nbe re-rolled until it looks right and then left alone. Change it and every\nobject changes together.",
         },
         {
-            "property": &"hue_amount",
+            "property": &"hue_range",
             "label": "Hue",
-            "type": SettingType.FLOAT,
-            "min": 0.0,
-            "max": 1.0,
-            "step": 0.01,
-            "tooltip": "How far each object's hue is allowed to wander, as a share of the colour wheel.\n\nAt 1 an object can come out any colour at all. At 0 every hue is left where it\nis, which is what to use when only the strength or the brightness should vary.",
+            "type": SettingType.FLOAT_RANGE,
+            "min": -0.5,
+            "max": 0.5,
+            "step": 1.0 / 360.0,
+            "tooltip": "How far round the colour wheel each object is turned, in turns.\n\nThe whole span is the whole wheel, so any object can come out any colour.\nPull the ends together for a sheet that stays in one part of the wheel, or\nput both at 0 to leave every hue where it is.",
         },
         {
-            "property": &"saturation_amount",
+            "property": &"saturation_range",
             "label": "Saturation",
-            "type": SettingType.FLOAT,
+            "type": SettingType.FLOAT_RANGE,
             "min": 0.0,
             "max": 2.0,
             "step": 0.01,
-            "tooltip": "The far end each object's colourfulness may be pulled towards.\n\nAt 1 nothing moves. At 0 an object can come out anywhere between its own\ncolour and grey; at 2, anywhere between its own colour and twice as deep.\nNothing can invent colour in an object that has none.",
+            "tooltip": "How much more or less colourful each object comes out, as a multiplier.\n\n1 leaves it alone, 0 drains it to grey and 2 is twice as deep. Nothing can\ninvent colour in an object that has none.",
         },
         {
-            "property": &"value_amount",
+            "property": &"value_range",
             "label": "Value",
-            "type": SettingType.FLOAT,
+            "type": SettingType.FLOAT_RANGE,
             "min": 0.0,
             "max": 3.0,
             "step": 0.01,
-            "tooltip": "The far end each object's lightness may be pulled towards, as a multiplier.\n\nAt 1 nothing moves. At 0 an object can come out anywhere down to black; at 3,\nanywhere up to three times as bright. Anything already at full brightness\nstays there.",
+            "tooltip": "How much lighter or darker each object comes out, as a multiplier.\n\n1 leaves it alone, 0 is black and 3 is three times as bright. Anything\nalready at full brightness stays there.",
         },
         {
-            "property": &"colorize_amount",
+            "property": &"colorize_range",
             "label": "Colorize",
-            "type": SettingType.FLOAT,
+            "type": SettingType.FLOAT_RANGE,
             "min": 0.0,
             "max": 1.0,
             "step": 0.01,
-            "tooltip": "How far an object may be mixed towards one flat colour, keeping each\npixel's own lightness.\n\nThe tint an object takes is its own random hue, so Hue decides how much the\ntints differ from one another. Black and white stay where they are.",
+            "tooltip": "How far each object is mixed towards one flat colour, keeping each pixel's\nown lightness.\n\nThe tint an object takes is its own random hue, so Hue decides how much the\ntints differ from one another. Put both ends at 1 to make every object flat.\nBlack and white stay where they are.",
         },
     ]
 
@@ -163,21 +163,29 @@ func prerequisite_note(ctx: IWPipelineContext) -> String:
     return "Reading the source's own transparency."
 
 
+## Whether every span sits where it does nothing, so the stage can be skipped outright.
+func _is_neutral() -> bool:
+    return _spans_at(settings.hue_range, 0.0) and _spans_at(settings.saturation_range, 1.0) \
+            and _spans_at(settings.value_range, 1.0) and _spans_at(settings.colorize_range, 0.0)
+
+
+func _spans_at(span: Vector2, resting: float) -> bool:
+    return is_equal_approx(span.x, resting) and is_equal_approx(span.y, resting)
+
+
 func process_context(ctx: IWPipelineContext) -> void:
-    if is_zero_approx(settings.hue_amount) and is_equal_approx(settings.saturation_amount, 1.0) \
-            and is_equal_approx(settings.value_amount, 1.0) \
-            and is_zero_approx(settings.colorize_amount):
+    if _is_neutral():
         return
     if not report_progress(0.05):
         return
 
-    var bounds := IWStageKernels.random_hsv_tiles(
-            ctx,
-            settings.rng_seed,
-            settings.hue_amount,
-            settings.saturation_amount,
-            settings.value_amount,
-            settings.colorize_amount)
+    var spans := PackedFloat64Array([
+        settings.hue_range.x, settings.hue_range.y,
+        settings.saturation_range.x, settings.saturation_range.y,
+        settings.value_range.x, settings.value_range.y,
+        settings.colorize_range.x, settings.colorize_range.y,
+    ])
+    var bounds := IWStageKernels.random_hsv_tiles(ctx, settings.rng_seed, spans)
     if bounds.is_empty():
         report_progress(1.0)
         return

@@ -5,6 +5,10 @@ extends Resource
 ## Every tunable of [RandomHSVTiles].
 ##
 ## Ranges live in [method RandomHSVTiles.get_settings_schema], not here.
+##
+## The four adjustments are spans rather than single numbers: x is the low end, y the high,
+## and each object draws its own number somewhere between them. Both ends together means
+## every object gets the same fixed adjustment.
 
 ## Which set of random colours comes out.
 ##
@@ -13,32 +17,30 @@ extends Resource
 ## than [code]seed[/code] because that is a built-in function.
 @export var rng_seed: int = 0
 
-## How far each island's hue is allowed to wander, as a share of the colour wheel.
+## How far round the colour wheel each object is turned, in turns.
 ##
-## At 1 an island can come out any colour at all; at 0 every hue is left alone. Starts at
-## 1, since a random hue per object is what this stage is for.
-@export var hue_amount: float = 1.0
+## Starts at the whole wheel, since a random hue per object is what this stage is for. Both
+## ends at 0 leaves every hue alone.
+@export var hue_range: Vector2 = Vector2(-0.5, 0.5)
 
-## The far end each island's colourfulness may be pulled towards, as a scale.
+## How much more or less colourful each object comes out, as a multiplier.
 ##
-## At 1 nothing moves. At 0 an island can come out anywhere between its own colour and
-## grey; at 2, anywhere between its own colour and twice as deep. Starts at 1: a random
+## 1 leaves it alone, 0 drains it to grey, 2 is twice as deep. Starts at 1 to 1: a random
 ## saturation reads as damage rather than as a colour, so it is asked for rather than
 ## arrived at.
-@export var saturation_amount: float = 1.0
+@export var saturation_range: Vector2 = Vector2(1.0, 1.0)
 
-## The far end each island's lightness may be pulled towards, as a multiplier.
+## How much lighter or darker each object comes out, as a multiplier.
 ##
-## Reads the same way as [HSVAdjust]'s value slider, only picked at random per island. At 1
-## nothing moves. At 0 an island can come out anywhere down to black; at 3, anywhere up to
-## three times as bright.
-@export var value_amount: float = 1.0
+## Reads the same way as [HSVAdjust]'s value slider. 1 leaves it alone, 0 is black, 3 is
+## three times as bright. Starts at 1 to 1, so nothing moves until it is asked for.
+@export var value_range: Vector2 = Vector2(1.0, 1.0)
 
-## How far an island may be mixed towards one flat colour, keeping each pixel's lightness.
+## How far each object is mixed towards one flat colour, keeping each pixel's lightness.
 ##
-## The tint an island takes is its own random hue, so [member hue_amount] decides how much
-## the tints differ from one another. At 0 this does nothing.
-@export var colorize_amount: float = 0.0
+## The tint an object takes is its own random hue, so [member hue_range] decides how much
+## the tints differ from one another. Starts at 0 to 0.
+@export var colorize_range: Vector2 = Vector2(0.0, 0.0)
 
 
 ## A copy that belongs to no image. Nothing here is a coordinate and nothing is a nested

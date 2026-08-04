@@ -28,11 +28,6 @@ double unit(uint64_t hash) {
     return static_cast<double>(hash >> 11) * (1.0 / 9007199254740992.0);
 }
 
-// The same number spread from -1 to 1, for the amounts that reach either way.
-double signed_unit(uint64_t hash) {
-    return unit(hash) * 2.0 - 1.0;
-}
-
 // Colour as hue, how colourful it is, and how light it is.
 //
 // Hue comes back as a turn round the wheel rather than degrees, so shifting it is an add
@@ -248,11 +243,10 @@ void IWStageKernels::adjust_hsv(const Ref<IWPipelineContext> &ctx,
 // rewrites the source pixels, so the caller owes the run a rebuild of the distance map
 // afterwards.
 PackedInt32Array IWStageKernels::random_hsv_tiles(const Ref<IWPipelineContext> &ctx,
-        int64_t rng_seed, double hue_amount, double saturation_amount, double value_amount,
-        double colorize_amount) {
+        int64_t rng_seed, const PackedFloat64Array &spans) {
     PackedInt32Array bounds;
     ERR_FAIL_COND_V(ctx.is_null(), bounds);
-    if (ctx->pixel_count <= 0) {
+    if (ctx->pixel_count <= 0 || spans.size() < 8) {
         return bounds;
     }
 
@@ -287,16 +281,18 @@ PackedInt32Array IWStageKernels::random_hsv_tiles(const Ref<IWPipelineContext> &
     // Each island's numbers, drawn from the seed and its own index. Worked out once per
     // island rather than per pixel, and clamped here so a hand-edited file cannot ask for
     // a hue that wraps twice.
-    //
-    // Hue reaches either way from where it is. The other three reach one way, from no
-    // change towards whatever end was asked for.
-    const double hue_reach = iw::clampf(hue_amount, 0.0, 1.0) * 0.5;
-    const double sat_end = iw::clampf(saturation_amount, 0.0, 2.0);
-    const double val_end = iw::clampf(value_amount, 0.0, 3.0);
-    const double tint_end = iw::clampf(colorize_amount, 0.0, 1.0);
+    const double *span = spans.ptr();
+    const double hue_low = iw::clampf(span[0], -0.5, 0.5);
+    const double hue_high = iw::clampf(span[1], -0.5, 0.5);
+    const double sat_low = iw::clampf(span[2], 0.0, 2.0);
+    const double sat_high = iw::clampf(span[3], 0.0, 2.0);
+    const double val_low = iw::clampf(span[4], 0.0, 3.0);
+    const double val_high = iw::clampf(span[5], 0.0, 3.0);
+    const double tint_low = iw::clampf(span[6], 0.0, 1.0);
+    const double tint_high = iw::clampf(span[7], 0.0, 1.0);
     const uint64_t root = mix64(static_cast<uint64_t>(rng_seed));
-    // Colorize draws from a stream of its own rather than widening the stride of the one
-    // above, so a seed picked before this slider existed still gives the colours it did.
+    // Colorize draws from a stream of its own rather than widening the stride of the three
+    // above, so a seed picked before that slider existed still gives the colours it did.
     const uint64_t tint_root = mix64(root + 0x9E3779B97F4A7C15ULL);
     std::vector<double> turn(static_cast<size_t>(island_count), 0.0);
     std::vector<double> sat_scale(static_cast<size_t>(island_count), 1.0);
@@ -304,10 +300,11 @@ PackedInt32Array IWStageKernels::random_hsv_tiles(const Ref<IWPipelineContext> &
     std::vector<double> tint_mix(static_cast<size_t>(island_count), 0.0);
     for (int64_t n = 0; n < island_count; n++) {
         const uint64_t key = root + static_cast<uint64_t>(n) * 3;
-        turn[n] = signed_unit(mix64(key)) * hue_reach;
-        sat_scale[n] = 1.0 + unit(mix64(key + 1)) * (sat_end - 1.0);
-        val_scale[n] = 1.0 + unit(mix64(key + 2)) * (val_end - 1.0);
-        tint_mix[n] = unit(mix64(tint_root + static_cast<uint64_t>(n))) * tint_end;
+        turn[n] = iw::lerpf(hue_low, hue_high, unit(mix64(key)));
+        sat_scale[n] = iw::lerpf(sat_low, sat_high, unit(mix64(key + 1)));
+        val_scale[n] = iw::lerpf(val_low, val_high, unit(mix64(key + 2)));
+        tint_mix[n] = iw::lerpf(tint_low, tint_high,
+                unit(mix64(tint_root + static_cast<uint64_t>(n))));
     }
 
     const double to_unit = 1.0 / 255.0;
