@@ -55,9 +55,12 @@ signal state_changed(state: int)
 ## [code]schedulers[/code], each an Array of names.
 signal info_ready(lists: Dictionary)
 
-## Emitted as a run goes along. [param fraction] is -1.0 when there is nothing to measure,
-## which is most of a run until the pictures start coming back.
-signal progress(fraction: float, note: String)
+## Emitted as a run goes along.
+##
+## [param overall] is how far the whole batch has got; [param step] is how far the picture
+## being made has. Either is -1.0 when there is nothing to measure, which is most of a run
+## until the steps start arriving.
+signal progress(overall: float, step: float, note: String)
 
 ## Emitted as each picture arrives, before the rest of the batch is made. [param index]
 ## counts from zero.
@@ -214,7 +217,7 @@ func start(root: String) -> void:
     _run_id += 1
     var run := _run_id
     _set_state(State.STARTING)
-    progress.emit(-1.0, "Looking for a server already running")
+    progress.emit(-1.0, -1.0, "Looking for a server already running")
 
     var already := await _ask(_url + "/system_stats", ASK_TIMEOUT)
     if _stale(run):
@@ -224,8 +227,9 @@ func start(root: String) -> void:
         await _fetch_lists()
         return
 
-    # A console of its own, which is the log tail for free. Never through cmd: the id would
-    # be cmd's, and killing that orphans python on the graphics card.
+    # A console of its own, which is the log tail for free. It takes the focus on the way up;
+    # the dock takes it straight back. Never through cmd: the id would be cmd's, and killing
+    # that orphans python on the graphics card.
     var pid := OS.create_process(String(install["python"]),
             PackedStringArray([String(install["main"]), "--port", str(_port())]), true)
     if pid <= 0:
@@ -234,6 +238,21 @@ func start(root: String) -> void:
         return
     _owned_pid = pid
     await _wait_for_start(run)
+
+
+## Gives up on a start, closing the process if one was launched.
+##
+## Only between pressing Start and the server answering. There may be no process yet — the
+## first thing a start does is look for a server already running.
+func cancel_start() -> void:
+    if _state != State.STARTING:
+        return
+    _run_id += 1
+    if owns_process():
+        OS.kill(_owned_pid)
+        _owned_pid = -1
+    _lists = {}
+    _set_state(State.OFFLINE)
 
 
 ## Stops the server, but only one this dock started. See [method owns_process].
@@ -251,7 +270,7 @@ func stop() -> void:
 
 ## Polls until the server answers, or gives up on it.
 func _wait_for_start(run: int) -> void:
-    progress.emit(-1.0, "Starting ComfyUI. The first start loads the whole of PyTorch, so give it a minute.")
+    progress.emit(-1.0, -1.0, "Starting ComfyUI. The first start loads the whole of PyTorch, so give it a minute.")
     var waited := 0.0
     while waited < START_TIMEOUT:
         await get_tree().create_timer(START_POLL_SECONDS).timeout
@@ -392,7 +411,7 @@ func submit_batch(graphs: Array, source: Image = null) -> void:
     _set_state(State.RUNNING)
 
     if source != null:
-        progress.emit(-1.0, "Sending the picture")
+        progress.emit(-1.0, -1.0, "Sending the picture")
         var upload_trouble := await _upload_source(source)
         if _stale(run):
             return
@@ -407,7 +426,7 @@ func submit_batch(graphs: Array, source: Image = null) -> void:
     var made: Array[Image] = []
     for i in graphs.size():
         _batch_index = i
-        progress.emit(_overall(0.0), "%sSending the job" % _batch_prefix())
+        progress.emit(_overall(0.0), -1.0, "%sSending the job" % _batch_prefix())
         var images: Variant = await _run_one(graphs[i], run)
         if images == null:
             # Already reported, or overtaken. Either way the batch is over.
@@ -553,7 +572,8 @@ func _read_frame(text: String) -> void:
             if total <= 0.0:
                 return
             var value := float(data.get("value", 0.0))
-            progress.emit(_overall(clampf(value / total, 0.0, 1.0)),
+            var within := clampf(value / total, 0.0, 1.0)
+            progress.emit(_overall(within), within,
                     "%sStep %d of %d" % [_batch_prefix(), int(value), int(total)])
         "executing":
             # A node of null is the graph reaching its end. Nothing is confirmed by it —
@@ -564,7 +584,7 @@ func _read_frame(text: String) -> void:
             # walked the bar to its end, and claiming a number here would be a second
             # opinion about the same thing.
             if data.get("node") == null:
-                progress.emit(-1.0, "Finishing")
+                progress.emit(-1.0, -1.0, "%sFinishing" % _batch_prefix())
 
 
 # --- Following a run -----------------------------------------------------
@@ -574,7 +594,7 @@ func _read_frame(text: String) -> void:
 ## [b]The poll is what carries the run, whether or not the socket is up.[/b] All the socket
 ## does is move the bar and keep the watchdog quiet.
 func _follow(prompt_id: String, run: int) -> Variant:
-    progress.emit(_overall(0.0), "%sGenerating" % _batch_prefix())
+    progress.emit(_overall(0.0), -1.0, "%sGenerating" % _batch_prefix())
     var misses := 0
 
     while true:
@@ -662,7 +682,8 @@ func _collect(outputs: Dictionary, run: int) -> Variant:
     var images: Array[Image] = []
     var lost := 0
     for i in wanted.size():
-        progress.emit(_overall(float(i) / float(wanted.size())),
+        var fetched := float(i) / float(wanted.size())
+        progress.emit(_overall(fetched), fetched,
                 "%sFetching %d of %d" % [_batch_prefix(), i + 1, wanted.size()])
         var image := await _fetch_image(wanted[i])
         if _stale(run):
@@ -680,7 +701,7 @@ func _collect(outputs: Dictionary, run: int) -> Variant:
     # Said rather than failed: some of it came down, and the rest of the batch is still to
     # make. A failure here would stop everything over a picture that is already in hand.
     if lost > 0:
-        progress.emit(-1.0, "Got %d of %d pictures; the rest would not come down."
+        progress.emit(-1.0, -1.0, "Got %d of %d pictures; the rest would not come down."
                 % [images.size(), wanted.size()])
     return images
 

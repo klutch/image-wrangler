@@ -264,6 +264,13 @@ const EXPORT_FOLD_PIVOTS := "export/pivots"
 ## The same, for the Generate tab's hand-built server section.
 const GENERATE_FOLD_SERVER := "generate/server"
 
+## What the viewport says while a start is being waited on. There is nothing to measure, so
+## the spinner is the whole of it.
+const STARTING_CAPTION := "Waiting for ComfyUI Server"
+
+## Held here because the button swaps between this and the one for Cancel.
+const START_TOOLTIP := "Runs ComfyUI from the folder above, in a console window of its own.\n\nThat console is its log. It takes the focus as it opens and the dock takes it\nstraight back, so it ends up behind the editor rather than in front of it.\n\nStart looks first for one already answering and joins that instead, so pressing\nthis with ComfyUI already up costs nothing.\n\nThe first start of the day loads the whole of PyTorch. Give it a minute."
+
 ## Where the Generate tab's settings are kept.
 ##
 ## A fixed name rather than one keyed on the batch, unlike the Export tab's: a description
@@ -385,6 +392,10 @@ var _upscale: Upscale
 ## of the dock.
 var _generate: IWGenerate
 var _comfy: IWComfyServer
+
+## Set while a start is being waited on, so the first loss of focus after it — the console
+## ComfyUI opens — is taken straight back. See [method _notification].
+var _reclaiming_focus := false
 
 ## What the last batch made, one entry per picture, filled as they arrive.
 ##
@@ -1061,6 +1072,25 @@ func _exit_tree() -> void:
 func _notification(what: int) -> void:
     if what == NOTIFICATION_APPLICATION_FOCUS_IN:
         _refresh_paste_all_button()
+    elif what == NOTIFICATION_APPLICATION_FOCUS_OUT and _reclaiming_focus:
+        # Once only. Whatever took the focus during a start is the console ComfyUI opened,
+        # and a second grab would be fighting somebody who meant to leave.
+        _reclaiming_focus = false
+        # Deferred, because the window that took it is still coming up and asking in the
+        # same frame loses the race.
+        _reclaim_focus.call_deferred()
+
+
+## Takes the focus back from the console ComfyUI opened on its way up.
+##
+## Windows only lets a program that just had the focus take it back, which is exactly the
+## case here. It may still refuse, in which case the console stays in front.
+func _reclaim_focus() -> void:
+    var window := get_window()
+    if window == null:
+        return
+    window.move_to_foreground()
+    window.grab_focus()
 
 
 ## Builds the file operation and its form. One instance for the session, since a
@@ -2142,8 +2172,8 @@ func _select_mode(mode: int) -> void:
         if _comfy_heartbeat != null:
             _comfy_heartbeat.start()
         # A run started here and left running belongs to this tab, so its overlay comes back
-        # with it — and never went up over anybody else's.
-        _preview.set_busy(_generate_running)
+        # with it — and never went up over anybody else's. A start being waited on too.
+        _refresh_generate_busy()
     # Which of the two Save buttons has anything to do depends on the tab, so the switch
     # itself has to say so — nothing else runs on the way in.
     _update_controls()
@@ -2212,7 +2242,7 @@ func _build_generate_page() -> void:
     _comfy_start_button = Button.new()
     _comfy_start_button.text = "Start"
     _comfy_start_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _comfy_start_button.tooltip_text = "Runs ComfyUI from the folder above, in a console window of its own.\n\nIt looks first for one already answering and joins that instead, so pressing\nthis with ComfyUI already up costs nothing.\n\nThe first start of the day loads the whole of PyTorch. Give it a minute."
+    _comfy_start_button.tooltip_text = START_TOOLTIP
     _comfy_start_button.pressed.connect(_on_comfy_start)
     buttons.add_child(_comfy_start_button)
 
@@ -5214,11 +5244,20 @@ func _update_comfy_controls() -> void:
     if _comfy_install_note != null:
         _comfy_install_note.visible = not connected
 
+    # While a start is being waited on it is the only thing worth pressing, so it becomes the
+    # way out of one rather than a dead button saying what is already on screen.
+    var starting := state == ComfyServer.State.STARTING
     _comfy_start_button.visible = not connected
-    _comfy_start_button.disabled = _comfy == null \
-            or state != ComfyServer.State.OFFLINE \
-            or not bool(_comfy_install.get("found", false))
-    _comfy_start_button.text = "Starting" if state == ComfyServer.State.STARTING else "Start"
+    if starting:
+        _comfy_start_button.text = "Cancel"
+        _comfy_start_button.disabled = false
+        _comfy_start_button.tooltip_text = "Stops waiting, and closes ComfyUI if this dock got as far as starting it."
+    else:
+        _comfy_start_button.text = "Start"
+        _comfy_start_button.disabled = _comfy == null \
+                or state != ComfyServer.State.OFFLINE \
+                or not bool(_comfy_install.get("found", false))
+        _comfy_start_button.tooltip_text = START_TOOLTIP
     # Shown dead rather than hidden: that is what says the server is not ours to close.
     _comfy_stop_button.visible = connected
     _comfy_stop_button.disabled = _comfy == null or not _comfy.owns_process()
@@ -5259,6 +5298,12 @@ func _on_comfy_root_chosen(dir: String) -> void:
 func _on_comfy_start() -> void:
     if _comfy == null:
         return
+    # The same button, because while a start is being waited on it is the only thing worth
+    # pressing. See _update_comfy_controls.
+    if _comfy.state() == ComfyServer.State.STARTING:
+        _comfy.cancel_start()
+        _refuse_generate("Stopped waiting for ComfyUI.")
+        return
     # The typed folder counts even if focus never left the box, so pressing Start straight
     # after typing does what it looks like it does.
     _store_comfy_root()
@@ -5286,9 +5331,26 @@ func _on_comfy_stop_on_exit_toggled(pressed: bool) -> void:
         _comfy.stop_on_exit = pressed
 
 
-func _on_comfy_state(_state: int) -> void:
+func _on_comfy_state(state: int) -> void:
+    # Armed for the length of a start, and spent on the first loss of focus after it. See
+    # _notification.
+    _reclaiming_focus = state == ComfyServer.State.STARTING
     _refresh_comfy_status()
+    _refresh_generate_busy()
     _update_controls()
+
+
+## The busy overlay, which follows either a run or a start being waited on.
+##
+## Called only when one of those changes, never per frame: [method IWPreviewView.set_busy]
+## empties both bars, so a repeat while a run is going would keep wiping them.
+func _refresh_generate_busy() -> void:
+    if _mode != Mode.GENERATE or _preview == null:
+        return
+    var starting := _comfy != null and _comfy.state() == ComfyServer.State.STARTING
+    _preview.set_busy(_generate_running or starting)
+    if starting:
+        _preview.set_stage_progress(0.0, STARTING_CAPTION)
 
 
 ## Takes the lists the server offered and puts them in the dropdowns.
@@ -5311,15 +5373,25 @@ func _on_comfy_info(lists: Dictionary) -> void:
     _schedule_generate_save()
 
 
-func _on_comfy_progress(fraction: float, note: String) -> void:
+## The top bar is the whole batch, the bottom the picture being made.
+##
+## The bottom one resets between pictures on its own: its ratchet clears whenever the
+## caption changes, and the caption names which picture this is.
+func _on_comfy_progress(overall: float, step: float, note: String) -> void:
     # Only while this tab is up. Another tab's viewport is showing something else, and a bar
     # over it would be about work that has nothing to do with what is on screen.
     if _mode == Mode.GENERATE and _preview != null:
-        if fraction >= 0.0:
-            _preview.set_progress(fraction)
+        if overall >= 0.0:
+            _preview.set_progress(overall)
         # The caption goes up either way. A run with nothing to measure yet still has
         # something to say, and a bar with no words under it is the thing that reads as hung.
-        _preview.set_stage_progress(maxf(fraction, 0.0), note)
+        #
+        # A start keeps its own caption: what it has to say about PyTorch belongs in the
+        # status line rather than across the viewport.
+        var caption := note
+        if _comfy != null and _comfy.state() == ComfyServer.State.STARTING:
+            caption = STARTING_CAPTION
+        _preview.set_stage_progress(maxf(step, 0.0), caption)
     _set_generate_status(note)
 
 
