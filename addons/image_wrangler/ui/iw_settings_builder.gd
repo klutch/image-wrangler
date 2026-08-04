@@ -241,19 +241,21 @@ static func begin_group(container: Container, title: String, collapsed: bool,
 ##
 ## The heading is left alone, so a group can still be folded away while it is switched off.
 static func set_group_enabled(container: Node, title: String, enabled: bool) -> void:
-    var body := _find_group(container, title)
+    var body := find_group(container, title)
     if body == null:
         return
     body.modulate = Color(1.0, 1.0, 1.0, 1.0 if enabled else 0.5)
     _enable_into(body, enabled)
 
 
-static func _find_group(node: Node, title: String) -> Control:
+## The box holding the group headed [param title], or null. Public so a caller can put its
+## own control at the foot of a group the schema built.
+static func find_group(node: Node, title: String) -> Control:
     for child in node.get_children():
         if child is Control and child.has_meta(META_GROUP) \
                 and String(child.get_meta(META_GROUP)) == title:
             return child as Control
-        var found := _find_group(child, title)
+        var found := find_group(child, title)
         if found != null:
             return found
     return null

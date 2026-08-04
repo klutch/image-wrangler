@@ -455,6 +455,20 @@ func probe() -> void:
         await _fetch_lists()
 
 
+## Asks the server again for what it has, for models added since the last look.
+##
+## The forget is what makes it different from [method probe], which deliberately keeps a
+## list it already holds.
+func refresh_lists() -> void:
+    if _shutting_down or _busy_state():
+        return
+    if _state == State.OFFLINE:
+        probe()
+        return
+    _lists = {}
+    await _fetch_lists()
+
+
 ## Where a picture this dock sends lands in the server's input folder.
 ##
 ## One name, overwritten every run, so a session leaves no pile of copies. The client id is

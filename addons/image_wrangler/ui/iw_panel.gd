@@ -1170,6 +1170,7 @@ func _build_generate() -> void:
         # and reading the file again would undo whatever has not been written out yet.
         _load_generate_config()
     SettingsBuilder.build(_generate, _generate_box, _on_setting_changed, _fold_state, "generate")
+    _add_model_refresh_button()
     if _generate.has_catalogue():
         SettingsBuilder.refresh_choices(_generate, _generate_box)
     if _comfy_url_edit != null and _comfy != null:
@@ -4868,6 +4869,29 @@ func _on_comfy_stop() -> void:
         return
     _comfy.stop()
     _set_generate_status("Stopped ComfyUI.")
+
+
+## Puts Refresh at the foot of the Model group, for models added while the server was up.
+##
+## Hand-placed after the build rather than declared in the schema, because pressing it asks
+## the server — which the operation deliberately knows nothing about. It goes dead with the
+## rest of the group while no server is answering.
+func _add_model_refresh_button() -> void:
+    var body := SettingsBuilder.find_group(_generate_box, "Model")
+    if body == null:
+        return
+    var refresh := Button.new()
+    refresh.text = "Refresh"
+    refresh.tooltip_text = "Asks the server again for its checkpoints and LoRAs.\n\nFor models dropped into its folders while it was running. What is picked\nstays picked."
+    refresh.pressed.connect(_on_comfy_refresh_models)
+    body.add_child(refresh)
+
+
+func _on_comfy_refresh_models() -> void:
+    if _comfy == null:
+        return
+    _set_generate_status("Asking the server what it has.")
+    _comfy.refresh_lists()
 
 
 ## Takes what a started server printed and puts it under the loading bars.
