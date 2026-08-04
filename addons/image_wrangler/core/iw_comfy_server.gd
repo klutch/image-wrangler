@@ -14,6 +14,12 @@ extends Node
 
 ## Where a fresh dock looks first. ComfyUI's own default.
 const DEFAULT_URL := "http://127.0.0.1:8188"
+const DEFAULT_PORT := 8188
+
+## How long a start may take before it is given up on, and how often it is asked. The first
+## start of the day loads the whole of PyTorch.
+const START_TIMEOUT := 180.0
+const START_POLL_SECONDS := 1.0
 
 ## How long each kind of request may take. Fetching a picture is slower than asking a
 ## question, and a picture can be a few megabytes over loopback.
@@ -36,7 +42,7 @@ const POLL_FAILURES_ALLOWED := 3
 ## How long a run may go without a sign of life before it is let go, in seconds.
 const STALL_SECONDS := 180.0
 
-enum State { OFFLINE, READY, RUNNING }
+enum State { OFFLINE, STARTING, READY, RUNNING }
 
 ## Emitted when the server comes or goes, or a run starts or stops. See [enum State].
 signal state_changed(state: int)
@@ -63,8 +69,19 @@ signal failed(reason: String)
 ## wrong and the tab should not say anything did.
 signal cancelled()
 
+## Whether a server this dock started is killed on the way out.
+##
+## Off leaves it up between editor sessions, which saves the PyTorch load next time.
+var stop_on_exit := true
+
 var _url := DEFAULT_URL
 var _state := State.OFFLINE
+
+## The process this dock started, or -1. See [method owns_process].
+##
+## Never written to disk to be picked up again later: the OS reuses process ids, and a
+## stored one would eventually name something else entirely.
+var _owned_pid := -1
 
 ## Bumped for every run. Every reply carries the number it was asked under, so an answer
 ## belonging to a run that has already been abandoned is dropped rather than acted on.
@@ -152,12 +169,117 @@ func has_lists() -> bool:
     return not _lists.is_empty()
 
 
+## Whether ComfyUI is a process this dock started.
+##
+## The only thing Stop follows. One that was already up when the dock found it is somebody
+## else's, and stopping it would take away something we were only borrowing.
+##
+## Forgets a process that has since died, rather than only reporting it: holding the id of
+## something gone is how a reused id gets the wrong thing killed.
+func owns_process() -> bool:
+    if _owned_pid > 0 and not OS.is_process_running(_owned_pid):
+        _owned_pid = -1
+    return _owned_pid > 0
+
+
+## Starts ComfyUI from [param root] and waits for it to answer.
+##
+## [b]The first act is a probe.[/b] Something already answering is connected to and left
+## unowned — a second ComfyUI would only fight for the port.
+func start(root: String) -> void:
+    if _shutting_down or _state != State.OFFLINE or owns_process():
+        return
+
+    var install := IWComfyInstall.resolve(root)
+    if not install["found"]:
+        failed.emit(install["note"])
+        return
+
+    _run_id += 1
+    var run := _run_id
+    _set_state(State.STARTING)
+    progress.emit(-1.0, "Looking for a server already running")
+
+    var already := await _ask(_url + "/system_stats", ASK_TIMEOUT)
+    if _stale(run):
+        return
+    if already["ok"]:
+        _set_state(State.READY)
+        await _fetch_lists()
+        return
+
+    # A console of its own, which is the log tail for free. Never through cmd: the id would
+    # be cmd's, and killing that orphans python on the graphics card.
+    var pid := OS.create_process(String(install["python"]),
+            PackedStringArray([String(install["main"]), "--port", str(_port())]), true)
+    if pid <= 0:
+        _set_state(State.OFFLINE)
+        failed.emit("Could not start %s." % String(install["python"]).get_file())
+        return
+    _owned_pid = pid
+    await _wait_for_start(run)
+
+
+## Stops the server, but only one this dock started. See [method owns_process].
+func stop() -> void:
+    if not owns_process():
+        return
+    _run_id += 1
+    _close_socket()
+    OS.kill(_owned_pid)
+    _owned_pid = -1
+    _lists = {}
+    _prompt_id = ""
+    _set_state(State.OFFLINE)
+
+
+## Polls until the server answers, or gives up on it.
+func _wait_for_start(run: int) -> void:
+    progress.emit(-1.0, "Starting ComfyUI. The first start loads the whole of PyTorch, so give it a minute.")
+    var waited := 0.0
+    while waited < START_TIMEOUT:
+        await get_tree().create_timer(START_POLL_SECONDS).timeout
+        if _stale(run):
+            return
+        waited += START_POLL_SECONDS
+
+        # Gone before it ever answered. Why is in the console it opened, which is still on
+        # screen because it was started with one.
+        if not OS.is_process_running(_owned_pid):
+            _owned_pid = -1
+            _set_state(State.OFFLINE)
+            failed.emit("ComfyUI stopped before it was ready. Its console window says why.")
+            return
+
+        var reply := await _ask(_url + "/system_stats", ASK_TIMEOUT)
+        if _stale(run):
+            return
+        if reply["ok"]:
+            _set_state(State.READY)
+            await _fetch_lists()
+            return
+
+    # The process is left alone and still owned: slow is not dead, and Stop is the way out.
+    _set_state(State.OFFLINE)
+    failed.emit("ComfyUI has not answered in %d minutes. It may still be loading — press Connect."
+            % int(START_TIMEOUT / 60.0))
+
+
+## The port out of the address, so the server cannot come up somewhere the dock is not
+## looking.
+func _port() -> int:
+    var host := _url.get_slice("/", 2)
+    if not host.contains(":"):
+        return DEFAULT_PORT
+    return maxi(host.get_slice(":", 1).to_int(), 1)
+
+
 ## Asks whether the server is there, and what it has.
 ##
 ## Safe to call on every visit to the tab. A server already known and answering is not
 ## asked for its lists again — only a reconnection is.
 func probe() -> void:
-    if _shutting_down or _state == State.RUNNING:
+    if _shutting_down or _state == State.RUNNING or _state == State.STARTING:
         return
     var reply := await _ask(_url + "/system_stats", ASK_TIMEOUT)
     if _shutting_down:
@@ -265,13 +387,16 @@ func cancel() -> void:
 
 ## Drops whatever is in flight on the way out.
 ##
-## The server is deliberately left alone: the reply would arrive after the dock has gone,
-## and the picture is written to ComfyUI's own output folder whether we are here to collect
-## it or not.
+## A run is deliberately left alone: the reply would arrive after the dock has gone, and the
+## picture is written to ComfyUI's own output folder whether we are here to collect it or
+## not. The process itself goes only if we started it and were asked to take it with us.
 func shut_down() -> void:
     _shutting_down = true
     _run_id += 1
     _close_socket()
+    if stop_on_exit and owns_process():
+        OS.kill(_owned_pid)
+    _owned_pid = -1
 
 
 # --- The progress socket -------------------------------------------------

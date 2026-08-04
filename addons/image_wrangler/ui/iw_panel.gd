@@ -397,12 +397,31 @@ var _generate_index := 0
 ## button and the busy overlay both follow it and the server is null while the dock builds.
 var _generate_running := false
 
+## What [IWComfyInstall] last made of the install folder. See [method _refresh_comfy_install].
+##
+## Held rather than worked out again, because Start's disabled state is asked for on every
+## pass through [method _update_controls] and the answer only moves when the folder does.
+var _comfy_install := {}
+
 ## What size the picture a run started from was, before it was scaled to what the server
 ## works at. Zero for a run from noise.
 ##
 ## What comes back is put back to this, so a result lands on top of its source rather than
 ## at whatever size the form said.
 var _generate_source_size := Vector2i.ZERO
+
+## Which image the last result was made from, or null for a run from noise.
+##
+## The result stops being shown once the highlight moves off it, the way Upscale's does.
+## Compared by identity: selecting another file replaces the object and nothing else does.
+var _generate_source_of: Image
+
+## The processed selected image, and which image that was made from.
+##
+## Kept because the tab shows it whenever nothing has been generated for the highlighted
+## file yet, and running the stack again for every repaint would be felt.
+var _generate_preview: Image
+var _generate_preview_of: Image
 
 ## The sheet Packing last built, shown in the viewport while its tab is up.
 ##
@@ -700,6 +719,13 @@ var _generate_status: Label
 ## The address of the server, and what it last said about itself.
 var _comfy_url_edit: LineEdit
 var _comfy_status: Label
+## Where ComfyUI is installed, what was made of that folder, and the two buttons that use
+## it. Stop follows [method IWComfyServer.owns_process] and nothing else.
+var _comfy_root_edit: LineEdit
+var _comfy_install_note: Label
+var _comfy_start_button: Button
+var _comfy_stop_button: Button
+var _comfy_stop_toggle: CheckBox
 ## Says how the last upscale went, or why it could not run at all.
 var _upscale_status: Label
 ## Says what the selected model is for, sitting under its dropdown.
@@ -766,6 +792,7 @@ var _normal_reset_dialog: ConfirmationDialog
 var _paste_all_dialog: ConfirmationDialog
 var _stack_save_dialog: FileDialog
 var _stack_load_dialog: FileDialog
+var _comfy_root_dialog: FileDialog
 
 ## Which of the two stacks a pending Save or Load belongs to.
 ##
@@ -844,6 +871,7 @@ func _build_comfy() -> void:
     _comfy.failed.connect(_on_comfy_failed)
     _comfy.cancelled.connect(_on_comfy_cancelled)
     _comfy.set_url(IWAddonSettings.comfy_url())
+    _comfy.stop_on_exit = IWAddonSettings.comfy_stop_on_exit()
 
 
 ## The dock's keyboard shortcuts: Escape and Backspace close and unwind a drawn
@@ -1172,6 +1200,9 @@ func _build_generate() -> void:
         SettingsBuilder.refresh_choices(_generate, _generate_box)
     if _comfy_url_edit != null and _comfy != null:
         _comfy_url_edit.text = _comfy.url()
+    if _comfy_root_edit != null:
+        _comfy_root_edit.text = IWAddonSettings.comfy_root()
+    _refresh_comfy_install()
     _refresh_comfy_status()
 
 
@@ -1444,6 +1475,11 @@ func _forget_controls() -> void:
     _generate_status = null
     _comfy_url_edit = null
     _comfy_status = null
+    _comfy_root_edit = null
+    _comfy_install_note = null
+    _comfy_start_button = null
+    _comfy_stop_button = null
+    _comfy_stop_toggle = null
     _upscale_box = null
     _upscale_status = null
     _upscale_model_note = null
@@ -1477,6 +1513,7 @@ func _forget_controls() -> void:
     _paste_all_dialog = null
     _stack_save_dialog = null
     _stack_load_dialog = null
+    _comfy_root_dialog = null
     _stack_menu = null
 
 
@@ -2063,6 +2100,9 @@ func _select_mode(mode: int) -> void:
         # dropdowns are filled by the time the button is pressed.
         if _comfy != null and not _comfy.is_running():
             _comfy.probe()
+            # Or a flag left up by a run that was dropped without a word would put the
+            # overlay back over a tab with nothing going on. See _cancel_generate.
+            _generate_running = false
         # A run started here and left running belongs to this tab, so its overlay comes back
         # with it — and never went up over anybody else's.
         _preview.set_busy(_generate_running)
@@ -2104,6 +2144,51 @@ func _build_generate_page() -> void:
     connect_button.tooltip_text = "Ask that address whether ComfyUI is there, and what models it has."
     connect_button.pressed.connect(_on_comfy_connect)
     address.add_child(connect_button)
+
+    var install := HBoxContainer.new()
+    server.add_child(install)
+
+    _comfy_root_edit = LineEdit.new()
+    _comfy_root_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _comfy_root_edit.placeholder_text = "ComfyUI folder, for Start"
+    _comfy_root_edit.tooltip_text = "Where ComfyUI is installed on this machine.\n\nOnly Start needs it. If you always run ComfyUI yourself, leave it empty.\n\nPick the folder ComfyUI was installed into, not the one holding main.py."
+    _comfy_root_edit.text_submitted.connect(func(_text: String) -> void: _store_comfy_root())
+    _comfy_root_edit.focus_exited.connect(_store_comfy_root)
+    install.add_child(_comfy_root_edit)
+
+    var browse := Button.new()
+    browse.text = "Browse"
+    browse.pressed.connect(_on_comfy_browse)
+    install.add_child(browse)
+
+    _comfy_install_note = Label.new()
+    _comfy_install_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    _comfy_install_note.modulate = Color(1, 1, 1, 0.6)
+    server.add_child(_comfy_install_note)
+
+    var buttons := HBoxContainer.new()
+    server.add_child(buttons)
+
+    _comfy_start_button = Button.new()
+    _comfy_start_button.text = "Start"
+    _comfy_start_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _comfy_start_button.tooltip_text = "Runs ComfyUI from the folder above, in a console window of its own.\n\nIt looks first for one already answering and joins that instead, so pressing\nthis with ComfyUI already up costs nothing.\n\nThe first start of the day loads the whole of PyTorch. Give it a minute."
+    _comfy_start_button.pressed.connect(_on_comfy_start)
+    buttons.add_child(_comfy_start_button)
+
+    _comfy_stop_button = Button.new()
+    _comfy_stop_button.text = "Stop"
+    _comfy_stop_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _comfy_stop_button.tooltip_text = "Closes the ComfyUI this dock started.\n\nDead unless the dock started it. One that was already running belongs to\nsomething else, and taking it away would be a surprise."
+    _comfy_stop_button.pressed.connect(_on_comfy_stop)
+    buttons.add_child(_comfy_stop_button)
+
+    _comfy_stop_toggle = CheckBox.new()
+    _comfy_stop_toggle.text = "Stop On Exit"
+    _comfy_stop_toggle.button_pressed = IWAddonSettings.comfy_stop_on_exit()
+    _comfy_stop_toggle.tooltip_text = "Closes a ComfyUI this dock started when the editor closes.\n\nOff leaves it up, so the next session skips the load. It also leaves several\ngigabytes of video memory held by a window you may not notice."
+    _comfy_stop_toggle.toggled.connect(_on_comfy_stop_on_exit_toggled)
+    server.add_child(_comfy_stop_toggle)
 
     _comfy_status = Label.new()
     _comfy_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -2265,6 +2350,13 @@ func _build_dialogs() -> void:
     _stack_load_dialog.add_filter("*.json", "Operation Stack")
     _stack_load_dialog.file_selected.connect(_on_stack_load_chosen)
     add_child(_stack_load_dialog)
+
+    _comfy_root_dialog = FileDialog.new()
+    _comfy_root_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+    _comfy_root_dialog.access = FileDialog.ACCESS_FILESYSTEM
+    _comfy_root_dialog.title = "Where ComfyUI Is Installed"
+    _comfy_root_dialog.dir_selected.connect(_on_comfy_root_chosen)
+    add_child(_comfy_root_dialog)
 
     _stack_menu = PopupMenu.new()
     _stack_menu.id_pressed.connect(_on_stack_menu_chosen)
@@ -2578,6 +2670,9 @@ static func _load_image(path: String) -> Image:
 ## instead — an empty column with nothing above it but a dropdown reads as broken, and
 ## the first thing anyone does with a fresh dock is add an image anyway.
 func _apply_stack_for(path: String) -> void:
+    # A different image, or a different stack over the same one. Either way the Generate
+    # tab's kept copy no longer describes what would be sent.
+    _forget_generate_preview()
     _refreshing = true
     var stages: Array[IWStackOperation] = []
     if path.is_empty():
@@ -4326,11 +4421,16 @@ func _on_setting_changed() -> void:
         # Subtract island picked is the case — so the notes are asked again too.
         _refresh_notes()
         _capture_history()
+        # The stack decides what Generate would send, so its kept copy is now wrong.
+        _forget_generate_preview()
     _schedule_autosave()
     if _mode == Mode.GENERATE:
         # Its own file rather than any image's sidecar, so _schedule_autosave above did
         # nothing for it. Nothing is run: see GENERATE_SAVE_DEBOUNCE.
         _schedule_generate_save()
+        # Start From Selected Image decides what the viewport shows, and nothing else
+        # would notice it had been ticked.
+        _update_preview_texture()
         return
     if _mode == Mode.PACKING:
         # The note under the dropdown is the one part of this form that is not a setting,
@@ -4903,16 +5003,57 @@ func _update_pivot_overlay() -> void:
 
 # --- Generate ------------------------------------------------------------
 
-## The picture the viewport is showing, or null.
+## The picture of the last run, or null.
 func _current_generate_image() -> Image:
     if _generate_index < 0 or _generate_index >= _generate_images.size():
         return null
     return _generate_images[_generate_index]
 
 
+## What the Generate tab's viewport shows.
+##
+## The last result while it still belongs to what is highlighted, and before that the
+## picture a run would start from — so a run over a selected image can be lined up and
+## looked at before a minute of graphics card is spent on it.
+func _generate_preview_image() -> Image:
+    var made := _current_generate_image()
+    if made != null and (_generate_source_of == null or _generate_source_of == _source_image):
+        return made
+    var settings: IWGenerateSettings = _generate.get_settings() if _generate != null else null
+    if settings != null and settings.use_source:
+        return _generate_stack_result()
+    return null
+
+
+## The processed selected image, run once and kept. See [member _generate_preview].
+func _generate_stack_result() -> Image:
+    if _source_image == null:
+        return null
+    if _generate_preview != null and _generate_preview_of == _source_image:
+        return _generate_preview
+    _generate_preview = _processed_image(_current_path(), _source_image)
+    _generate_preview_of = _source_image
+    return _generate_preview
+
+
+## Drops the kept processed image, for a change that would make it come out different.
+func _forget_generate_preview() -> void:
+    _generate_preview = null
+    _generate_preview_of = null
+
+
 func _set_generate_status(text: String) -> void:
     if _generate_status != null:
         _generate_status.text = text
+
+
+## Says why a run will not start, in both places.
+##
+## The tab's own line is dim and sits under the button, which is a fine place for progress
+## and a poor one for the answer to a press that otherwise looks ignored.
+func _refuse_generate(note: String) -> void:
+    _set_generate_status(note)
+    _set_status(note)
 
 
 ## Says where the server is and what it said, under the address row.
@@ -4925,13 +5066,17 @@ func _refresh_comfy_status() -> void:
     match _comfy.state():
         ComfyServer.State.RUNNING:
             _comfy_status.text = "Working."
+        ComfyServer.State.STARTING:
+            _comfy_status.text = "Starting."
         ComfyServer.State.READY:
+            var whose := " Started here." if _comfy.owns_process() else ""
             if _generate != null and _generate.has_catalogue():
-                _comfy_status.text = "Connected. %d checkpoints." % _generate.checkpoints.size()
+                _comfy_status.text = "Connected. %d checkpoints.%s" \
+                        % [_generate.checkpoints.size(), whose]
             else:
-                _comfy_status.text = "Connected."
+                _comfy_status.text = "Connected.%s" % whose
         _:
-            _comfy_status.text = "Not connected. Start ComfyUI, then press Connect."
+            _comfy_status.text = "Not connected. Press Start, or run ComfyUI yourself and press Connect."
 
 
 func _store_comfy_url() -> void:
@@ -4948,6 +5093,77 @@ func _on_comfy_connect() -> void:
     _store_comfy_url()
     _set_generate_status("Asking %s what it has." % _comfy.url())
     _comfy.probe()
+
+
+## Start and Stop against what the server is doing now.
+##
+## Stop follows ownership and nothing else, so a server that was already up when the dock
+## found it can never be taken away by this.
+func _update_comfy_buttons() -> void:
+    if _comfy_start_button == null or _comfy_stop_button == null:
+        return
+    var state: int = _comfy.state() if _comfy != null else ComfyServer.State.OFFLINE
+    _comfy_start_button.disabled = _comfy == null \
+            or state != ComfyServer.State.OFFLINE \
+            or not bool(_comfy_install.get("found", false))
+    _comfy_start_button.text = "Starting" if state == ComfyServer.State.STARTING else "Start"
+    _comfy_stop_button.disabled = _comfy == null or not _comfy.owns_process()
+
+
+## Looks at the install folder again and says what was made of it, under the Browse row.
+func _refresh_comfy_install() -> void:
+    _comfy_install = IWComfyInstall.resolve(IWAddonSettings.comfy_root())
+    if _comfy_install_note != null:
+        _comfy_install_note.text = String(_comfy_install["note"])
+
+
+func _store_comfy_root() -> void:
+    if _comfy_root_edit == null:
+        return
+    IWAddonSettings.set_comfy_root(_comfy_root_edit.text)
+    _refresh_comfy_install()
+    _update_controls()
+
+
+func _on_comfy_browse() -> void:
+    if _comfy_root_dialog == null:
+        return
+    var root := IWAddonSettings.comfy_root()
+    if not root.is_empty():
+        _comfy_root_dialog.current_dir = root
+    _comfy_root_dialog.popup_centered_ratio(0.6)
+
+
+func _on_comfy_root_chosen(dir: String) -> void:
+    if _comfy_root_edit != null:
+        _comfy_root_edit.text = dir
+    IWAddonSettings.set_comfy_root(dir)
+    _refresh_comfy_install()
+    _update_controls()
+
+
+func _on_comfy_start() -> void:
+    if _comfy == null:
+        return
+    # The typed folder counts even if focus never left the box, so pressing Start straight
+    # after typing does what it looks like it does.
+    _store_comfy_root()
+    _store_comfy_url()
+    _set_generate_status("Starting ComfyUI.")
+    _comfy.start(IWAddonSettings.comfy_root())
+
+
+func _on_comfy_stop() -> void:
+    if _comfy == null:
+        return
+    _comfy.stop()
+    _set_generate_status("Stopped ComfyUI.")
+
+
+func _on_comfy_stop_on_exit_toggled(pressed: bool) -> void:
+    IWAddonSettings.set_comfy_stop_on_exit(pressed)
+    if _comfy != null:
+        _comfy.stop_on_exit = pressed
 
 
 func _on_comfy_state(_state: int) -> void:
@@ -5014,23 +5230,13 @@ func _on_comfy_finished(images: Array) -> void:
 
 
 func _on_comfy_failed(reason: String) -> void:
-    _generate_running = false
-    if _preview != null:
-        _preview.set_busy(false)
-    _set_generate_status(reason)
-    _refresh_comfy_status()
-    _update_controls()
+    _end_generate_run(reason)
 
 
 ## Nothing went wrong, so nothing is said beyond the fact that it stopped.
 func _on_comfy_cancelled() -> void:
-    _generate_running = false
-    if _preview != null:
-        _preview.set_busy(false)
-    _set_generate_status("Stopped.")
+    _end_generate_run("Stopped.")
     _set_status("Generation stopped.")
-    _refresh_comfy_status()
-    _update_controls()
 
 
 ## The one button: makes a picture, or stops the one being made.
@@ -5042,31 +5248,54 @@ func _on_generate_pressed() -> void:
 
 
 func _cancel_generate() -> void:
-    if _comfy != null and _generate_running:
-        _comfy.cancel()
+    if _comfy == null or not _generate_running:
+        return
+    # The flag goes up before submit's first await, so a run dropped without a word — one
+    # overtaken by another, or cut off by a shutdown — leaves it up with nothing behind it.
+    # Pressing the button is when that has to be noticed, or it stays stuck on Cancel and
+    # every press after it does nothing.
+    if not _comfy.is_running():
+        _end_generate_run("")
+        return
+    _comfy.cancel()
+
+
+## Puts the tab back to not-running, with [param note] on its status line.
+func _end_generate_run(note: String) -> void:
+    _generate_running = false
+    if _preview != null:
+        _preview.set_busy(false)
+    _set_generate_status(note)
+    _refresh_comfy_status()
+    _update_controls()
 
 
 ## Sends the form to the server, or says why it cannot.
 func _run_generate() -> void:
-    if _generate == null or _comfy == null or _generate_running:
+    if _generate == null or _comfy == null:
+        return
+    if _generate_running:
+        _refuse_generate("A generation is already going. Press Cancel to stop it.")
         return
     if _comfy.state() == ComfyServer.State.OFFLINE:
-        _set_generate_status("Not connected to ComfyUI. Set the address above and press Connect.")
+        _refuse_generate("Not connected to ComfyUI. Set the address above and press Connect.")
         return
     var settings: IWGenerateSettings = _generate.get_settings()
     var trouble := IWComfyGraph.trouble(settings, _source_image != null)
     if not trouble.is_empty():
-        _set_generate_status(trouble)
+        _refuse_generate(trouble)
         return
 
     # Before the seed is drawn, so a source that could not be read costs nothing.
     var source: Image = null
     _generate_source_size = Vector2i.ZERO
+    _generate_source_of = null
     if settings.use_source:
         source = _generate_source(settings)
         if source == null:
-            _set_generate_status("Could not process %s to send." % _current_path().get_file())
+            _refuse_generate("Could not process %s to send." % _current_path().get_file())
             return
+        _generate_source_of = _source_image
 
     # Drawn here rather than by the server, and written back, so the number that made the
     # picture on screen is the one sitting in the box.
@@ -5092,7 +5321,8 @@ func _run_generate() -> void:
 func _generate_source(settings: IWGenerateSettings) -> Image:
     if _source_image == null:
         return null
-    var processed := _processed_image(_current_path(), _source_image)
+    # The same pixels the viewport is already showing, so what was looked at is what goes.
+    var processed := _generate_stack_result()
     if processed == null:
         return null
     _generate_source_size = processed.get_size()
@@ -5971,7 +6201,7 @@ func _update_preview_texture() -> void:
     # No original underneath: nothing was made from anything, so the fade slider has no
     # second picture to lay over the first.
     if _mode == Mode.GENERATE:
-        _preview.set_image(_current_generate_image())
+        _preview.set_image(_generate_preview_image())
         _preview.set_original(null)
         return
     if _source_image == null:
@@ -6109,6 +6339,7 @@ func _update_controls() -> void:
     if _mode == Mode.GENERATE:
         _process_selected_button.disabled = _current_generate_image() == null
         _process_all_button.disabled = true
+        _update_comfy_buttons()
         if _generate_button != null:
             # Never disabled while a run is going: it is the way to stop one.
             _generate_button.disabled = not _generate_running and (_comfy == null \
