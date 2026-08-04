@@ -20,16 +20,21 @@ extends Resource
 ## How much lighter or darker, as a multiplier. 1 leaves it alone.
 @export var value: float = 1.0
 
+## How far to mix towards one flat hue, keeping each pixel's own lightness. 0 leaves the
+## colours as they are; 1 replaces them, with [member hue] naming the tint and
+## [member saturation] setting its strength.
+@export var colorize: float = 0.0
+
 
 ## Whether this would change anything if it ran.
 func is_active() -> bool:
     return enabled and rect.size.x > 0 and rect.size.y > 0 and not is_neutral()
 
 
-## Whether the three sliders are all sitting where they do nothing.
+## Whether the sliders are all sitting where they do nothing.
 func is_neutral() -> bool:
     return is_zero_approx(hue) and is_equal_approx(saturation, 1.0) \
-            and is_equal_approx(value, 1.0)
+            and is_equal_approx(value, 1.0) and is_zero_approx(colorize)
 
 
 ## What the row calls itself: where it is, and which sliders are off neutral.
@@ -41,5 +46,7 @@ func describe() -> String:
         parts.append("S%+d%%" % roundi((saturation - 1.0) * 100.0))
     if not is_equal_approx(value, 1.0):
         parts.append("V%+d%%" % roundi((value - 1.0) * 100.0))
+    if not is_zero_approx(colorize):
+        parts.append("C%d%%" % roundi(colorize * 100.0))
     var where := "(%d, %d) %d×%d" % [rect.position.x, rect.position.y, rect.size.x, rect.size.y]
     return where if parts.is_empty() else "%s  %s" % [where, " ".join(parts)]

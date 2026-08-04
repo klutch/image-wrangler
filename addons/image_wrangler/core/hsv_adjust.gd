@@ -3,11 +3,16 @@ class_name HSVAdjust
 extends IWStackOperation
 
 ## Turns the hue and scales the saturation and value of the pixels inside picked
-## rectangles.
+## rectangles, and can tint them to one flat colour.
 ##
-## Pick a region off the preview and it gets a row with three sliders of its own. Regions
+## Pick a region off the preview and it gets a row with four sliders of its own. Regions
 ## may overlap, and are applied in the order they were picked — each working on what the
 ## one before it left — so a broad correction can have a local one on top of it.
+##
+## [b]Colorize is the odd one.[/b] The other three move the colour that is already there.
+## Colorize throws it away and rebuilds each pixel from a single hue at that pixel's own
+## lightness, then mixes between the two answers. Turning it up re-reads Hue as a place on
+## the wheel rather than a distance round it, and Saturation as how strong the tint is.
 ##
 ## Alpha is never touched, and nor is any pixel outside every rectangle.
 ##
@@ -70,7 +75,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "property": &"regions",
             "label": "Regions",
             "type": SettingType.HSV_LIST,
-            "tooltip": "Rectangles picked off the preview, each with its own hue, saturation\nand value.",
+            "tooltip": "Rectangles picked off the preview, each with its own hue, saturation,\nvalue and colorize.",
         },
     ]
 
@@ -110,6 +115,7 @@ func process_context(ctx: IWPipelineContext) -> void:
         shifts.append(region.hue)
         shifts.append(region.saturation)
         shifts.append(region.value)
+        shifts.append(region.colorize)
     if rects.is_empty():
         report_progress(1.0)
         return

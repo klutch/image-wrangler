@@ -1,12 +1,11 @@
 @tool
 extends VBoxContainer
 
-## The HSV Adjustment list: rectangles picked off the preview, each with its own three
-## sliders.
+## The HSV Adjustment list: rectangles picked off the preview, each with its own sliders.
 ##
 ## Built on the same shape as the Island Picker — pick a region, get a row, edit the
 ## highlighted row underneath. What differs is what a row holds: an island carries one
-## tolerance and a mode, where a region here carries three adjustments and no mode, since
+## tolerance and a mode, where a region here carries four adjustments and no mode, since
 ## there is nothing to add or subtract.
 ##
 ## The [HSVRegionList] it edits is resolved through the operation's settings on every
@@ -42,12 +41,13 @@ var _list: EntryList
 var _pick_button: Button
 var _clear_button: Button
 
-## The three sliders for the highlighted row, hidden rather than disabled when nothing is
+## The sliders for the highlighted row, hidden rather than disabled when nothing is
 ## selected — a control that edits nothing should not be on screen.
 var _editor: VBoxContainer
 var _hue: EditorSpinSlider
 var _saturation: EditorSpinSlider
 var _value: EditorSpinSlider
+var _colorize: EditorSpinSlider
 var _reset_button: Button
 
 ## Set while the sliders are being pointed at another row, so their change signal does not
@@ -86,8 +86,8 @@ func _build() -> void:
     buttons.add_child(_clear_button)
 
     _list = EntryList.new()
-    # No mode dropdown: a region here has nothing to add or subtract, only three
-    # adjustments that are all on the sliders below.
+    # No mode dropdown: a region here has nothing to add or subtract, only the
+    # adjustments on the sliders below.
     _list.configure(false)
     _list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _list.row_selected.connect(_on_row_selected)
@@ -106,10 +106,12 @@ func _build() -> void:
             "How much more or less colourful, as a multiplier.\n\n1 leaves it alone, 0 drains it to grey. Above 1 deepens what is already\nthere and cannot invent colour in a pixel that has none.")
     _value = _add_slider("Value", 0.0, 3.0, 0.01,
             "How much lighter or darker, as a multiplier.\n\n1 leaves it alone. Above 1 lightens, and anything already at full\nbrightness stays there.")
+    _colorize = _add_slider("Colorize", 0.0, 1.0, 0.01,
+            "How far to mix towards one flat colour, keeping each pixel's own lightness.\n\nAt 0 the sliders above work as usual. Turning it up re-reads Hue as a place\non the wheel rather than a distance round it, and Saturation as how strong\nthe tint is. Black and white stay where they are.")
 
     _reset_button = Button.new()
     _reset_button.text = "Reset Sliders"
-    _reset_button.tooltip_text = "Put this region's three sliders back where they do nothing.\nThe region stays on the list."
+    _reset_button.tooltip_text = "Put this region's sliders back where they do nothing.\nThe region stays on the list."
     _reset_button.pressed.connect(_on_reset_pressed)
     _editor.add_child(_reset_button)
 
@@ -239,7 +241,7 @@ func _swatch_for(region: HSVRegion) -> Color:
     return Color.from_hsv(hue, SWATCH_SATURATION, SWATCH_VALUE)
 
 
-## Points the three sliders at the highlighted region, or hides them.
+## Points the sliders at the highlighted region, or hides them.
 func _load_editor() -> void:
     var region := _selected_region()
     _editor.visible = region != null
@@ -249,6 +251,7 @@ func _load_editor() -> void:
     _hue.value = region.hue
     _saturation.value = region.saturation
     _value.value = region.value
+    _colorize.value = region.colorize
     _loading_editor = false
 
 
@@ -301,6 +304,7 @@ func _on_slider_changed(_moved_to: float) -> void:
     region.hue = _hue.value
     region.saturation = _saturation.value
     region.value = _value.value
+    region.colorize = _colorize.value
     # One row rather than the whole list, so the label and swatch follow a dragged
     # slider without the rows being rebuilt under the pointer.
     _list.update_row(selected_index(), {
@@ -318,6 +322,7 @@ func _on_reset_pressed() -> void:
     region.hue = 0.0
     region.saturation = 1.0
     region.value = 1.0
+    region.colorize = 0.0
     _load_editor()
     _list.update_row(selected_index(), {
         "color": _swatch_for(region),

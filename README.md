@@ -83,7 +83,7 @@ one pass, so no stage sees a half-finished image. The Add dropdown lists them al
 | **Edge Cleanup** | Restores antialiasing on an edge that came back hard, and can outline it. |
 | **Exclude Tiles** | Click whole objects to hold them back, or to keep only those. |
 | **Fill Pinholes** | Closes small transparent specks inside a subject, matching each to its surroundings. |
-| **HSV Adjustment** | Pick rectangles off the preview. Each gets its own hue, saturation and value sliders. Regions may overlap. |
+| **HSV Adjustment** | Pick rectangles off the preview. Each gets its own hue, saturation, value and colorize sliders. Regions may overlap. |
 | **Matte Remove Background** | Recovers per-pixel coverage from an antialiased edge instead of thresholding it, so the silhouette stays soft rather than fringed or jagged. Keys off a flat background colour. |
 | **Neural Remove Background** | Hands the image to a trained network and lets it decide what is subject. Reaches background the colour key cannot: enclosed areas, and subjects too close in colour to the background. Needs a model — see [First run](#first-run). |
 | **Polygon Edit** | Draw a shape and force everything inside it transparent or opaque. For watermarks and scan edges. |

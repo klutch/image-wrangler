@@ -64,6 +64,46 @@ void to_hsv(double r, double g, double b, double &hue, double &sat, double &val)
     }
 }
 
+// HSL's lightness, not HSV's value. Value calls white and full red equally bright, so
+// tinting by it would turn white into a flat colour; lightness puts white at 1, where no
+// tint can reach it.
+double to_lightness(double r, double g, double b) {
+    const double highest = iw::maxf(r, iw::maxf(g, b));
+    const double lowest = iw::minf(r, iw::minf(g, b));
+    return (highest + lowest) * 0.5;
+}
+
+// One hue and one strength at a given lightness. Hue is a turn round the wheel, as
+// everywhere else here. Black and white come out unchanged whatever hue is asked for.
+void hsl_to_rgb(double hue, double sat, double light, double &r, double &g, double &b) {
+    const double chroma = (1.0 - iw::absf(2.0 * light - 1.0)) * sat;
+    if (chroma <= 0.0) {
+        r = light;
+        g = light;
+        b = light;
+        return;
+    }
+    const double sector = hue * 6.0;
+    const int64_t step = static_cast<int64_t>(iw::floori(sector)) % 6;
+    const double along = sector - iw::floori(sector);
+    const double rising = chroma * along;
+    const double falling = chroma * (1.0 - along);
+    switch (step) {
+        case 0: r = chroma; g = rising; b = 0.0; break;
+        case 1: r = falling; g = chroma; b = 0.0; break;
+        case 2: r = 0.0; g = chroma; b = rising; break;
+        case 3: r = 0.0; g = falling; b = chroma; break;
+        case 4: r = rising; g = 0.0; b = chroma; break;
+        default: r = chroma; g = 0.0; b = falling; break;
+    }
+    // Chroma is a span, not a position. Lift it so its middle sits at the asked-for
+    // lightness.
+    const double base = light - chroma * 0.5;
+    r += base;
+    g += base;
+    b += base;
+}
+
 void to_rgb(double hue, double sat, double val, double &r, double &g, double &b) {
     if (sat <= 0.0) {
         r = val;
@@ -92,9 +132,13 @@ void to_rgb(double hue, double sat, double val, double &r, double &g, double &b)
 // Turns the hue, and scales how colourful and how light the pixels are, inside each
 // rectangle it is given.
 //
-// The regions arrive flattened — four numbers of rectangle and three of adjustment per
+// The regions arrive flattened — four numbers of rectangle and four of adjustment per
 // region — for the reason every other kernel here takes flat arrays: reaching back into
 // an Array of Resources once per pixel would cost more than the whole adjustment does.
+//
+// [b]Colorize is a second answer, crossfaded in.[/b] The first three numbers move the
+// colour that is there; the fourth rebuilds the pixel from one hue at its own lightness
+// and mixes towards it. At 0 the branch is skipped and costs nothing.
 //
 // Regions are applied in the order they were picked, and they are allowed to overlap. Two
 // covering the same pixel both act on it, the second working on what the first left,
@@ -110,7 +154,7 @@ void IWStageKernels::adjust_hsv(const Ref<IWPipelineContext> &ctx,
         return;
     }
     const int64_t count = rects.size() / 4;
-    if (count <= 0 || shifts.size() < count * 3) {
+    if (count <= 0 || shifts.size() < count * 4) {
         return;
     }
 
@@ -130,18 +174,27 @@ void IWStageKernels::adjust_hsv(const Ref<IWPipelineContext> &ctx,
             continue;
         }
 
-        const double turn = shift[n * 3];
-        const double sat_scale = shift[n * 3 + 1];
-        const double val_scale = shift[n * 3 + 2];
+        const double turn = shift[n * 4];
+        const double sat_scale = shift[n * 4 + 1];
+        const double val_scale = shift[n * 4 + 2];
+        const double tint_mix = iw::clampf(shift[n * 4 + 3], 0.0, 1.0);
+
+        // Colorize reads the same two sliders the other way round: the turn as a place on
+        // the wheel rather than a distance along it, and the scale as a strength.
+        const bool tinting = tint_mix > 0.0;
+        const double tint_hue = turn - iw::floori(turn);
+        const double tint_sat = iw::clampf(sat_scale, 0.0, 1.0);
 
         for (int64_t y = top; y < bottom; y++) {
             for (int64_t x = left; x < right; x++) {
                 const int64_t at = (y * width + x) * 4;
+                const double src_r = data[at] * to_unit;
+                const double src_g = data[at + 1] * to_unit;
+                const double src_b = data[at + 2] * to_unit;
                 double hue = 0.0;
                 double sat = 0.0;
                 double val = 0.0;
-                to_hsv(data[at] * to_unit, data[at + 1] * to_unit, data[at + 2] * to_unit,
-                        hue, sat, val);
+                to_hsv(src_r, src_g, src_b, hue, sat, val);
 
                 // Hue wraps rather than clamping: the wheel has no ends, and a turn that
                 // stopped at red would bunch every shifted colour up against it.
@@ -154,6 +207,21 @@ void IWStageKernels::adjust_hsv(const Ref<IWPipelineContext> &ctx,
                 double g = 0.0;
                 double b = 0.0;
                 to_rgb(hue, sat, val, r, g, b);
+
+                if (tinting) {
+                    // The value slider keeps its meaning here, scaling the lightness the
+                    // tint is built at rather than the value it no longer has.
+                    const double light = iw::clampf(
+                            to_lightness(src_r, src_g, src_b) * val_scale, 0.0, 1.0);
+                    double tr = 0.0;
+                    double tg = 0.0;
+                    double tb = 0.0;
+                    hsl_to_rgb(tint_hue, tint_sat, light, tr, tg, tb);
+                    r = iw::lerpf(r, tr, tint_mix);
+                    g = iw::lerpf(g, tg, tint_mix);
+                    b = iw::lerpf(b, tb, tint_mix);
+                }
+
                 data[at] = static_cast<uint8_t>(iw::roundi(iw::clampf(r, 0.0, 1.0) * 255.0));
                 data[at + 1] = static_cast<uint8_t>(iw::roundi(iw::clampf(g, 0.0, 1.0) * 255.0));
                 data[at + 2] = static_cast<uint8_t>(iw::roundi(iw::clampf(b, 0.0, 1.0) * 255.0));
