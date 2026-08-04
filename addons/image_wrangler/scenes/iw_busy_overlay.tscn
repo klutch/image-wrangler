@@ -1,0 +1,111 @@
+[gd_scene format=3 uid="uid://iwbusyover01"]
+
+[ext_resource type="Script" uid="uid://43fgccs0yu6i" path="res://addons/image_wrangler/ui/iw_busy_overlay.gd" id="1_script"]
+
+[sub_resource type="StyleBoxFlat" id="panel"]
+content_margin_left = 18.0
+content_margin_top = 18.0
+content_margin_right = 18.0
+content_margin_bottom = 18.0
+bg_color = Color(0, 0, 0, 0.72)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+
+[sub_resource type="StyleBoxFlat" id="track_main"]
+bg_color = Color(0, 0, 0, 0.55)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(1, 1, 1, 0.25)
+
+[sub_resource type="StyleBoxFlat" id="fill_main"]
+bg_color = Color(0.4, 0.6, 1, 1)
+
+[sub_resource type="StyleBoxFlat" id="track_stage"]
+bg_color = Color(0, 0, 0, 0.55)
+
+[sub_resource type="StyleBoxFlat" id="fill_stage"]
+bg_color = Color(0.26, 0.39000002, 0.65, 1)
+
+[node name="BusyOverlay" type="Control" unique_id=2127011033]
+visible = false
+layout_mode = 3
+anchors_preset = 0
+mouse_filter = 2
+script = ExtResource("1_script")
+
+[node name="Scrim" type="ColorRect" parent="." unique_id=1775863398]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 0.3)
+
+[node name="Center" type="CenterContainer" parent="." unique_id=876000022]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="Center" unique_id=224883021]
+layout_mode = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("panel")
+
+[node name="Stack" type="VBoxContainer" parent="Center/Panel" unique_id=686093058]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Spinner" type="Control" parent="Center/Panel/Stack" unique_id=1684378290]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(78, 78)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Caption" type="Label" parent="Center/Panel/Stack" unique_id=1260508896]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.85)
+layout_mode = 2
+text = "Processing…"
+horizontal_alignment = 1
+
+[node name="Bars" type="VBoxContainer" parent="Center/Panel/Stack" unique_id=1288998210]
+layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="MainBar" type="ProgressBar" parent="Center/Panel/Stack/Bars" unique_id=2138384067]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(220, 6)
+layout_mode = 2
+theme_override_styles/background = SubResource("track_main")
+theme_override_styles/fill = SubResource("fill_main")
+max_value = 1.0
+step = 0.001
+show_percentage = false
+
+[node name="StageBar" type="ProgressBar" parent="Center/Panel/Stack/Bars" unique_id=1562114440]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(220, 3)
+layout_mode = 2
+theme_override_styles/background = SubResource("track_stage")
+theme_override_styles/fill = SubResource("fill_stage")
+max_value = 1.0
+step = 0.001
+show_percentage = false
+
+[node name="LogLabel" type="RichTextLabel" parent="Center/Panel/Stack" unique_id=538221019]
+unique_name_in_owner = true
+visible = false
+modulate = Color(1, 1, 1, 0.5)
+custom_minimum_size = Vector2(0, 250)
+layout_mode = 2
+bbcode_enabled = true

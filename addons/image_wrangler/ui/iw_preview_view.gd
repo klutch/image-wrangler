@@ -182,88 +182,10 @@ const PIVOT_ARM_WIDTH := 1.5
 ## be found on a sheet with a hundred of them.
 const PIVOT_SELECTED_SCALE := 1.5
 
-## The busy overlay: how far the image behind it is dimmed, and the shape of the
-## bar drawn over it.
-##
-## Dimmed rather than covered, because the point of the preview is the image and
-## the point of the overlay is that what you are looking at is one revision out of
-## date — not that it has gone away.
-const BUSY_SCRIM_ALPHA := 0.3
-const BUSY_BAR_WIDTH := 220.0
-const BUSY_BAR_HEIGHT := 6.0
-
-## Seconds the overlay takes to come up, and to go away again.
-##
-## Most runs are short, and an overlay that snapped on and off for every one of them
-## turned the preview into a flicker — the eye is caught by the change rather than by
-## the result, which is the opposite of what the thing is for. Fading means a run that
-## finishes inside this never reaches full strength: it shows as a swell rather than a
-## flash, and the shorter it is the less there is to see.
-##
-## Long enough to read as a fade rather than a fast cut, short enough that a run which
-## really is slow has its bar up almost at once.
-const BUSY_FADE_TIME := 0.5
-
-## The second bar, under the first: how far through the stage that is running, where
-## the one above is how far through the whole stack.
-##
-## Thinner and dimmer, because it is the subordinate reading. Two bars of equal weight
-## would leave the user working out which is which every time they looked.
-const BUSY_STAGE_BAR_HEIGHT := 3.0
-const BUSY_STAGE_BAR_GAP := 3.0
-
-## Shown while nothing has said which stage is running.
-const BUSY_CAPTION := "Processing…"
-
-## The lines a server being started has printed, drawn under the bars: how many are kept,
-## how wide the block may be, and the gap above it.
-const BUSY_LOG_LINES := 8
-const BUSY_LOG_WIDTH := 480.0
-const BUSY_LOG_GAP := 8.0
-
-## The panel the whole overlay sits in, so that a spinner and a caption over busy
-## artwork read as one thing rather than as marks on the image.
-const BUSY_PANEL_ALPHA := 0.72
-const BUSY_PANEL_RADIUS := 10
-const BUSY_PANEL_PADDING := 18.0
-
-## Closest the panel may come to the edge of the view, which is what decides how
-## much room the contents have on a narrow preview column.
-const BUSY_PANEL_MARGIN := 12.0
-
-## Diameter of the spinner, and the gap between it and what sits under it.
-##
-## Drawn rather than loaded from a PNG. Arcs stay crisp at any size and at any
-## editor scale, pick up the theme's accent colour, and cannot go missing — which
-## is worth more here than artwork would be, since this is the one thing on screen
-## whose whole job is to be noticed.
-const BUSY_RING_SIZE := 78.0
-const BUSY_SPINNER_GAP := 10.0
-
-## Stroke width as a fraction of the diameter, rather than a number of pixels.
-##
-## Proportional so the ring keeps its proportions when it has to shrink into a
-## narrow preview column — a fixed stroke would turn a small spinner into a blob
-## and leave a large one looking like wire.
-const BUSY_RING_THICKNESS := 0.115
-
-## Segments in the two arcs. Enough that the ring reads as round at full size,
-## which is where faceting would show.
-const BUSY_RING_SEGMENTS := 64
-
-## How the spinner turns.
-##
-## Not at a constant rate: the wobble term takes a tenth of a turn off and puts it
-## back once or so a second, which reads as something working at a thing rather
-## than as a wheel freewheeling. The numbers are picked so it never quite reverses
-## — the wobble's own peak rate is [code]0.10 * TAU * 1.3[/code], a hair under the
-## base rate — so it slows almost to a stop and then picks up again.
-const BUSY_SPIN_TURNS_PER_SECOND := 0.85
-const BUSY_SPIN_WOBBLE_TURNS := 0.10
-const BUSY_SPIN_WOBBLE_HZ := 1.3
-
-## Fraction of the ring the drawn fallback spinner fills.
-const BUSY_SPIN_SWEEP := 0.28
+## The working overlay — scrim, spinner, caption, bars and log — from its own scene.
+## Dimmed rather than covered, because the point of the preview is the image and the
+## point of the overlay is that what you are looking at is one revision out of date.
+const BusyOverlayScene := preload("res://addons/image_wrangler/scenes/iw_busy_overlay.tscn")
 
 const MIN_ZOOM := 1.0
 const MAX_ZOOM := 1000.0
@@ -392,44 +314,11 @@ var original_fade := 0.0:
         if _canvas != null:
             _canvas.queue_redraw()
 
-## Whether a run is in flight, and how far along it last said it was.
-##
-## Only ever written from the main thread — the worker reports through the dock,
-## which defers, so nothing here is touched from two threads at once.
-var _busy := false
-var _progress := 0.0
-
-## How far through the stage that is running, and which one it is.
-##
-## Separate from [member _progress] because the two answer different questions: how
-## far through the whole stack, and how far through the thing currently doing the
-## work. A single fraction cannot say both, and without the second a stack that spends
-## four seconds in one stage looks identical to one that has hung.
-var _stage_progress := 0.0
-var _stage_label := ""
-
-## What a server being started has printed, newest last. Drawn under the bars while
-## anything is in it.
-var _busy_log := PackedStringArray()
-
-## How far the overlay has faded up, 0 to 1, ramped over [constant BUSY_FADE_TIME]
-## towards whatever [member _busy] currently is.
-##
-## Separate from [member _busy] because the two are no longer the same thing: a run
-## can be over while its overlay is still on screen on its way out, and the next run
-## can start again from wherever that had got to rather than from nothing.
-##
-## Linear here and eased where it is drawn, so what accumulates is a plain fraction of
-## the fade time and the curve stays a decision the drawing makes.
-var _busy_fade := 0.0
-
-## Seconds the current run has been on screen, which is all the spinner needs to
-## know. Reset per run so every one starts from the same place.
-var _spin_time := 0.0
-
-## Built once. A StyleBox is the only way to get a rounded rectangle out of a
-## CanvasItem — draw_rect has square corners and nothing else.
-var _busy_panel: StyleBoxFlat
+## The working overlay, instanced from its scene in [method _init]. It owns the fade,
+## the spinner and the ratcheting bars; the busy setters below forward to it. Only
+## ever spoken to from the main thread — the worker reports through the dock, which
+## defers, so nothing here is touched from two threads at once.
+var _overlay: Control
 
 var _texture: Texture2D
 
@@ -576,6 +465,11 @@ func _init() -> void:
     _canvas.gui_input.connect(_on_canvas_gui_input)
     add_child(_canvas)
 
+    # Over the image and under the scrollbars, so a run dims the picture without
+    # taking the bars away.
+    _overlay = BusyOverlayScene.instantiate()
+    add_child(_overlay)
+
     _h_scroll = HScrollBar.new()
     _h_scroll.value_changed.connect(_on_h_scroll_changed)
     add_child(_h_scroll)
@@ -586,31 +480,7 @@ func _init() -> void:
 
 
 func _ready() -> void:
-    # Off until there is a spinner to turn; see set_busy.
-    set_process(false)
     _relayout()
-
-
-## Runs while the overlay is on screen at all, which outlasts the run itself by the
-## length of the fade.
-func _process(delta: float) -> void:
-    # Kept turning on the way out. A spinner that stops dead and then fades is two
-    # endings for one event, and the first of them says the wrong thing — that the
-    # work has stalled rather than finished.
-    _spin_time += delta
-
-    var target := 1.0 if _busy else 0.0
-    if not is_equal_approx(_busy_fade, target):
-        var step := delta / BUSY_FADE_TIME
-        _busy_fade = minf(_busy_fade + step, target) if target > _busy_fade \
-                else maxf(_busy_fade - step, target)
-    elif not _busy:
-        # Faded out and nothing running: the last frame of the fade has been drawn, so
-        # there is nothing left to animate until the next run.
-        _busy_fade = 0.0
-        set_process(false)
-
-    _canvas.queue_redraw()
 
 
 func _notification(what: int) -> void:
@@ -849,94 +719,30 @@ func clear_live_patch() -> void:
         _canvas.queue_redraw()
 
 
-## Puts the view into or out of its working state.
-##
-## Starting a run resets the bar, so a second run cannot appear to begin wherever
-## the first one left off. Neither end is immediate: both are a target for the fade in
-## [method _process] to travel towards, so a run that begins during the last one's exit
-## turns it round from wherever it had reached rather than snapping back to full.
+## Puts the view into or out of its working state. The overlay owns what that means —
+## the fade, the reset of the bars, the spinner carrying across back-to-back runs.
 func set_busy(active: bool) -> void:
-    if active:
-        # The bar resets even when a run was already going, since a replacement run
-        # starts from nothing and showing it inheriting the abandoned one's place
-        # would be a lie about how far along it is.
-        _progress = 0.0
-        _stage_progress = 0.0
-        _stage_label = ""
-        if not _busy:
-            # The spinner does not, though. It is saying work is happening, and one
-            # run giving way to another has not stopped it happening — restarting it
-            # would put a stutter in the one thing on screen that must look continuous.
-            # The same holds while the previous run's overlay is still fading: it is
-            # still on screen, so it is still one the eye can follow.
-            if _busy_fade <= 0.0:
-                _spin_time = 0.0
-            _busy = true
-            # Nothing here animates between runs, so the frame loop only runs while
-            # there is something to turn or to fade.
-            set_process(true)
-        _canvas.queue_redraw()
-        return
-
-    if not _busy:
-        return
-    _busy = false
-    # Deliberately still processing: the overlay has to be carried out rather than
-    # taken away, and [member _progress] is left where the run left it so the bar
-    # fades from what it reached instead of emptying first.
-    set_process(true)
-    _canvas.queue_redraw()
+    _overlay.set_busy(active)
 
 
-## How far along the run says it is, 0 to 1.
-##
-## Never goes backwards within a run. A report out of order — which is easy enough
-## to introduce by reordering the passes that send them — would otherwise show as
-## a bar that stutters, and a bar that stutters is worse than one that is coarse.
+## How far along the run says it is, 0 to 1. Ratcheted by the overlay so a report out
+## of order cannot make the bar stutter.
 func set_progress(fraction: float) -> void:
-    if not _busy:
-        return
-    var clamped := maxf(_progress, clampf(fraction, 0.0, 1.0))
-    if is_equal_approx(_progress, clamped):
-        return
-    _progress = clamped
-    _canvas.queue_redraw()
+    _overlay.set_progress(fraction)
 
 
 ## How far along the stage named [param label] says it is, 0 to 1.
-##
-## Ratcheted within a stage for the same reason the bar above is, but deliberately not
-## across them: this one is meant to reset every time the run moves on, and that reset
-## is most of what it is saying. The label changing is what a new stage looks like from
-## here, so it is what clears the ratchet.
 func set_stage_progress(fraction: float, label: String) -> void:
-    if not _busy:
-        return
-    var changed := label != _stage_label
-    if changed:
-        _stage_label = label
-        _stage_progress = 0.0
-    var clamped := maxf(_stage_progress, clampf(fraction, 0.0, 1.0))
-    if not changed and is_equal_approx(_stage_progress, clamped):
-        return
-    _stage_progress = clamped
-    _canvas.queue_redraw()
+    _overlay.set_stage_progress(fraction, label)
 
 
 ## Adds [param text] to the lines drawn under the bars, keeping the newest few.
 func append_busy_log(text: String) -> void:
-    for line: String in text.split("\n", false):
-        _busy_log.append(line)
-    while _busy_log.size() > BUSY_LOG_LINES:
-        _busy_log.remove_at(0)
-    _canvas.queue_redraw()
+    _overlay.append_log(text)
 
 
 func clear_busy_log() -> void:
-    if _busy_log.is_empty():
-        return
-    _busy_log.clear()
-    _canvas.queue_redraw()
+    _overlay.clear_log()
 
 
 func get_zoom() -> float:
@@ -1096,6 +902,9 @@ func _relayout() -> void:
 
     _canvas.position = Vector2.ZERO
     _canvas.size = _viewport
+    # The overlay covers exactly what the canvas does, scrollbars excluded.
+    _overlay.position = Vector2.ZERO
+    _overlay.size = _viewport
 
     _syncing_bars = true
     # A Range clamps its value to [min_value, max_value - page], so the bars have
@@ -1572,8 +1381,6 @@ func _pixel_at_clamped(local_position: Vector2) -> Vector2i:
 func _draw_canvas() -> void:
     _canvas.draw_texture_rect(_checker, Rect2(Vector2.ZERO, _viewport), true)
     if _texture == null or _content_size.x <= 0.0 or _content_size.y <= 0.0:
-        # Still worth saying something is happening, even with nothing to dim.
-        _draw_busy()
         return
     var frame := Rect2(_content_origin, _content_size)
     # Over the checkerboard and under the image, so the margins still say where the image
@@ -1607,9 +1414,6 @@ func _draw_canvas() -> void:
     # Over the tile patches and the marks, since a pivot is a point on one sprite and has
     # to be findable on a sheet those have already covered.
     _draw_pivots()
-    # Over everything, including the overlays, since it is about the whole view
-    # rather than about anything drawn on it.
-    _draw_busy()
 
 
 ## Where a rectangle of image pixels lands on screen.
@@ -1936,234 +1740,6 @@ func _draw_handle(center: Vector2, color: Color, emphasised := false) -> void:
     var box := Rect2(center - Vector2(half, half), Vector2(half, half) * 2.0)
     _canvas.draw_rect(box.grow(1.0), Color(0, 0, 0, 0.75), true)
     _canvas.draw_rect(box, color, true)
-
-
-## Dims the view and draws a progress bar across the middle of it.
-##
-## The bar is the honest shape for this: the passes behind it report where they
-## have got to, so there is a real fraction to draw. It advances unevenly, because
-## the passes are not equally expensive and the reports say so rather than
-## pretending otherwise.
-func _draw_busy() -> void:
-    # Not [member _busy]: a finished run is still on screen for the length of its fade,
-    # and this is the only thing that says whether there is anything left to draw.
-    var fade := _busy_alpha()
-    if fade <= 0.0:
-        return
-
-    _canvas.draw_rect(
-        Rect2(Vector2.ZERO, _viewport), Color(0, 0, 0, BUSY_SCRIM_ALPHA * fade), true)
-
-    var accent := Color(0.4, 0.6, 1.0)
-    if has_theme_color(&"accent_color", &"Editor"):
-        accent = get_theme_color(&"accent_color", &"Editor")
-    # Carries the fade into both bars and the spinner arc, which are the only things
-    # drawn in it. [method Color.darkened] leaves alpha alone, so the stage bar's
-    # dimmer shade inherits this too.
-    accent.a *= fade
-
-    var font := get_theme_default_font()
-    var font_size := get_theme_default_font_size()
-    # The running stage's name rather than a fixed word, so a slow stack says which
-    # part of it is slow instead of only that it is.
-    var caption_text := _stage_label if not _stage_label.is_empty() else BUSY_CAPTION
-    var caption := Vector2.ZERO
-    if font != null:
-        caption = font.get_string_size(caption_text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size)
-
-    # Everything has to fit between the panel's padding and the view's edges, so
-    # the room left for the contents is what is worked out first and everything
-    # below sizes itself against it.
-    var room := Vector2(
-        maxf(_viewport.x - (BUSY_PANEL_MARGIN + BUSY_PANEL_PADDING) * 2.0, 0.0),
-        maxf(_viewport.y - (BUSY_PANEL_MARGIN + BUSY_PANEL_PADDING) * 2.0, 0.0),
-    )
-    if room.x <= 0.0 or room.y <= 0.0:
-        return
-
-    var spinner := _spinner_size(room, caption.y)
-    var bar_width := minf(BUSY_BAR_WIDTH, room.x)
-
-    # The started server's lines, smaller than the caption: detail, not the headline.
-    var log_font_size := maxi(font_size - 3, 9)
-    var log_line := 0.0
-    var log_size := Vector2.ZERO
-    if font != null and not _busy_log.is_empty():
-        log_line = font.get_height(log_font_size)
-        log_size = Vector2(minf(BUSY_LOG_WIDTH, room.x), log_line * float(_busy_log.size()))
-
-    # Stacked and centred as one group, so a short preview column drops the bar
-    # rather than pushing the spinner off its middle.
-    var stack := spinner.y
-    if caption.y > 0.0:
-        stack += BUSY_SPINNER_GAP + caption.y
-    if bar_width > 0.0:
-        stack += BUSY_SPINNER_GAP + BUSY_BAR_HEIGHT + BUSY_STAGE_BAR_GAP + BUSY_STAGE_BAR_HEIGHT
-    if log_size.y > 0.0:
-        stack += BUSY_LOG_GAP + log_size.y
-    var content := Vector2(
-            maxf(maxf(maxf(spinner.x, caption.x), bar_width), log_size.x), stack)
-
-    # The panel first, since everything else is drawn on top of it.
-    var panel := Rect2(
-        Vector2(
-            floorf((_viewport.x - content.x) * 0.5 - BUSY_PANEL_PADDING),
-            floorf((_viewport.y - content.y) * 0.5 - BUSY_PANEL_PADDING),
-        ),
-        (content + Vector2(BUSY_PANEL_PADDING, BUSY_PANEL_PADDING) * 2.0).floor(),
-    )
-    _canvas.draw_style_box(_panel_style(), panel)
-
-    var top := floorf((_viewport.y - content.y) * 0.5)
-
-    _draw_spinner(Vector2(floorf(_viewport.x * 0.5), top + spinner.y * 0.5), spinner, accent)
-    top += spinner.y
-
-    if caption.y > 0.0:
-        top += BUSY_SPINNER_GAP
-        _canvas.draw_string(
-            font,
-            # draw_string takes the baseline, not the top of the line.
-            Vector2(floorf((_viewport.x - caption.x) * 0.5), top + font.get_ascent(font_size)),
-            caption_text,
-            HORIZONTAL_ALIGNMENT_LEFT,
-            -1.0,
-            font_size,
-            Color(1, 1, 1, 0.85 * fade),
-        )
-        top += caption.y
-
-    if bar_width <= 0.0:
-        return
-    top += BUSY_SPINNER_GAP
-    var origin := Vector2(floorf((_viewport.x - bar_width) * 0.5), floorf(top))
-
-    _draw_bar(origin, bar_width, BUSY_BAR_HEIGHT, _progress, accent, true)
-    _draw_bar(
-        origin + Vector2(0.0, BUSY_BAR_HEIGHT + BUSY_STAGE_BAR_GAP),
-        bar_width,
-        BUSY_STAGE_BAR_HEIGHT,
-        _stage_progress,
-        accent.darkened(0.35),
-        false,
-    )
-
-    if log_size.y <= 0.0:
-        return
-    top += BUSY_BAR_HEIGHT + BUSY_STAGE_BAR_GAP + BUSY_STAGE_BAR_HEIGHT + BUSY_LOG_GAP
-    var log_x := floorf((_viewport.x - log_size.x) * 0.5)
-    for line: String in _busy_log:
-        # The width clips a long line rather than letting it out of the panel.
-        _canvas.draw_string(
-            font,
-            Vector2(log_x, floorf(top + font.get_ascent(log_font_size))),
-            line,
-            HORIZONTAL_ALIGNMENT_LEFT,
-            log_size.x,
-            log_font_size,
-            Color(1, 1, 1, 0.5 * fade),
-        )
-        top += log_line
-
-
-## One progress bar. Track first, then the fill over it, so a fraction of zero still
-## reads as a bar waiting rather than as nothing at all.
-##
-## [param outlined] is for the upper bar only: an outline around the thin one would be
-## most of its height.
-func _draw_bar(origin: Vector2, width: float, height: float, fraction: float, fill: Color, outlined: bool) -> void:
-    # The fill arrives already faded, since its colour is the caller's; the track and
-    # the outline are this function's own and have to be faded here.
-    var fade := _busy_alpha()
-    _canvas.draw_rect(Rect2(origin, Vector2(width, height)), Color(0, 0, 0, 0.55 * fade), true)
-    if fraction > 0.0:
-        _canvas.draw_rect(Rect2(origin, Vector2(floorf(width * fraction), height)), fill, true)
-    if outlined:
-        _canvas.draw_rect(
-            Rect2(origin, Vector2(width, height)), Color(1, 1, 1, 0.25 * fade), false, 1.0)
-
-
-## The spinner at [param center], turned to wherever the run has got to in time.
-##
-## The bar says how far along the work is and the spinner says the work is still
-## happening. They answer different questions: a bar that has not moved for four
-## seconds is indistinguishable from one that has hung, and a stage of this
-## operation can easily take that long.
-func _draw_spinner(center: Vector2, size: Vector2, accent: Color) -> void:
-    var turns := _spin_time * BUSY_SPIN_TURNS_PER_SECOND \
-            + BUSY_SPIN_WOBBLE_TURNS * sin(TAU * BUSY_SPIN_WOBBLE_HZ * _spin_time)
-    var angle := TAU * turns
-    var radius := minf(size.x, size.y) * 0.5
-    if radius <= 0.0:
-        return
-
-    # Kept off the outer edge, since a stroke straddles the radius it is drawn at
-    # and half of it would otherwise sit outside the size asked for.
-    var thickness := maxf(radius * 2.0 * BUSY_RING_THICKNESS, 1.0)
-    radius -= thickness * 0.5
-
-    # A faint full ring under a bright arc running round it. The ring underneath is
-    # what keeps the arc from reading as a stray mark at the moments the wobble has
-    # it nearly stopped.
-    _canvas.draw_arc(
-        center,
-        radius,
-        0.0,
-        TAU,
-        BUSY_RING_SEGMENTS,
-        # The arc over it arrives faded with the accent; this one is the spinner's own.
-        Color(1, 1, 1, 0.18 * _busy_alpha()),
-        thickness,
-        true,
-    )
-    _canvas.draw_arc(
-        center,
-        radius,
-        angle,
-        angle + TAU * BUSY_SPIN_SWEEP,
-        BUSY_RING_SEGMENTS,
-        accent,
-        thickness,
-        true,
-    )
-
-
-## How big to draw the spinner, given the [param room] the panel has and the
-## [param caption_height] that has to share it.
-##
-## Fixed at [constant BUSY_RING_SIZE] until the view is too small to hold it, and
-## then square, so it turns round rather than wobbling on an oval.
-func _spinner_size(room: Vector2, caption_height: float) -> Vector2:
-    # What is left once the caption and the bar have taken their share, so a short
-    # view shrinks the spinner rather than pushing them out of the panel.
-    var spare := room.y - BUSY_BAR_HEIGHT - BUSY_SPINNER_GAP
-    if caption_height > 0.0:
-        spare -= caption_height + BUSY_SPINNER_GAP
-
-    var ring := minf(BUSY_RING_SIZE, minf(room.x, maxf(spare, 0.0)))
-    return Vector2(ring, ring)
-
-
-## The rounded black panel behind the overlay, built on first use.
-##
-## Its colour is set on every call rather than only on the first, since it is the one
-## part of the overlay whose fade cannot be applied at the draw — a StyleBox carries
-## its own.
-func _panel_style() -> StyleBoxFlat:
-    if _busy_panel == null:
-        _busy_panel = StyleBoxFlat.new()
-        _busy_panel.set_corner_radius_all(BUSY_PANEL_RADIUS)
-    _busy_panel.bg_color = Color(0, 0, 0, BUSY_PANEL_ALPHA * _busy_alpha())
-    return _busy_panel
-
-
-## The opacity the overlay is drawn at: [member _busy_fade], eased.
-##
-## Eased rather than taken straight, because a linear fade is not seen as an even one
-## — it appears to arrive suddenly and then crawl. Smoothing both ends is most of what
-## makes this read as the overlay arriving rather than as it being switched on.
-func _busy_alpha() -> float:
-    return smoothstep(0.0, 1.0, _busy_fade)
 
 
 static func _build_checker() -> Texture2D:
