@@ -406,12 +406,6 @@ Off leaves it up, so the next session skips the load. It also leaves several
 gigabytes of video memory held by a window you may not notice."
 text = "Stop On Exit"
 
-[node name="ComfyStatus" type="Label" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot/ServerRows"]
-unique_name_in_owner = true
-modulate = Color(1, 1, 1, 0.6)
-layout_mode = 2
-autowrap_mode = 3
-
 [node name="GenerateBox" type="VBoxContainer" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn"]
 unique_name_in_owner = true
 layout_mode = 2

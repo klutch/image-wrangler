@@ -28,6 +28,38 @@ const MAX_BATCH := 64
 ## burnt, and a slider that spends most of its travel in the ruined part is no use.
 const MAX_CFG := 30.0
 
+## The deepest useful CLIP skip. The encoder has twelve layers, but nothing is trained
+## past two or three, and the same slider rule applies.
+const MAX_CLIP_SKIP := 4
+
+## What a model's name gives away about the settings it wants. Checked lowercased, in
+## order, first match wins — so the speed words beat the family words.
+##
+## The value keys are the low end of what the note's prose suggests, and are what Set
+## applies. clip_skip is only present where a family is known to want one.
+const NAME_HINTS := [
+    {"word": "lightning", "note": "few-step model: 4-6 steps, CFG 1-2, euler + sgm_uniform",
+        "sampler": "euler", "scheduler": "sgm_uniform", "steps": 4, "cfg": 1.0},
+    {"word": "hyper", "note": "few-step model: 8 steps, CFG 1-1.5, euler + sgm_uniform",
+        "sampler": "euler", "scheduler": "sgm_uniform", "steps": 8, "cfg": 1.0},
+    {"word": "turbo", "note": "few-step model: 4-8 steps, CFG 1-2, dpmpp_sde + karras",
+        "sampler": "dpmpp_sde", "scheduler": "karras", "steps": 4, "cfg": 1.0},
+    {"word": "lcm", "note": "wants its own sampler: lcm + sgm_uniform, 4-8 steps, CFG 1-2",
+        "sampler": "lcm", "scheduler": "sgm_uniform", "steps": 4, "cfg": 1.0},
+    {"word": "schnell", "note": "few-step model: 4 steps, CFG 1, euler + simple",
+        "sampler": "euler", "scheduler": "simple", "steps": 4, "cfg": 1.0},
+    {"word": "flux", "note": "20 steps, CFG 1, euler + simple",
+        "sampler": "euler", "scheduler": "simple", "steps": 20, "cfg": 1.0},
+    {"word": "pony", "note": "SDXL family: 25 steps, CFG 6-7, euler_ancestral + normal, CLIP skip 2",
+        "sampler": "euler_ancestral", "scheduler": "normal", "steps": 25, "cfg": 6.0,
+        "clip_skip": 2},
+    {"word": "illustrious", "note": "SDXL family: 25 steps, CFG 5-7, euler_ancestral + normal, CLIP skip 2",
+        "sampler": "euler_ancestral", "scheduler": "normal", "steps": 25, "cfg": 5.0,
+        "clip_skip": 2},
+    {"word": "xl", "note": "SDXL family: 20-30 steps, CFG 5-7, dpmpp_2m + karras",
+        "sampler": "dpmpp_2m", "scheduler": "karras", "steps": 20, "cfg": 5.0},
+]
+
 @export var settings: IWGenerateSettings
 
 ## What the server said it has, filled by the dock from [signal IWComfyServer.info_ready].
@@ -102,6 +134,33 @@ func has_catalogue() -> bool:
     return not checkpoints.is_empty()
 
 
+## One entry per picked model whose name says something: [code]line[/code] to show, and
+## the low-end values under the [constant NAME_HINTS] keys for its Set to apply.
+##
+## Empty when neither name says anything — a name with no hints in it is not worth a
+## warning that never goes away.
+func advice_rows() -> Array[Dictionary]:
+    var rows: Array[Dictionary] = []
+    for name: String in [settings.checkpoint, settings.lora, settings.lora2]:
+        if name == IWComfyGraph.LORA_NONE:
+            continue
+        var hint := _hint_for(name)
+        if hint.is_empty():
+            continue
+        var row := hint.duplicate()
+        row["line"] = "%s — %s." % [name.get_file().get_basename(), hint["note"]]
+        rows.append(row)
+    return rows
+
+
+static func _hint_for(name: String) -> Dictionary:
+    var lower := name.to_lower()
+    for hint: Dictionary in NAME_HINTS:
+        if lower.contains(String(hint["word"])):
+            return hint
+    return {}
+
+
 func get_settings_schema() -> Array[Dictionary]:
     return [
         {
@@ -110,19 +169,22 @@ func get_settings_schema() -> Array[Dictionary]:
             "type": SettingType.CHOICE,
             "options": checkpoints,
             "group": "Model",
+            # Every group here opens folded. The whole tab is taller than the dock, and the
+            # one thing worth seeing before anything else is whether there is a server.
+            "collapsed": true,
             "tooltip": "Which model makes the picture.\n\nThe list is whatever the server has. It is empty until the dock has spoken to\none, and what a model was trained on decides far more about the result than any\nother setting here.",
         },
         {
             "property": &"lora",
-            "label": "LoRA",
+            "label": "LoRA 1",
             "type": SettingType.CHOICE,
             "options": loras,
             "group": "Model",
-            "tooltip": "A small extra model that leans the checkpoint towards a subject or a style.\n\nOne at a time. Pick %s to use the checkpoint on its own." % IWComfyGraph.LORA_NONE,
+            "tooltip": "A small extra model that leans the checkpoint towards a subject or a style.\n\nPick %s to use the checkpoint on its own." % IWComfyGraph.LORA_NONE,
         },
         {
             "property": &"lora_strength",
-            "label": "LoRA Strength",
+            "label": "LoRA 1 Strength",
             "type": SettingType.FLOAT,
             "min": -2.0,
             "max": 2.0,
@@ -131,11 +193,40 @@ func get_settings_schema() -> Array[Dictionary]:
             "tooltip": "How hard that LoRA leans. One is how it was trained to be used.\n\nBelow one softens it. Above one usually takes the picture apart. Negative\npushes the other way, which sometimes works and usually does not.",
         },
         {
+            "property": &"lora2",
+            "label": "LoRA 2",
+            "type": SettingType.CHOICE,
+            "options": loras,
+            "group": "Model",
+            "tooltip": "A second LoRA, stacked on top of the first.\n\nThe usual pairing is one for speed and one for style. Both lean the same\ncheckpoint, so two that pull hard in different directions will fight.",
+        },
+        {
+            "property": &"lora2_strength",
+            "label": "LoRA 2 Strength",
+            "type": SettingType.FLOAT,
+            "min": -2.0,
+            "max": 2.0,
+            "step": 0.05,
+            "group": "Model",
+            "tooltip": "How hard the second LoRA leans. Same rules as the first.",
+        },
+        {
+            "property": &"clip_skip",
+            "label": "CLIP Skip",
+            "type": SettingType.INT,
+            "min": 1,
+            "max": MAX_CLIP_SKIP,
+            "step": 1,
+            "group": "Model",
+            "tooltip": "How many layers of the text encoder go unused, counted from the end.\n\nOne is the whole encoder, which is what most models want. Anime-family models\n— Pony, Illustrious, NoobAI — were trained at two, and read prompts worse\nat one.",
+        },
+        {
             "property": &"positive",
             "label": "Description",
             "type": SettingType.TEXT,
             "lines": 5,
             "group": "Prompt",
+            "collapsed": true,
             "tooltip": "What to make.\n\nWhat a model answers to depends on what it was trained on: some want a\nsentence, some want a list of words. Try both.",
         },
         {
@@ -152,6 +243,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "type": SettingType.CHOICE,
             "options": samplers,
             "group": "Sampling",
+            "collapsed": true,
             "tooltip": "Which method walks the noise back to a picture.\n\neuler is the plain one and a fine default. The ancestral ones add noise as they\ngo, so they keep changing right to the last step and never quite settle.",
         },
         {
@@ -207,6 +299,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "max": MAX_BATCH,
             "step": 1,
             "group": "Batches",
+            "collapsed": true,
             "tooltip": "How many to make from one press.\n\nEach uses the seed above plus its own number, so any one of them can be made\nagain on its own. They are made one at a time and appear in a grid as they\narrive.\n\nEvery one costs what a single picture costs, so a large number is a long wait.",
         },
         {

@@ -19,6 +19,16 @@ extends Resource
 ## How strongly that LoRA is applied, to both the model and the text encoder.
 @export var lora_strength: float = 1.0
 
+## A second LoRA, stacked on top of the first. Same rules as [member lora].
+@export var lora2: String = IWComfyGraph.LORA_NONE
+
+## How strongly the second LoRA is applied.
+@export var lora2_strength: float = 1.0
+
+## How many layers of the text encoder go unused, counted from the end. One is the whole
+## encoder; anime-family models are usually trained for two.
+@export var clip_skip: int = 1
+
 ## What to make.
 @export var positive: String = ""
 

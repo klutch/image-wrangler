@@ -35,9 +35,6 @@ const MAX_SEED := 2147483647
 ## run from noise.
 static func build(settings: IWGenerateSettings, seed_value: int,
         source_name := "") -> Dictionary:
-    var with_lora := not settings.lora.is_empty() and settings.lora != LORA_NONE
-    var model_from := ["10", 0] if with_lora else ["4", 0]
-    var clip_from := ["10", 1] if with_lora else ["4", 1]
     var from_source := settings.use_source and not source_name.is_empty()
     var latent_from := ["12", 0] if from_source else ["5", 0]
 
@@ -46,6 +43,33 @@ static func build(settings: IWGenerateSettings, seed_value: int,
             "class_type": "CheckpointLoaderSimple",
             "inputs": {"ckpt_name": settings.checkpoint},
         },
+    }
+
+    # The LoRAs chain in slot order, each reading the one before. A slot of none is left
+    # out entirely rather than sent empty. See LORA_NONE.
+    var model_from := ["4", 0]
+    var clip_from := ["4", 1]
+    if _lora_wanted(settings.lora):
+        graph["10"] = _lora_node(settings.lora, settings.lora_strength,
+                model_from, clip_from)
+        model_from = ["10", 0]
+        clip_from = ["10", 1]
+    if _lora_wanted(settings.lora2):
+        graph["13"] = _lora_node(settings.lora2, settings.lora2_strength,
+                model_from, clip_from)
+        model_from = ["13", 0]
+        clip_from = ["13", 1]
+
+    # After the LoRAs, so what they taught the text encoder is kept. One is the whole
+    # encoder and needs no node.
+    if settings.clip_skip > 1:
+        graph["14"] = {
+            "class_type": "CLIPSetLastLayer",
+            "inputs": {"stop_at_clip_layer": -settings.clip_skip, "clip": clip_from},
+        }
+        clip_from = ["14", 0]
+
+    graph.merge({
         "6": {
             "class_type": "CLIPTextEncode",
             "inputs": {"text": settings.positive, "clip": clip_from},
@@ -77,7 +101,7 @@ static func build(settings: IWGenerateSettings, seed_value: int,
             "class_type": "SaveImage",
             "inputs": {"filename_prefix": FILENAME_PREFIX, "images": ["8", 0]},
         },
-    }
+    })
 
     # One or the other feeds the sampler. LoadImage names what the upload left in the
     # server's input folder.
@@ -96,21 +120,25 @@ static func build(settings: IWGenerateSettings, seed_value: int,
             "class_type": "EmptyLatentImage",
             "inputs": {"width": size.x, "height": size.y, "batch_size": 1},
         }
-
-    # Left out entirely rather than sent empty, and the two prompts and the sampler read
-    # from the checkpoint instead. See LORA_NONE.
-    if with_lora:
-        graph["10"] = {
-            "class_type": "LoraLoader",
-            "inputs": {
-                "lora_name": settings.lora,
-                "strength_model": settings.lora_strength,
-                "strength_clip": settings.lora_strength,
-                "model": ["4", 0],
-                "clip": ["4", 1],
-            },
-        }
     return graph
+
+
+static func _lora_wanted(name: String) -> bool:
+    return not name.is_empty() and name != LORA_NONE
+
+
+static func _lora_node(name: String, strength: float, model_from: Array,
+        clip_from: Array) -> Dictionary:
+    return {
+        "class_type": "LoraLoader",
+        "inputs": {
+            "lora_name": name,
+            "strength_model": strength,
+            "strength_clip": strength,
+            "model": model_from,
+            "clip": clip_from,
+        },
+    }
 
 
 ## The size the server is asked to work at, rounded to something a sampler can divide.

@@ -75,7 +75,11 @@ const TEXT_LINE_HEIGHT := 18
 ## [param key_prefix] scopes the fold keys to one form. The dock passes a stack
 ## entry's uid, because the same operation may appear in the stack twice and folding
 ## one of them must not fold the other — which keying by operation id would do.
-static func build(operation: IWOperation, container: Container, on_changed: Callable, fold_state: Dictionary, key_prefix: String = "") -> void:
+##
+## [param on_fold] is called after a heading is clicked, for a caller that writes the fold
+## state somewhere rather than only holding it. Nothing is passed to it: the store it was
+## handed has already been updated.
+static func build(operation: IWOperation, container: Container, on_changed: Callable, fold_state: Dictionary, key_prefix: String = "", on_fold := Callable()) -> void:
     for child in container.get_children():
         container.remove_child(child)
         child.queue_free()
@@ -104,7 +108,7 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
             # for. The schema key is read off the entry that opens the group, since
             # that is the only one the heading exists for.
             var collapsed: bool = fold_state.get(key, bool(setting.get("collapsed", false)))
-            target = begin_group(container, group, collapsed, fold_state, key)
+            target = begin_group(container, group, collapsed, fold_state, key, on_fold)
 
         var label: String = setting.get("label", String(property).capitalize())
         var tooltip: String = setting.get("tooltip", "")
@@ -175,10 +179,13 @@ static func build(operation: IWOperation, container: Container, on_changed: Call
 ## [param collapsed] is the state it opens in, and every click writes the new one
 ## back to [param fold_state] under [param key], so the fold outlives the form.
 ##
+## [param on_fold] is called after each click, for a caller that keeps the fold state
+## somewhere beyond the session. See [method build].
+##
 ## Public because the dock builds sections of its own with it, outside any schema — see
 ## the Export tab in [code]iw_panel.gd[/code].
 static func begin_group(container: Container, title: String, collapsed: bool,
-        fold_state: Dictionary, key: String) -> Container:
+        fold_state: Dictionary, key: String, on_fold := Callable()) -> Container:
     if title.is_empty():
         return container
 
@@ -220,6 +227,8 @@ static func begin_group(container: Container, title: String, collapsed: bool,
             # the caller handed in and outlives the form being rebuilt.
             fold_state[key] = not pressed
             _apply_fold_arrow(heading)
+            if on_fold.is_valid():
+                on_fold.call()
     )
     # Re-resolved on a theme switch, since the arrow comes out of the theme and
     # the icon already handed over would be the old theme's.

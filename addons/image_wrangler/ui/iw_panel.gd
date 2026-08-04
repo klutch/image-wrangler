@@ -226,12 +226,25 @@ const EXPORT_FOLD_PACKING := "export/packing"
 const EXPORT_FOLD_NORMALS := "export/normals"
 const EXPORT_FOLD_PIVOTS := "export/pivots"
 
+## What every one of the Generate tab's fold keys starts with, so its own file can be
+## written and read back without carrying any other form's.
+const GENERATE_FOLD_PREFIX := "generate/"
+
 ## The same, for the Generate tab's hand-built server section.
-const GENERATE_FOLD_SERVER := "generate/server"
+##
+## The one group there that opens unfolded: it is what says whether anything below it can
+## run. The rest ask for it in their schema. See [method IWGenerate.get_settings_schema].
+const GENERATE_FOLD_SERVER := GENERATE_FOLD_PREFIX + "server"
+
+## Where the folds go in the Generate tab's file, beside its stack.
+const GENERATE_FOLD_FIELD := "folds"
 
 ## What the viewport says while a start is being waited on. There is nothing to measure, so
 ## the spinner is the whole of it.
 const STARTING_CAPTION := "Waiting for ComfyUI Server"
+
+## The same, for the shorter wait on an address answering Connect.
+const CONNECTING_CAPTION := "Asking ComfyUI Server"
 
 ## Held here because the button swaps between this and the one for Cancel.
 const START_TOOLTIP := "Runs ComfyUI from the folder above.\n\nWhat it prints while starting is shown over the preview.\n\nStart looks first for one already answering and joins that instead, so pressing\nthis with ComfyUI already up costs nothing.\n\nThe first start of the day loads the whole of PyTorch. Give it a minute."
@@ -676,9 +689,13 @@ var _upscale_box: VBoxContainer
 ## to the main status label, like every other tab.
 var _generate_box: VBoxContainer
 var _generate_button: Button
-## The address of the server, and what it last said about itself.
+## What the picked models' names say the Sampling group should hold, at the top of it —
+## one row per model, each with its own Set. Hidden while the names say nothing.
+var _sampling_note_box: MarginContainer
+var _sampling_note_rows: VBoxContainer
+## The address of the server, and the button that asks it.
 var _comfy_url_edit: LineEdit
-var _comfy_status: Label
+var _comfy_connect_button: Button
 ## The two rows that only matter until there is a server answering. Both go away once there
 ## is one: the address worked, and the folder is only ever read by Start.
 var _comfy_address_row: HBoxContainer
@@ -698,6 +715,10 @@ var _comfy_waiting := false
 ## Set while the Model group's Refresh waits on the server's answer. Local answers land
 ## inside the overlay's fade and show nothing; a remote server's slowness shows a spinner.
 var _comfy_refreshing := false
+
+## Set from Connect until the address answers or the ask times out. Holds the overlay up
+## and keeps Connect dead, so a slow address cannot be pressed at twice over.
+var _comfy_probing := false
 ## Says how the last upscale went, or why it could not run at all.
 var _upscale_status: Label
 ## Says what the selected model is for, sitting under its dropdown.
@@ -817,6 +838,9 @@ func _enter_tree() -> void:
 func _ready() -> void:
     # Only a floor, so the splitters between the columns stay freely draggable.
     custom_minimum_size = Vector2(0, 240)
+    # Ahead of everything, because the Server heading is made while the layout is bound and
+    # a group cannot be folded after the fact — it is told how to open.
+    _load_generate_folds()
     # The forms are built into containers the layout owns, so the layout goes first.
     _build_ui()
     _build_rename()
@@ -1173,8 +1197,10 @@ func _build_generate() -> void:
         # Only on the first make. A rebuild is showing settings that are already in hand,
         # and reading the file again would undo whatever has not been written out yet.
         _load_generate_config()
-    SettingsBuilder.build(_generate, _generate_box, _on_setting_changed, _fold_state, "generate")
+    SettingsBuilder.build(_generate, _generate_box, _on_setting_changed, _fold_state,
+            "generate", _schedule_generate_save)
     _add_model_refresh_button()
+    _add_sampling_notes()
     if _generate.has_catalogue():
         SettingsBuilder.refresh_choices(_generate, _generate_box)
     if _comfy_url_edit != null and _comfy != null:
@@ -1182,7 +1208,6 @@ func _build_generate() -> void:
     if _comfy_root_edit != null:
         _comfy_root_edit.text = IWAddonSettings.comfy_root()
     _refresh_comfy_install()
-    _refresh_comfy_status()
     # A rebuild can land while a server is already answering, and the rows come back visible.
     _update_comfy_controls()
 
@@ -1453,8 +1478,10 @@ func _forget_controls() -> void:
     # The controls only. _comfy and _generate outlive a rebuild, like _upscale does.
     _generate_box = null
     _generate_button = null
+    _sampling_note_box = null
+    _sampling_note_rows = null
     _comfy_url_edit = null
-    _comfy_status = null
+    _comfy_connect_button = null
     _comfy_address_row = null
     _comfy_install_row = null
     _comfy_root_edit = null
@@ -1872,7 +1899,8 @@ func _select_mode(mode: int) -> void:
         # Nothing is made on arrival — that costs a minute and a graphics card, and opening
         # a tab is not asking for one. What does happen is a look at the server, so the
         # dropdowns are filled by the time the button is pressed.
-        if _comfy != null and not _comfy.is_running():
+        # Quietly, and not at all while Connect's own ask is still in the air.
+        if _comfy != null and not _comfy.is_running() and not _comfy_probing:
             _comfy.probe()
             # Or a flag left up by a run that was dropped without a word would put the
             # overlay back over a tab with nothing going on. See _cancel_generate.
@@ -1896,14 +1924,16 @@ func _select_mode(mode: int) -> void:
 ## carries the session's fold state — and the scene's rows are moved in under it.
 func _bind_generate_page(chrome: Control) -> void:
     var server := SettingsBuilder.begin_group(chrome.get_node("%ServerSlot"), "Server",
-            false, _fold_state, GENERATE_FOLD_SERVER)
+            _fold_state.get(GENERATE_FOLD_SERVER, false), _fold_state, GENERATE_FOLD_SERVER,
+            _schedule_generate_save)
     (chrome.get_node("%ServerRows") as Control).reparent(server)
 
     _comfy_address_row = chrome.get_node("%AddressRow")
     _comfy_url_edit = chrome.get_node("%ComfyUrlEdit")
     _comfy_url_edit.text_submitted.connect(func(_text: String) -> void: _on_comfy_connect())
     _comfy_url_edit.focus_exited.connect(_store_comfy_url)
-    chrome.get_node("%ConnectButton").pressed.connect(_on_comfy_connect)
+    _comfy_connect_button = chrome.get_node("%ConnectButton")
+    _comfy_connect_button.pressed.connect(_on_comfy_connect)
 
     _comfy_install_row = chrome.get_node("%InstallRow")
     _comfy_root_edit = chrome.get_node("%ComfyRootEdit")
@@ -1922,7 +1952,6 @@ func _bind_generate_page(chrome: Control) -> void:
     _comfy_stop_toggle.button_pressed = IWAddonSettings.comfy_stop_on_exit()
     _comfy_stop_toggle.toggled.connect(_on_comfy_stop_on_exit_toggled)
 
-    _comfy_status = chrome.get_node("%ComfyStatus")
     _generate_box = chrome.get_node("%GenerateBox")
 
     # One button rather than two: while a run is going, the only thing worth pressing is
@@ -4041,6 +4070,8 @@ func _on_setting_changed() -> void:
         # Start From Selected Image decides what the viewport shows, and nothing else
         # would notice it had been ticked.
         _update_preview_texture()
+        # The advice follows whichever checkpoint and LoRA are picked.
+        _refresh_sampling_notes()
         return
     if _mode == Mode.PACKING:
         # The note under the dropdown is the one part of this form that is not a setting,
@@ -4715,29 +4746,6 @@ func _forget_generate_preview() -> void:
     _generate_preview_of = null
 
 
-## Says where the server is and what it said, under the address row.
-func _refresh_comfy_status() -> void:
-    if _comfy_status == null:
-        return
-    if _comfy == null:
-        _comfy_status.text = ""
-        return
-    match _comfy.state():
-        ComfyServer.State.RUNNING:
-            _comfy_status.text = "Working."
-        ComfyServer.State.STARTING:
-            _comfy_status.text = "Starting."
-        ComfyServer.State.READY:
-            var whose := " Started here." if _comfy.owns_process() else ""
-            if _generate != null and _generate.has_catalogue():
-                _comfy_status.text = "Connected. %d checkpoints.%s" \
-                        % [_generate.checkpoints.size(), whose]
-            else:
-                _comfy_status.text = "Connected.%s" % whose
-        _:
-            _comfy_status.text = "Not connected. Press Start, or run ComfyUI yourself and press Connect."
-
-
 func _store_comfy_url() -> void:
     if _comfy == null or _comfy_url_edit == null:
         return
@@ -4746,12 +4754,35 @@ func _store_comfy_url() -> void:
     _comfy_url_edit.text = _comfy.url()
 
 
+## Asks the typed address whether ComfyUI is there, holding the overlay up until it
+## answers or the ask times out.
+##
+## Awaited rather than fired and forgotten, because the button and the overlay both have to
+## come back at the end of it. What the ask found is said by the handlers it goes through:
+## [method _on_comfy_info] on an answer, [method _on_comfy_failed] on a timeout.
 func _on_comfy_connect() -> void:
-    if _comfy == null:
+    if _comfy == null or _comfy_probing:
         return
     _store_comfy_url()
-    _set_status("Asking %s what it has." % _comfy.url())
-    _comfy.probe()
+    var asking := "Asking %s what it has." % _comfy.url()
+    _set_status(asking)
+    _comfy_probing = true
+    _refresh_generate_busy()
+    _update_comfy_controls()
+
+    await _comfy.probe()
+
+    _comfy_probing = false
+    # The dock can be closed while the ask is in the air, and there is nothing left to put
+    # back if it was.
+    if _shutting_down:
+        return
+    # Neither handler spoke: the server was already known and had no new lists to offer.
+    # Left saying it is being asked, the label would read as hung.
+    if _status_label.text == asking and _comfy.state() != ComfyServer.State.OFFLINE:
+        _set_status("Connected to %s." % _comfy.url())
+    _refresh_generate_busy()
+    _update_controls()
 
 
 ## The whole Server section against what the server is doing now.
@@ -4762,12 +4793,20 @@ func _update_comfy_controls() -> void:
     var state: int = _comfy.state() if _comfy != null else ComfyServer.State.OFFLINE
     var connected := state == ComfyServer.State.READY or state == ComfyServer.State.RUNNING
 
-    # Nothing under Model can mean anything until a server has said what it has: the two
-    # lists are its files, and the strength belongs to a LoRA that cannot be picked yet.
-    # Ahead of the guard below, since those rows exist whether or not the server buttons do.
+    # The whole form stands down without a server: nothing in it can run, and the dead
+    # rows say waiting rather than broken. Model asks for the catalogue as well, since its
+    # lists are the server's files. Ahead of the guard below, since these rows exist
+    # whether or not the server buttons do.
     if _generate_box != null:
         SettingsBuilder.set_group_enabled(_generate_box, "Model",
                 connected and _generate != null and _generate.has_catalogue())
+        for group: String in ["Prompt", "Sampling", "Batches"]:
+            SettingsBuilder.set_group_enabled(_generate_box, group, connected)
+
+    # Dead while its own ask is in the air, so a slow address cannot be pressed at twice
+    # over. Nothing else takes it away: it is the way back from a server that dropped.
+    if _comfy_connect_button != null:
+        _comfy_connect_button.disabled = _comfy_probing
 
     if _comfy_start_button == null or _comfy_stop_button == null:
         return
@@ -4875,6 +4914,79 @@ func _add_model_refresh_button() -> void:
     body.add_child(refresh)
 
 
+## Puts the advice at the top of the Sampling group: one row per picked model whose name
+## says something, each with its own Set. Hand-placed like the Model group's Refresh.
+func _add_sampling_notes() -> void:
+    var body := SettingsBuilder.find_group(_generate_box, "Sampling")
+    if body == null:
+        return
+    _sampling_note_box = MarginContainer.new()
+    for side: StringName in [&"margin_left", &"margin_top", &"margin_right", &"margin_bottom"]:
+        _sampling_note_box.add_theme_constant_override(side, 6)
+    _sampling_note_box.visible = false
+    body.add_child(_sampling_note_box)
+    body.move_child(_sampling_note_box, 0)
+
+    _sampling_note_rows = VBoxContainer.new()
+    _sampling_note_box.add_child(_sampling_note_rows)
+    _refresh_sampling_notes()
+
+
+## Rebuilds the advice rows. Cheap and event-driven, so remaking them beats keeping rows
+## and labels in step by hand.
+func _refresh_sampling_notes() -> void:
+    if _sampling_note_rows == null or _generate == null:
+        return
+    for child in _sampling_note_rows.get_children():
+        _sampling_note_rows.remove_child(child)
+        child.queue_free()
+    var rows: Array[Dictionary] = _generate.advice_rows()
+    for row: Dictionary in rows:
+        _sampling_note_rows.add_child(_sampling_note_row(row))
+    if _sampling_note_box != null:
+        _sampling_note_box.visible = not rows.is_empty()
+
+
+## One line of advice, dressed like the model folder's warning, with its Set beside it.
+func _sampling_note_row(row: Dictionary) -> Control:
+    var box := HBoxContainer.new()
+    var note := Label.new()
+    note.text = String(row["line"])
+    note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    note.modulate = Color(1, 0.85, 0.4)
+    note.add_theme_font_size_override(&"font_size", 10)
+    note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    box.add_child(note)
+
+    var set_button := Button.new()
+    set_button.text = "Set"
+    set_button.add_theme_font_size_override(&"font_size", 10)
+    set_button.size_flags_vertical = Control.SIZE_SHRINK_END
+    set_button.tooltip_text = "Sets the sampler, scheduler, steps and guidance to the low end of what this\nline suggests, and the CLIP skip when the line names one."
+    set_button.pressed.connect(_on_sampling_advice_set.bind(row))
+    box.add_child(set_button)
+    return box
+
+
+## Applies one row's low-end values and shows them in the form.
+func _on_sampling_advice_set(hint: Dictionary) -> void:
+    if _generate == null or hint.is_empty():
+        return
+    var settings: IWGenerateSettings = _generate.get_settings()
+    settings.sampler = String(hint["sampler"])
+    settings.scheduler = String(hint["scheduler"])
+    settings.steps = int(hint["steps"])
+    settings.cfg = float(hint["cfg"])
+    var skip_note := ""
+    if hint.has("clip_skip"):
+        settings.clip_skip = int(hint["clip_skip"])
+        skip_note = ", CLIP skip %d" % settings.clip_skip
+    SettingsBuilder.refresh_values(_generate, _generate_box)
+    _schedule_generate_save()
+    _set_status("Set %s + %s, %d steps, CFG %s%s." % [settings.sampler, settings.scheduler,
+            settings.steps, String.num(settings.cfg, 1), skip_note])
+
+
 func _on_comfy_refresh_models() -> void:
     # Matches what refresh_lists itself stands down for, or the flag would raise an
     # overlay no answer is coming to lower.
@@ -4919,7 +5031,6 @@ func _on_comfy_state(state: int) -> void:
         _comfy_waiting = false
         if _preview != null:
             _preview.clear_busy_log()
-    _refresh_comfy_status()
     _refresh_generate_busy()
     _update_controls()
 
@@ -4931,9 +5042,12 @@ func _on_comfy_state(state: int) -> void:
 func _refresh_generate_busy() -> void:
     if _mode != Mode.GENERATE or _preview == null:
         return
-    _preview.set_busy(_generate_running or _comfy_waiting or _comfy_refreshing)
+    _preview.set_busy(_generate_running or _comfy_waiting or _comfy_refreshing \
+            or _comfy_probing)
     if _comfy_waiting:
         _preview.set_stage_progress(0.0, STARTING_CAPTION)
+    elif _comfy_probing and not _generate_running:
+        _preview.set_stage_progress(0.0, CONNECTING_CAPTION)
     elif _comfy_refreshing and not _generate_running:
         _preview.set_stage_progress(0.0, "Refreshing Models")
 
@@ -4950,7 +5064,7 @@ func _on_comfy_info(lists: Dictionary) -> void:
     _generate.set_catalogue(lists)
     if _generate_box != null:
         SettingsBuilder.refresh_choices(_generate, _generate_box)
-    _refresh_comfy_status()
+    _refresh_sampling_notes()
     _update_controls()
     if _generate.checkpoints.is_empty():
         _set_status("The server has no checkpoints. Put one in ComfyUI's models/checkpoints folder and press Connect again.")
@@ -5039,7 +5153,6 @@ func _on_comfy_finished(images: Array) -> void:
         _update_preview_texture()
         if made != null:
             _preview.fit_to_view()
-    _refresh_comfy_status()
     _update_controls()
 
 
@@ -5086,7 +5199,6 @@ func _end_generate_run(note: String) -> void:
     # another tab put there.
     if not note.is_empty():
         _set_status(note)
-    _refresh_comfy_status()
     _update_controls()
 
 
@@ -5215,6 +5327,34 @@ func _load_generate_config() -> void:
             return
 
 
+## Reads back which of the tab's groups were left folded.
+##
+## Its own read, ahead of the settings and ahead of the layout, because the two are wanted
+## at different moments: a heading is told how to open while it is being made, and by the
+## time [method _build_generate] runs the Server heading already exists. The file is small
+## and this happens once per dock.
+##
+## Only the tab's own keys are taken, so a file written by a build with a group this one
+## does not have leaves nothing behind in [member _fold_state].
+func _load_generate_folds() -> void:
+    var stored: Variant = SettingsIO.load_field_from(
+            GENERATE_CONFIG_PATH, GENERATE_FOLD_FIELD, null)
+    if not (stored is Dictionary):
+        return
+    for key: Variant in (stored as Dictionary):
+        if key is String and (key as String).begins_with(GENERATE_FOLD_PREFIX):
+            _fold_state[key] = bool((stored as Dictionary)[key])
+
+
+## What the tab's file carries under [constant GENERATE_FOLD_FIELD].
+func _generate_folds() -> Dictionary:
+    var folds := {}
+    for key: Variant in _fold_state:
+        if key is String and (key as String).begins_with(GENERATE_FOLD_PREFIX):
+            folds[key] = bool(_fold_state[key])
+    return folds
+
+
 func _schedule_generate_save() -> void:
     if _shutting_down or _generate_save == null:
         return
@@ -5233,7 +5373,8 @@ func _flush_generate_save() -> void:
         "folded": false,
         "settings": _generate.get_settings(),
     }]
-    if SettingsIO.save_stack_to(GENERATE_CONFIG_PATH, records) != OK:
+    var extra := {GENERATE_FOLD_FIELD: _generate_folds()}
+    if SettingsIO.save_stack_to(GENERATE_CONFIG_PATH, records, extra) != OK:
         push_warning("Image Wrangler: could not write %s." % GENERATE_CONFIG_PATH)
 
 

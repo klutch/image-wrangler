@@ -310,6 +310,17 @@ static func load_stack_from(path: String, registry: Dictionary) -> Array:
     return decode_stack(_read_envelope(path), registry, path.get_file())
 
 
+## What [param key] holds in the file at [param path], or [param fallback].
+##
+## The way back in for whatever [method save_stack_to] carried in beside the stack. The
+## fallback covers every failure alike — no file, somebody else's file, or a file of ours
+## written before that field existed.
+static func load_field_from(path: String, key: String, fallback: Variant) -> Variant:
+    if path.is_empty() or not FileAccess.file_exists(path):
+        return fallback
+    return _read_envelope(path).get(key, fallback)
+
+
 ## The stack an envelope describes, whatever it arrived in.
 ##
 ## Split out from [method load_stack] because the sidecar is no longer the only thing
@@ -434,7 +445,13 @@ static func save_stack(source_path: String, stack: Array) -> Error:
 ## Writes [param stack] into the file at [param path], leaving anything else in it alone.
 ##
 ## The counterpart to [method load_stack_from], and for the same reason.
-static func save_stack_to(path: String, stack: Array) -> Error:
+##
+## [param extra] goes into the envelope beside the stack, for a caller with something to
+## keep that is not a setting of any operation — the Generate tab keeps which of its groups
+## are folded there. A field it does not name is left as it was, so two callers writing
+## different fields to one file do not wipe each other. Read back with
+## [method load_field_from].
+static func save_stack_to(path: String, stack: Array, extra: Dictionary = {}) -> Error:
     if path.is_empty():
         return ERR_INVALID_PARAMETER
     var envelope := {}
@@ -449,6 +466,7 @@ static func save_stack_to(path: String, stack: Array) -> Error:
     envelope["format"] = FORMAT
     envelope["version"] = VERSION
     envelope["stack"] = encode_stack(stack)
+    envelope.merge(extra, true)
     # The version 1 blocks are dropped rather than kept in step. Two records of the
     # same settings would only ever disagree, and the file has already been read.
     envelope.erase("operations")
