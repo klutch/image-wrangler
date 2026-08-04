@@ -35,8 +35,8 @@ extends Resource
 ## What to keep out of it.
 @export var negative: String = ""
 
-## The saved prompt pairs, shown as coloured squares under the two boxes.
-@export var swatches: Array[IWPromptSwatch] = []
+## The saved settings, shown as coloured squares in the Presets group.
+@export var presets: Array[IWGeneratePreset] = []
 
 ## Which sampler walks the noise back to a picture, and the schedule it walks on. Both are
 ## names the server offered.
@@ -81,4 +81,15 @@ extends Resource
 ## describe the tab rather than any one picture. It is here because the dock's codec walks
 ## every settings Resource alike.
 func duplicate_for_new_image() -> IWGenerateSettings:
-    return duplicate()
+    return duplicate_for_preset()
+
+
+## A copy of everything here, for a preset to hold.
+##
+## The preset list is emptied on the copy. A preset that kept the list it lives in would
+## carry every other preset inside it, and the file would double in size with each one
+## saved.
+func duplicate_for_preset() -> IWGenerateSettings:
+    var copy := duplicate()
+    copy.presets = [] as Array[IWGeneratePreset]
+    return copy

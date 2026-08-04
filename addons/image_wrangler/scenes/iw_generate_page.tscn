@@ -1,25 +1,40 @@
 [gd_scene format=3 uid="uid://iwgeneratp01"]
 
-[node name="Generate" type="ScrollContainer" unique_id=1866017413]
+[node name="Generate" type="VBoxContainer" unique_id=1866017413]
+
+[node name="GenerateButton" type="Button" parent="." unique_id=1948636383]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Make a picture from the description below.
+
+Nothing here runs on its own the way the other tabs do — a generation takes a
+minute and a graphics card, so it happens only when asked. Refresh asks too.
+
+While one is going this stops it, as does Escape."
+text = "Generate"
+
+[node name="GenerateScroll" type="ScrollContainer" parent="." unique_id=1732508914]
+layout_mode = 2
+size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="GenerateColumn" type="VBoxContainer" parent="." unique_id=1246094365]
+[node name="GenerateColumn" type="VBoxContainer" parent="GenerateScroll" unique_id=1246094365]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="ServerSlot" type="VBoxContainer" parent="GenerateColumn" unique_id=1126176059]
+[node name="ServerSlot" type="VBoxContainer" parent="GenerateScroll/GenerateColumn" unique_id=1126176059]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="ServerRows" type="VBoxContainer" parent="GenerateColumn/ServerSlot" unique_id=1226572826]
+[node name="ServerRows" type="VBoxContainer" parent="GenerateScroll/GenerateColumn/ServerSlot" unique_id=1226572826]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="AddressRow" type="HBoxContainer" parent="GenerateColumn/ServerSlot/ServerRows" unique_id=1131602540]
+[node name="AddressRow" type="HBoxContainer" parent="GenerateScroll/GenerateColumn/ServerSlot/ServerRows" unique_id=1131602540]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="ComfyUrlEdit" type="LineEdit" parent="GenerateColumn/ServerSlot/ServerRows/AddressRow" unique_id=1659851141]
+[node name="ComfyUrlEdit" type="LineEdit" parent="GenerateScroll/GenerateColumn/ServerSlot/ServerRows/AddressRow" unique_id=1659851141]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -28,17 +43,17 @@ tooltip_text = "Where ComfyUI is answering.
 Its own default is http://127.0.0.1:8188. Start ComfyUI yourself, then press
 Connect."
 
-[node name="ConnectButton" type="Button" parent="GenerateColumn/ServerSlot/ServerRows/AddressRow" unique_id=720762042]
+[node name="ConnectButton" type="Button" parent="GenerateScroll/GenerateColumn/ServerSlot/ServerRows/AddressRow" unique_id=720762042]
 unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Ask that address whether ComfyUI is there, and what models it has."
 text = "Connect"
 
-[node name="InstallRow" type="HBoxContainer" parent="GenerateColumn/ServerSlot/ServerRows" unique_id=513042931]
+[node name="InstallRow" type="HBoxContainer" parent="GenerateScroll/GenerateColumn/ServerSlot/ServerRows" unique_id=513042931]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="ComfyRootEdit" type="LineEdit" parent="GenerateColumn/ServerSlot/ServerRows/InstallRow" unique_id=1266465401]
+[node name="ComfyRootEdit" type="LineEdit" parent="GenerateScroll/GenerateColumn/ServerSlot/ServerRows/InstallRow" unique_id=1266465401]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -49,35 +64,27 @@ Only Start needs it. If you always run ComfyUI yourself, leave it empty.
 Pick the folder ComfyUI was installed into, not the one holding main.py."
 placeholder_text = "ComfyUI folder, for Start"
 
-[node name="ComfyBrowseButton" type="Button" parent="GenerateColumn/ServerSlot/ServerRows/InstallRow" unique_id=1673225468]
+[node name="ComfyBrowseButton" type="Button" parent="GenerateScroll/GenerateColumn/ServerSlot/ServerRows/InstallRow" unique_id=1673225468]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Browse"
 
-[node name="InstallNote" type="Label" parent="GenerateColumn/ServerSlot/ServerRows" unique_id=1463934005]
+[node name="InstallNote" type="Label" parent="GenerateScroll/GenerateColumn/ServerSlot/ServerRows" unique_id=1463934005]
 unique_name_in_owner = true
 modulate = Color(1, 1, 1, 0.6)
 layout_mode = 2
 autowrap_mode = 3
 
-[node name="ServerButtons" type="HBoxContainer" parent="GenerateColumn/ServerSlot/ServerRows" unique_id=1334364126]
+[node name="ServerButtons" type="HBoxContainer" parent="GenerateScroll/GenerateColumn/ServerSlot/ServerRows" unique_id=1334364126]
 layout_mode = 2
 
-[node name="ComfyStartButton" type="Button" parent="GenerateColumn/ServerSlot/ServerRows/ServerButtons" unique_id=1154710732]
+[node name="ComfyStartButton" type="Button" parent="GenerateScroll/GenerateColumn/ServerSlot/ServerRows/ServerButtons" unique_id=1154710732]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-tooltip_text = "Runs ComfyUI from the folder above.
-
-What it prints while starting is shown over the preview.
-
-Start looks first for one already answering and joins that instead, so pressing
-this with ComfyUI already up costs nothing.
-
-The first start of the day loads the whole of PyTorch. Give it a minute."
 text = "Start"
 
-[node name="ComfyStopButton" type="Button" parent="GenerateColumn/ServerSlot/ServerRows/ServerButtons" unique_id=559977482]
+[node name="ComfyStopButton" type="Button" parent="GenerateScroll/GenerateColumn/ServerSlot/ServerRows/ServerButtons" unique_id=559977482]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -87,18 +94,11 @@ Dead unless the dock started it. One that was already running belongs to
 something else, and taking it away would be a surprise."
 text = "Stop"
 
-[node name="GenerateBox" type="VBoxContainer" parent="GenerateColumn" unique_id=693842588]
+[node name="PresetSlot" type="VBoxContainer" parent="GenerateScroll/GenerateColumn" unique_id=1417338205]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="GenerateBox" type="VBoxContainer" parent="GenerateScroll/GenerateColumn" unique_id=693842588]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-
-[node name="GenerateButton" type="Button" parent="GenerateColumn" unique_id=1948636383]
-unique_name_in_owner = true
-layout_mode = 2
-tooltip_text = "Make a picture from the description above.
-
-Nothing here runs on its own the way the other tabs do — a generation takes a
-minute and a graphics card, so it happens only when asked. Refresh asks too.
-
-While one is going this stops it, as does Escape."
-text = "Generate"

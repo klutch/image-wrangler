@@ -236,6 +236,10 @@ const GENERATE_FOLD_PREFIX := "generate/"
 ## run. The rest ask for it in their schema. See [method IWGenerate.get_settings_schema].
 const GENERATE_FOLD_SERVER := GENERATE_FOLD_PREFIX + "server"
 
+## The same, for the saved settings under it. Unfolded to begin with, like the server
+## above it: it is one row of small squares, and folded away it would not be found at all.
+const GENERATE_FOLD_PRESETS := GENERATE_FOLD_PREFIX + "presets"
+
 ## Where the folds go in the Generate tab's file, beside its stack.
 const GENERATE_FOLD_FIELD := "folds"
 
@@ -247,7 +251,7 @@ const STARTING_CAPTION := "Waiting for ComfyUI Server"
 const CONNECTING_CAPTION := "Asking ComfyUI Server"
 
 ## Held here because the button swaps between this and the one for Cancel.
-const START_TOOLTIP := "Runs ComfyUI from the folder above.\n\nWhat it prints while starting is shown over the preview.\n\nStart looks first for one already answering and joins that instead, so pressing\nthis with ComfyUI already up costs nothing.\n\nThe first start of the day loads the whole of PyTorch. Give it a minute."
+const START_TOOLTIP := "Runs ComfyUI from the folder above.\n\nWhat it prints while starting is shown over the preview.\n\nThis always starts a new one. To join a server that is already up, press\nConnect.\n\nThe first start of the day loads the whole of PyTorch. Give it a minute."
 
 ## Where the Generate tab's settings are kept.
 ##
@@ -357,6 +361,14 @@ var _generate_images: Array[Image] = []
 ## Those pictures laid out as one, which is what the viewport shows and what Save Current
 ## writes. Null until the first of a batch arrives. See [method _place_generate_image].
 var _generate_sheet: Image
+
+## The last step picture the server pushed, or null. What the viewport shows while a
+## picture is being made.
+##
+## [b]Deliberately not part of the batch.[/b] It is a rough look at work in progress, made
+## by a shortcut rather than by the real decoder — it is never saved, and it is dropped the
+## moment the picture it was showing arrives for real. See [signal IWComfyServer.preview_ready].
+var _generate_step: Image
 
 ## The cell that sheet was laid out with, so a picture can be dropped into it without the
 ## whole thing being made again.
@@ -693,8 +705,8 @@ var _generate_button: Button
 ## one row per model, each with its own Set. Hidden while the names say nothing.
 var _sampling_note_box: MarginContainer
 var _sampling_note_rows: VBoxContainer
-## The saved prompts at the foot of the Prompt group, and the + that adds one.
-var _swatch_flow: HFlowContainer
+## The saved settings in the Presets group, and the + that adds one.
+var _preset_flow: HFlowContainer
 ## The address of the server, and the button that asks it.
 var _comfy_url_edit: LineEdit
 var _comfy_connect_button: Button
@@ -870,6 +882,7 @@ func _build_comfy() -> void:
     _comfy.progress.connect(_on_comfy_progress)
     _comfy.log_output.connect(_on_comfy_log)
     _comfy.image_ready.connect(_on_comfy_image_ready)
+    _comfy.preview_ready.connect(_on_comfy_preview)
     _comfy.finished.connect(_on_comfy_finished)
     _comfy.failed.connect(_on_comfy_failed)
     _comfy.cancelled.connect(_on_comfy_cancelled)
@@ -1201,7 +1214,7 @@ func _build_generate() -> void:
             "generate", _schedule_generate_save)
     _add_model_refresh_button()
     _add_sampling_notes()
-    _add_prompt_swatches()
+    _refresh_presets()
     if _generate.has_catalogue():
         SettingsBuilder.refresh_choices(_generate, _generate_box)
     if _comfy_url_edit != null and _comfy != null:
@@ -1481,7 +1494,7 @@ func _forget_controls() -> void:
     _generate_button = null
     _sampling_note_box = null
     _sampling_note_rows = null
-    _swatch_flow = null
+    _preset_flow = null
     _comfy_url_edit = null
     _comfy_connect_button = null
     _comfy_address_row = null
@@ -1929,6 +1942,14 @@ func _bind_generate_page(chrome: Control) -> void:
             _fold_state.get(GENERATE_FOLD_SERVER, false), _fold_state, GENERATE_FOLD_SERVER,
             _schedule_generate_save)
     (page.get_node("%ServerRows") as Control).reparent(server)
+
+    # Made here rather than in the form, so it survives every rebuild of it. Filled by
+    # _build_generate: the operation it reads does not exist yet.
+    var presets := SettingsBuilder.begin_group(page.get_node("%PresetSlot"), "Presets",
+            _fold_state.get(GENERATE_FOLD_PRESETS, false), _fold_state, GENERATE_FOLD_PRESETS,
+            _schedule_generate_save)
+    _preset_flow = HFlowContainer.new()
+    presets.add_child(_preset_flow)
 
     _comfy_address_row = page.get_node("%AddressRow")
     _comfy_url_edit = page.get_node("%ComfyUrlEdit")
@@ -4714,10 +4735,15 @@ func _generate_grid(count: int) -> Vector2i:
 
 ## What the Generate tab's viewport shows.
 ##
-## The last result while it still belongs to what is highlighted, and before that the
-## picture a run would start from — so a run over a selected image can be lined up and
-## looked at before a minute of graphics card is spent on it.
+## The picture being made if the server is pushing one, then the last result while it still
+## belongs to what is highlighted, and before that the picture a run would start from — so a
+## run over a selected image can be lined up and looked at before a minute of graphics card
+## is spent on it.
 func _generate_preview_image() -> Image:
+    # First, because a picture forming now is worth more than the one before it. It is
+    # cleared as each real picture lands, so a batch still shows what it has finished.
+    if _generate_step != null:
+        return _generate_step
     var made := _current_generate_image()
     if made != null and (_generate_source_of == null or _generate_source_of == _source_image):
         return made
@@ -4987,39 +5013,28 @@ func _on_sampling_advice_set(hint: Dictionary) -> void:
             settings.clip_skip])
 
 
-## Puts the saved prompts at the foot of the Prompt group: one coloured square per pair,
-## and a + that saves what the two boxes hold. Hand-placed like the Model group's Refresh.
-func _add_prompt_swatches() -> void:
-    var body := SettingsBuilder.find_group(_generate_box, "Prompt")
-    if body == null:
+## Rebuilds the preset row. Remade whole, the way the sampling notes are.
+func _refresh_presets() -> void:
+    if _preset_flow == null or _generate == null:
         return
-    _swatch_flow = HFlowContainer.new()
-    body.add_child(_swatch_flow)
-    _refresh_prompt_swatches()
-
-
-## Rebuilds the swatch row. Remade whole, the way the sampling notes are.
-func _refresh_prompt_swatches() -> void:
-    if _swatch_flow == null or _generate == null:
-        return
-    for child in _swatch_flow.get_children():
-        _swatch_flow.remove_child(child)
+    for child in _preset_flow.get_children():
+        _preset_flow.remove_child(child)
         child.queue_free()
     var settings: IWGenerateSettings = _generate.get_settings()
-    for index in settings.swatches.size():
-        _swatch_flow.add_child(_swatch_button(settings.swatches[index], index))
+    for index in settings.presets.size():
+        _preset_flow.add_child(_preset_button(settings.presets[index], index))
     var add := Button.new()
     add.text = "+"
     add.custom_minimum_size = Vector2(22, 22)
     add.focus_mode = Control.FOCUS_NONE
-    add.tooltip_text = "Saves the two boxes above as a swatch."
-    add.pressed.connect(_on_swatch_add)
-    _swatch_flow.add_child(add)
+    add.tooltip_text = "Saves every setting below as a preset."
+    add.pressed.connect(_on_preset_add)
+    _preset_flow.add_child(add)
 
 
 ## A Button whose tooltip wraps at a readable width instead of running the screen's
-## width, since a swatch's tooltip carries a whole prompt.
-class SwatchButton:
+## width, since a preset's tooltip carries a whole prompt.
+class PresetButton:
     extends Button
 
     func _make_custom_tooltip(for_text: String) -> Object:
@@ -5030,71 +5045,103 @@ class SwatchButton:
         return label
 
 
-## One saved prompt, worn as its colour in every state.
-func _swatch_button(swatch: IWPromptSwatch, index: int) -> Button:
-    var button := SwatchButton.new()
+## One saved preset, worn as its colour in every state.
+func _preset_button(preset: IWGeneratePreset, index: int) -> Button:
+    var button := PresetButton.new()
     button.custom_minimum_size = Vector2(22, 22)
     button.focus_mode = Control.FOCUS_NONE
-    button.tooltip_text = _swatch_tooltip(swatch)
+    button.tooltip_text = _preset_tooltip(preset)
     for state: StringName in [&"normal", &"hover", &"pressed"]:
         var style := StyleBoxFlat.new()
-        style.bg_color = swatch.color
+        style.bg_color = preset.color
         if state == &"hover":
-            style.bg_color = swatch.color.lightened(0.2)
+            style.bg_color = preset.color.lightened(0.2)
         elif state == &"pressed":
-            style.bg_color = swatch.color.darkened(0.2)
+            style.bg_color = preset.color.darkened(0.2)
         style.set_corner_radius_all(3)
         button.add_theme_stylebox_override(state, style)
-    button.pressed.connect(_on_swatch_pressed.bind(index))
+    button.pressed.connect(_on_preset_pressed.bind(index))
     return button
 
 
-static func _swatch_tooltip(swatch: IWPromptSwatch) -> String:
-    var text := "Click to put this prompt back into the boxes. Ctrl+Click removes it."
-    if not swatch.positive.is_empty():
-        text += "\n\n%s" % swatch.positive
-    if not swatch.negative.is_empty():
-        text += "\n\nKeep out: %s" % swatch.negative
-    return text
+## What a preset says on hover: the words first, then what decides the picture.
+##
+## Written out by hand rather than walked from the schema, so related settings can share a
+## line. A setting added to the form needs a line adding here.
+static func _preset_tooltip(preset: IWGeneratePreset) -> String:
+    var held := preset.settings
+    if held == null:
+        return "Click to load. Ctrl+Click removes it."
+    var parts := ["Click to load. Ctrl+Click removes it."]
+    if not held.positive.strip_edges().is_empty():
+        parts.append(held.positive)
+    if not held.negative.strip_edges().is_empty():
+        parts.append("Keep out: %s" % held.negative)
+
+    var models := [held.checkpoint.get_file().get_basename()]
+    for pair: Array in [[held.lora, held.lora_strength], [held.lora2, held.lora2_strength]]:
+        var name := String(pair[0])
+        if not name.is_empty() and name != IWComfyGraph.LORA_NONE:
+            models.append("%s (%s)" % [name.get_file().get_basename(),
+                    String.num(float(pair[1]), 2)])
+    parts.append("\n".join(models))
+
+    var walk := "%s + %s, %d steps, CFG %s, CLIP skip %d" % [held.sampler, held.scheduler,
+            held.steps, String.num(held.cfg, 1), held.clip_skip]
+    walk += "\n" + ("New seed each time" if held.randomize_seed else "Seed %d" % held.seed)
+    parts.append(walk)
+
+    var frame := "%d x %d, %s" % [held.width, held.height,
+            "1 image" if held.batch == 1 else "%d images" % held.batch]
+    if held.use_source:
+        frame += "\nFrom the selected image, change %s" % String.num(held.denoise, 2)
+    parts.append(frame)
+    return "\n\n".join(parts)
 
 
-func _on_swatch_add() -> void:
+func _on_preset_add() -> void:
     if _generate == null:
         return
     var settings: IWGenerateSettings = _generate.get_settings()
-    if settings.positive.strip_edges().is_empty() \
-            and settings.negative.strip_edges().is_empty():
-        _set_status("Nothing to save: both boxes are empty.")
-        return
-    var swatch := IWPromptSwatch.new()
-    swatch.positive = settings.positive
-    swatch.negative = settings.negative
-    swatch.color = Color.from_hsv(randf(), randf_range(0.5, 0.8), randf_range(0.65, 0.95))
-    settings.swatches.append(swatch)
-    _refresh_prompt_swatches()
+    var preset := IWGeneratePreset.new()
+    preset.settings = settings.duplicate_for_preset()
+    preset.color = Color.from_hsv(randf(), randf_range(0.5, 0.8), randf_range(0.65, 0.95))
+    settings.presets.append(preset)
+    _refresh_presets()
     _schedule_generate_save()
-    _set_status("Saved the prompt as a swatch.")
+    _set_status("Saved the settings as a preset.")
 
 
-## Puts a swatch back into the two boxes, or with Ctrl held takes it away.
-func _on_swatch_pressed(index: int) -> void:
+## Puts a preset back into the form, or with Ctrl held takes it away.
+func _on_preset_pressed(index: int) -> void:
     if _generate == null:
         return
     var settings: IWGenerateSettings = _generate.get_settings()
-    if index < 0 or index >= settings.swatches.size():
+    if index < 0 or index >= settings.presets.size():
         return
     if Input.is_key_pressed(KEY_CTRL):
-        settings.swatches.remove_at(index)
-        _refresh_prompt_swatches()
+        settings.presets.remove_at(index)
+        _refresh_presets()
         _schedule_generate_save()
-        _set_status("Removed the swatch.")
+        _set_status("Removed the preset.")
         return
-    var swatch: IWPromptSwatch = settings.swatches[index]
-    settings.positive = swatch.positive
-    settings.negative = swatch.negative
+    # A copy, so editing the form afterwards does not move what the preset holds. The
+    # library is not part of the job, so it is put back onto the copy.
+    var restored := settings.presets[index].settings.duplicate_for_preset()
+    restored.presets = settings.presets
+    _generate.set_settings(restored)
+    # A preset can hold a number from before a range moved, or one typed into the file.
+    _generate.clamp_settings_to_schema()
+    # Choices first: they hold names the server offered, and a name the server has not got
+    # is kept rather than dropped. Values then settle everything else, visibility included.
+    SettingsBuilder.refresh_choices(_generate, _generate_box)
     SettingsBuilder.refresh_values(_generate, _generate_box)
+    # The two things outside the form that follow a setting: what the viewport shows, and
+    # what the picked models are worth saying about.
+    _update_preview_texture()
+    _refresh_sampling_notes()
     _schedule_generate_save()
-    _set_status("Put the swatch's prompt back into the boxes.")
+    _set_status("Loaded the preset.")
 
 
 func _on_comfy_refresh_models() -> void:
@@ -5209,11 +5256,50 @@ func _on_comfy_progress(overall: float, step: float, note: String) -> void:
         _set_status(note)
 
 
+## Takes one step picture and puts it in the viewport.
+##
+## [b]Scaled to the size the picture will come back at.[/b] These arrive at whatever the
+## server's preview size is rather than at the size being asked for, and left alone the view
+## would jump every time one landed and again when the real picture arrived. Nearest,
+## because it is a rough guess at a picture and smoothing it would only make the guesswork
+## look like detail.
+##
+## The scrim comes off the overlay on the first one, since there is now something under it
+## worth seeing. The bars and the spinner stay.
+func _on_comfy_preview(image: Image) -> void:
+    if not _generate_running or _mode != Mode.GENERATE or _preview == null:
+        return
+
+    var target := _generate_source_size
+    if target == Vector2i.ZERO and _generate != null:
+        var settings: IWGenerateSettings = _generate.get_settings()
+        target = IWComfyGraph.working_size(settings)
+    if target != Vector2i.ZERO and image.get_size() != target:
+        image.resize(target.x, target.y, Image.INTERPOLATE_NEAREST)
+
+    var first := _generate_step == null
+    _generate_step = image
+    # Straight to the viewport rather than through _update_preview_texture, which these
+    # arrive far too often for: the rest of what it does — clearing tile bounds, the pivot
+    # overlay, the original underneath — was settled when the tab came up and cannot have
+    # moved since, because a run cannot be started from anywhere else.
+    _preview.set_image(_generate_step)
+    if first:
+        _preview.set_busy_dimmed(false)
+        # Only while the batch has nothing finished in it. Once it has, the view is framed
+        # on a grid somebody may be looking at, and fitting per picture would yank it away.
+        if _generate_images.is_empty():
+            _preview.fit_to_view()
+
+
 ## Takes one picture of a batch, before the rest are made.
 ##
 ## The grid is rebuilt and shown each time, so a long batch fills in under you rather than
 ## arriving all at once at the end.
 func _on_comfy_image_ready(image: Image, index: int, total: int) -> void:
+    # The step pictures were standing in for this one. Dropped before the grid is shown, or
+    # the real picture would arrive behind a rough guess at it.
+    _generate_step = null
     # Back to the size it came from, whatever the server was asked to work at.
     if _generate_source_size != Vector2i.ZERO and image.get_size() != _generate_source_size:
         image.resize(_generate_source_size.x, _generate_source_size.y,
@@ -5241,6 +5327,7 @@ func _on_comfy_image_ready(image: Image, index: int, total: int) -> void:
 
 func _on_comfy_finished(images: Array) -> void:
     _generate_running = false
+    _generate_step = null
     if _preview != null:
         _preview.set_busy(false)
     var made := _current_generate_image()
@@ -5293,10 +5380,15 @@ func _cancel_generate() -> void:
 ## Puts the tab back to not-running, with [param note] on the status label.
 func _end_generate_run(note: String) -> void:
     _generate_running = false
+    # A run stopped part way leaves its last step picture standing in for a picture that is
+    # never going to arrive. What the batch actually finished is what should be on screen.
+    _generate_step = null
     # Through the refresh rather than set_busy(false): a failed start reports through
     # here too, and its overlay has to stay up with what was printed.
     if _mode == Mode.GENERATE:
         _refresh_generate_busy()
+        # The step picture above was what the viewport was holding, so it has to be told.
+        _update_preview_texture()
     elif _preview != null:
         _preview.set_busy(false)
     # An ending with nothing to say leaves the label alone rather than wiping what
@@ -5355,6 +5447,7 @@ func _run_generate() -> void:
 
     _generate_images.clear()
     _generate_sheet = null
+    _generate_step = null
     _generate_cell = Vector2i.ZERO
     _generate_batch_total = count
     _generate_running = true

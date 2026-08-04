@@ -76,6 +76,7 @@ var _stage_label := ""
 
 var _log := PackedStringArray()
 
+var _scrim: ColorRect
 var _spinner: Control
 var _caption: Label
 var _main_bar: ProgressBar
@@ -92,6 +93,7 @@ func _ready() -> void:
 func _bind() -> void:
     if _spinner != null:
         return
+    _scrim = %Scrim
     _spinner = %Spinner
     _caption = %Caption
     _main_bar = %MainBar
@@ -148,6 +150,9 @@ func set_busy(active: bool) -> void:
         _main_bar.value = 0.0
         _stage_bar.value = 0.0
         _caption.text = CAPTION
+        # Back to dimming. A run has nothing to show yet, and the last one's permission to
+        # see through must not carry into it.
+        _scrim.visible = true
         if not _busy:
             # The spinner is not reset with the bars: it says work is happening, and
             # one run giving way to another has not stopped it happening.
@@ -163,6 +168,18 @@ func set_busy(active: bool) -> void:
     # Still processing: the overlay is carried out rather than taken away, and the
     # bars keep what they reached so they fade from there instead of emptying first.
     set_process(true)
+
+
+## Whether the scrim dims what is underneath.
+##
+## Turned off while the picture down there is worth watching — which on the Generate tab
+## is the moment the server starts pushing step pictures. The panel stays either way: the
+## spinner and the bars are still the answer to how much of this is left.
+##
+## Reset to dimming by [method set_busy], so it is asked for per run rather than held.
+func set_dimmed(dim: bool) -> void:
+    _bind()
+    _scrim.visible = dim
 
 
 ## How far along the run says it is, 0 to 1. Never goes backwards within a run — a

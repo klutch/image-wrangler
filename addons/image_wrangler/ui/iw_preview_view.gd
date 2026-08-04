@@ -725,6 +725,12 @@ func set_busy(active: bool) -> void:
     _overlay.set_busy(active)
 
 
+## Whether the working overlay dims the image under it. See [code]set_dimmed[/code] on
+## the overlay: off is for a picture worth watching being made.
+func set_busy_dimmed(dim: bool) -> void:
+    _overlay.set_dimmed(dim)
+
+
 ## How far along the run says it is, 0 to 1. Ratcheted by the overlay so a report out
 ## of order cannot make the bar stutter.
 func set_progress(fraction: float) -> void:

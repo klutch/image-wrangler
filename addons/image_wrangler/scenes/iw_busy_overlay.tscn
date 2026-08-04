@@ -38,6 +38,7 @@ mouse_filter = 2
 script = ExtResource("1_script")
 
 [node name="Scrim" type="ColorRect" parent="." unique_id=1775863398]
+unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0

@@ -21,6 +21,14 @@ const DEFAULT_PORT := 8188
 const START_TIMEOUT := 180.0
 const START_POLL_SECONDS := 1.0
 
+## What a server this dock starts is told to make step pictures with.
+##
+## [code]auto[/code] takes the good decoder if the server has the files for it and the
+## cheap approximation otherwise, so it is never the reason a start fails. ComfyUI makes
+## none at all unless it is asked at launch, and only a server this dock started can be
+## asked — one that was already running keeps whatever it was given.
+const PREVIEW_METHOD := "auto"
+
 ## How long each kind of request may take. Fetching a picture is slower than asking a
 ## question, and a picture can be a few megabytes over loopback.
 const ASK_TIMEOUT := 10.0
@@ -28,6 +36,15 @@ const FETCH_TIMEOUT := 60.0
 
 ## What separates the parts of an upload. Anything the file itself cannot contain will do.
 const UPLOAD_BOUNDARY := "ImageWranglerUpload"
+
+## What a binary frame off the socket is made of: two counts of four bytes, then the
+## picture. The first count says what the frame is, the second what the picture is encoded
+## as. Both are big-endian, which is why they are read a byte at a time — the decoders on
+## [PackedByteArray] are little-endian and would come back with nonsense.
+const PREVIEW_HEADER := 8
+const PREVIEW_EVENT_IMAGE := 1
+const PREVIEW_FORMAT_JPEG := 1
+const PREVIEW_FORMAT_PNG := 2
 
 ## How often the run is asked whether it has finished.
 const POLL_SECONDS := 1.0
@@ -71,6 +88,13 @@ signal progress(overall: float, step: float, note: String)
 ## counts from zero.
 signal image_ready(image: Image, index: int, total: int)
 
+## Emitted with each step picture the server pushes as a picture is being made.
+##
+## [b]A look at the work, never a result.[/b] It is small, rough and made by a shortcut
+## rather than by the real decoder, so it is shown and thrown away — nothing saves one.
+## There may be none at all: see [constant PREVIEW_METHOD] for what decides that.
+signal preview_ready(image: Image)
+
 ## Emitted when a whole batch finishes, with one [Image] per picture made.
 signal finished(images: Array)
 
@@ -102,6 +126,10 @@ var _run_id := 0
 
 ## Set on the way out so a reply arriving after the dock has gone does nothing.
 var _shutting_down := false
+
+## Whether what a started server printed says the port was already taken. Read by the branch
+## that finds the process gone, so it can name the reason instead of guessing.
+var _port_taken := false
 
 ## What the server last said it has. Kept so a second tab visit does not re-ask.
 var _lists := {}
@@ -170,11 +198,29 @@ func _drain_log() -> void:
         _log_bytes = _log_bytes.slice(cut + 1, _log_bytes.size())
         var text := whole.get_string_from_utf8()
         if not text.is_empty():
-            log_output.emit(text)
+            _note_log(text)
 
     # Only after that last read: what a process says on its way out is the half worth having.
     if not owns_process():
         _close_log()
+
+
+## Passes a whole chunk on, noting anything in it that explains a start that failed.
+##
+## Read off whole lines rather than the raw chunks, so a phrase cannot be cut in half by
+## where a read happened to stop.
+func _note_log(text: String) -> void:
+    if _says_port_taken(text):
+        _port_taken = true
+    log_output.emit(text)
+
+
+## Whether [param text] is python saying the port is taken. Windows and Linux word it
+## differently, and Windows numbers it as well.
+static func _says_port_taken(text: String) -> bool:
+    var lower := text.to_lower()
+    return lower.contains("10048") or lower.contains("address already in use") \
+            or lower.contains("only one usage of each socket address")
 
 
 func _take_from(pipe: FileAccess) -> void:
@@ -192,7 +238,7 @@ func _close_log() -> void:
     if not _log_bytes.is_empty():
         var last := _log_bytes.get_string_from_utf8()
         if not last.is_empty():
-            log_output.emit(last + "\n")
+            _note_log(last + "\n")
     _log_out = null
     _log_err = null
     _log_bytes = PackedByteArray()
@@ -214,12 +260,25 @@ func _process(_delta: float) -> void:
         return
     if ready != WebSocketPeer.STATE_OPEN:
         return
+    # Text frames as they come, the picture only once the queue is empty.
+    #
+    # [b]The order is the point.[/b] The two kinds arrive interleaved down one queue, and
+    # everything that carries the run — the bars, the captions, the watchdog — is in the
+    # text. Draining those first means nothing that goes wrong with a picture can strand
+    # the frames queued behind it.
+    #
+    # Only the newest picture is kept. The rest are earlier steps of the same one, already
+    # out of date by the time the loop ends, and decoding them would be work thrown away.
+    var newest := PackedByteArray()
     while _socket.get_available_packet_count() > 0:
         var packet := _socket.get_packet()
-        # Binary frames are preview pictures, which we never asked for. was_string_packet
-        # describes the packet just taken, so it has to be read after it.
+        # was_string_packet describes the packet just taken, so it has to be read after it.
         if _socket.was_string_packet():
             _read_frame(packet.get_string_from_utf8())
+        else:
+            newest = packet
+    if not newest.is_empty():
+        _read_preview(newest)
 
 
 # --- What the dock asks of this ------------------------------------------
@@ -271,8 +330,8 @@ func owns_process() -> bool:
 
 ## Starts ComfyUI from [param root] and waits for it to answer.
 ##
-## [b]The first act is a probe.[/b] Something already answering is connected to and left
-## unowned — a second ComfyUI would only fight for the port.
+## Always a new one. Joining a server that is already up is what Connect is for, so this
+## never looks first — see [method probe].
 func start(root: String) -> void:
     if _shutting_down or _state != State.OFFLINE or owns_process():
         return
@@ -285,21 +344,13 @@ func start(root: String) -> void:
     _run_id += 1
     var run := _run_id
     _set_state(State.STARTING)
-    progress.emit(-1.0, -1.0, "Looking for a server already running")
-
-    var already := await _ask(_url + "/system_stats", ASK_TIMEOUT)
-    if _stale(run):
-        return
-    if already["ok"]:
-        _set_state(State.READY)
-        await _fetch_lists()
-        return
 
     # Pipes rather than a console, so the dock can show what it says. The false is what makes
     # them non-blocking. Never through cmd: the id would be cmd's, and killing that orphans
     # python on the graphics card.
     var pipe := OS.execute_with_pipe(String(install["python"]),
-            PackedStringArray([String(install["main"]), "--port", str(_port())]), false)
+            PackedStringArray([String(install["main"]), "--port", str(_port()),
+                    "--preview-method", PREVIEW_METHOD]), false)
     var pid := int(pipe.get("pid", -1))
     if pid <= 0:
         _set_state(State.OFFLINE)
@@ -309,6 +360,7 @@ func start(root: String) -> void:
     _log_out = pipe.get("stdio")
     _log_err = pipe.get("stderr")
     _log_bytes = PackedByteArray()
+    _port_taken = false
     _log_timer.start()
     await _wait_for_start(run)
 
@@ -316,7 +368,7 @@ func start(root: String) -> void:
 ## Gives up on a start, closing the process if one was launched.
 ##
 ## Only between pressing Start and the server answering. There may be no process yet — the
-## first thing a start does is look for a server already running.
+## install has to be found before anything is launched.
 func cancel_start() -> void:
     if _state != State.STARTING:
         return
@@ -361,7 +413,10 @@ func _wait_for_start(run: int) -> void:
             _owned_pid = -1
             _close_log()
             _set_state(State.OFFLINE)
-            failed.emit("ComfyUI stopped before it was ready. What it printed is over the preview.")
+            if _port_taken:
+                failed.emit("Something is already using %s. Press Connect to join it." % _url)
+            else:
+                failed.emit("ComfyUI stopped before it was ready. What it printed is over the preview.")
             return
 
         var reply := await _ask(_url + "/system_stats", ASK_TIMEOUT)
@@ -678,6 +733,42 @@ func _read_frame(text: String) -> void:
             # opinion about the same thing.
             if data.get("node") == null:
                 progress.emit(-1.0, -1.0, "%sFinishing" % _batch_prefix())
+
+
+## One binary frame off the socket: a step picture, or nothing.
+##
+## [b]Nothing here decides anything about the run.[/b] A frame that cannot be read is
+## dropped without a word, the way a malformed text frame is — the run is carried by the
+## poll, and a picture nobody could decode is not a reason to say anything went wrong.
+##
+## Only while a run is going. The socket is closed at every ending, so this is a guard
+## against a frame already in the buffer rather than against anything expected.
+func _read_preview(packet: PackedByteArray) -> void:
+    if _state != State.RUNNING or packet.size() <= PREVIEW_HEADER:
+        return
+    if _be32(packet, 0) != PREVIEW_EVENT_IMAGE:
+        return
+
+    var image := Image.new()
+    var body := packet.slice(PREVIEW_HEADER)
+    var error := ERR_INVALID_DATA
+    match _be32(packet, 4):
+        PREVIEW_FORMAT_JPEG:
+            error = image.load_jpg_from_buffer(body)
+        PREVIEW_FORMAT_PNG:
+            error = image.load_png_from_buffer(body)
+    if error != OK or image.is_empty():
+        return
+
+    # A picture is the server working just as plainly as a progress frame is. See the
+    # watchdog in _follow.
+    _last_life_msec = Time.get_ticks_msec()
+    preview_ready.emit(image)
+
+
+## Four big-endian bytes at [param at], as a number.
+static func _be32(bytes: PackedByteArray, at: int) -> int:
+    return (bytes[at] << 24) | (bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3]
 
 
 # --- Following a run -----------------------------------------------------
