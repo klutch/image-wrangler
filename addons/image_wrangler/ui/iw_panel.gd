@@ -693,6 +693,8 @@ var _generate_button: Button
 ## one row per model, each with its own Set. Hidden while the names say nothing.
 var _sampling_note_box: MarginContainer
 var _sampling_note_rows: VBoxContainer
+## The saved prompts at the foot of the Prompt group, and the + that adds one.
+var _swatch_flow: HFlowContainer
 ## The address of the server, and the button that asks it.
 var _comfy_url_edit: LineEdit
 var _comfy_connect_button: Button
@@ -706,7 +708,6 @@ var _comfy_root_edit: LineEdit
 var _comfy_install_note: Label
 var _comfy_start_button: Button
 var _comfy_stop_button: Button
-var _comfy_stop_toggle: CheckBox
 
 ## Set from Start until the server answers, or Cancel is pressed. What holds the loading
 ## overlay up — a failed start leaves it set, so what was printed stays readable.
@@ -873,7 +874,6 @@ func _build_comfy() -> void:
     _comfy.failed.connect(_on_comfy_failed)
     _comfy.cancelled.connect(_on_comfy_cancelled)
     _comfy.set_url(IWAddonSettings.comfy_url())
-    _comfy.stop_on_exit = IWAddonSettings.comfy_stop_on_exit()
 
 
 ## The dock's keyboard shortcuts: Escape and Backspace close and unwind a drawn
@@ -1201,6 +1201,7 @@ func _build_generate() -> void:
             "generate", _schedule_generate_save)
     _add_model_refresh_button()
     _add_sampling_notes()
+    _add_prompt_swatches()
     if _generate.has_catalogue():
         SettingsBuilder.refresh_choices(_generate, _generate_box)
     if _comfy_url_edit != null and _comfy != null:
@@ -1480,6 +1481,7 @@ func _forget_controls() -> void:
     _generate_button = null
     _sampling_note_box = null
     _sampling_note_rows = null
+    _swatch_flow = null
     _comfy_url_edit = null
     _comfy_connect_button = null
     _comfy_address_row = null
@@ -1488,7 +1490,6 @@ func _forget_controls() -> void:
     _comfy_install_note = null
     _comfy_start_button = null
     _comfy_stop_button = null
-    _comfy_stop_toggle = null
     _upscale_box = null
     _upscale_status = null
     _upscale_model_note = null
@@ -1726,12 +1727,12 @@ func _bind_operation_column(chrome: Control) -> void:
     _history_view = chrome.get_node("%History")
     _history_view.revert_requested.connect(_on_history_revert)
 
-    _rename_box = chrome.get_node("%RenameBox")
+    _rename_box = chrome.get_node("%Rename/%RenameBox")
 
     # Three sections, each folding away on its own. The headings are still made here —
     # they carry the session's fold state, which a scene cannot — so the scene leaves a
     # slot per section to pin where each lands, and what the scene holds is moved in.
-    var packing_section := SettingsBuilder.begin_group(chrome.get_node("%PackingSlot"),
+    var packing_section := SettingsBuilder.begin_group(chrome.get_node("%Export/%PackingSlot"),
             "Packing", false, _fold_state, EXPORT_FOLD_PACKING)
 
     _packing_box = VBoxContainer.new()
@@ -1744,13 +1745,13 @@ func _bind_operation_column(chrome: Control) -> void:
     _packing_mode_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     _packing_mode_note.modulate = Color(1, 1, 1, 0.6)
 
-    var normal_section := SettingsBuilder.begin_group(chrome.get_node("%NormalSlot"),
+    var normal_section := SettingsBuilder.begin_group(chrome.get_node("%Export/%NormalSlot"),
             "Normal Maps", false, _fold_state, EXPORT_FOLD_NORMALS)
 
     # The second stack in the dock, and the same scene as the first. What it offers, what a
     # card's form looks like and what each tool button does all arrive from here — see
     # iw_stack_view.gd.
-    _normal_stack = chrome.get_node("%NormalStack")
+    _normal_stack = chrome.get_node("%Export/%NormalStack")
     _normal_stack.reparent(normal_section)
     _normal_stack.set_operations(normal_generators())
     _normal_stack.form_builder = _build_normal_form
@@ -1802,18 +1803,18 @@ func _bind_operation_column(chrome: Control) -> void:
     _packing_reach_slider.value_changed.connect(_on_inner_reach_changed)
     extras.add_child(_packing_reach_slider)
 
-    var pivot_section := SettingsBuilder.begin_group(chrome.get_node("%PivotSlot"),
+    var pivot_section := SettingsBuilder.begin_group(chrome.get_node("%Export/%PivotSlot"),
             "Pivots", true, _fold_state, EXPORT_FOLD_PIVOTS)
 
-    _pivot_view = chrome.get_node("%PivotView")
+    _pivot_view = chrome.get_node("%Export/%PivotView")
     _pivot_view.reparent(pivot_section)
     _pivot_view.edit_toggled.connect(_on_pivot_edit_toggled)
     _pivot_view.pivots_changed.connect(_on_pivots_changed)
     _pivot_view.selection_changed.connect(_update_pivot_overlay)
 
-    _packing_status = chrome.get_node("%PackingStatus")
+    _packing_status = chrome.get_node("%Export/%PackingStatus")
 
-    _upscale_box = chrome.get_node("%UpscaleBox")
+    _upscale_box = chrome.get_node("%Upscale/%UpscaleBox")
 
     # Says what the model in the dropdown above it is for. Built here and moved into the
     # form by _build_upscale, exactly as Packing's note is.
@@ -1821,7 +1822,7 @@ func _bind_operation_column(chrome: Control) -> void:
     _upscale_model_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     _upscale_model_note.modulate = Color(1, 1, 1, 0.6)
 
-    _upscale_status = chrome.get_node("%UpscaleStatus")
+    _upscale_status = chrome.get_node("%Upscale/%UpscaleStatus")
 
     _bind_generate_page(chrome)
     _bind_output_section(chrome)
@@ -1923,40 +1924,37 @@ func _select_mode(mode: int) -> void:
 ## the settings Resource the form writes to. The Server heading is still made here — it
 ## carries the session's fold state — and the scene's rows are moved in under it.
 func _bind_generate_page(chrome: Control) -> void:
-    var server := SettingsBuilder.begin_group(chrome.get_node("%ServerSlot"), "Server",
+    var page: Control = chrome.get_node("%Generate")
+    var server := SettingsBuilder.begin_group(page.get_node("%ServerSlot"), "Server",
             _fold_state.get(GENERATE_FOLD_SERVER, false), _fold_state, GENERATE_FOLD_SERVER,
             _schedule_generate_save)
-    (chrome.get_node("%ServerRows") as Control).reparent(server)
+    (page.get_node("%ServerRows") as Control).reparent(server)
 
-    _comfy_address_row = chrome.get_node("%AddressRow")
-    _comfy_url_edit = chrome.get_node("%ComfyUrlEdit")
+    _comfy_address_row = page.get_node("%AddressRow")
+    _comfy_url_edit = page.get_node("%ComfyUrlEdit")
     _comfy_url_edit.text_submitted.connect(func(_text: String) -> void: _on_comfy_connect())
     _comfy_url_edit.focus_exited.connect(_store_comfy_url)
-    _comfy_connect_button = chrome.get_node("%ConnectButton")
+    _comfy_connect_button = page.get_node("%ConnectButton")
     _comfy_connect_button.pressed.connect(_on_comfy_connect)
 
-    _comfy_install_row = chrome.get_node("%InstallRow")
-    _comfy_root_edit = chrome.get_node("%ComfyRootEdit")
+    _comfy_install_row = page.get_node("%InstallRow")
+    _comfy_root_edit = page.get_node("%ComfyRootEdit")
     _comfy_root_edit.text_submitted.connect(func(_text: String) -> void: _store_comfy_root())
     _comfy_root_edit.focus_exited.connect(_store_comfy_root)
-    chrome.get_node("%ComfyBrowseButton").pressed.connect(_on_comfy_browse)
+    page.get_node("%ComfyBrowseButton").pressed.connect(_on_comfy_browse)
 
-    _comfy_install_note = chrome.get_node("%InstallNote")
+    _comfy_install_note = page.get_node("%InstallNote")
 
-    _comfy_start_button = chrome.get_node("%ComfyStartButton")
+    _comfy_start_button = page.get_node("%ComfyStartButton")
     _comfy_start_button.pressed.connect(_on_comfy_start)
-    _comfy_stop_button = chrome.get_node("%ComfyStopButton")
+    _comfy_stop_button = page.get_node("%ComfyStopButton")
     _comfy_stop_button.pressed.connect(_on_comfy_stop)
 
-    _comfy_stop_toggle = chrome.get_node("%ComfyStopToggle")
-    _comfy_stop_toggle.button_pressed = IWAddonSettings.comfy_stop_on_exit()
-    _comfy_stop_toggle.toggled.connect(_on_comfy_stop_on_exit_toggled)
-
-    _generate_box = chrome.get_node("%GenerateBox")
+    _generate_box = page.get_node("%GenerateBox")
 
     # One button rather than two: while a run is going, the only thing worth pressing is
     # the one that stops it, and a dead Generate sitting beside it says nothing.
-    _generate_button = chrome.get_node("%GenerateButton")
+    _generate_button = page.get_node("%GenerateButton")
     _generate_button.pressed.connect(_on_generate_pressed)
 
 
@@ -4898,7 +4896,10 @@ func _on_comfy_stop() -> void:
     _set_status("Stopped ComfyUI.")
 
 
-## Puts Refresh at the foot of the Model group, for models added while the server was up.
+## Puts Refresh at the head of the Model group, for models added while the server was up.
+##
+## Above the dropdowns rather than below them, because it is what fills them: an empty
+## Checkpoint row with nothing above it says nothing about how to get one.
 ##
 ## Hand-placed after the build rather than declared in the schema, because pressing it asks
 ## the server — which the operation deliberately knows nothing about. It goes dead with the
@@ -4908,10 +4909,11 @@ func _add_model_refresh_button() -> void:
     if body == null:
         return
     var refresh := Button.new()
-    refresh.text = "Refresh"
+    refresh.text = "Refresh Model / LoRA Lists"
     refresh.tooltip_text = "Asks the server again for its checkpoints and LoRAs.\n\nFor models dropped into its folders while it was running. What is picked\nstays picked."
     refresh.pressed.connect(_on_comfy_refresh_models)
     body.add_child(refresh)
+    body.move_child(refresh, 0)
 
 
 ## Puts the advice at the top of the Sampling group: one row per picked model whose name
@@ -4985,6 +4987,116 @@ func _on_sampling_advice_set(hint: Dictionary) -> void:
             settings.clip_skip])
 
 
+## Puts the saved prompts at the foot of the Prompt group: one coloured square per pair,
+## and a + that saves what the two boxes hold. Hand-placed like the Model group's Refresh.
+func _add_prompt_swatches() -> void:
+    var body := SettingsBuilder.find_group(_generate_box, "Prompt")
+    if body == null:
+        return
+    _swatch_flow = HFlowContainer.new()
+    body.add_child(_swatch_flow)
+    _refresh_prompt_swatches()
+
+
+## Rebuilds the swatch row. Remade whole, the way the sampling notes are.
+func _refresh_prompt_swatches() -> void:
+    if _swatch_flow == null or _generate == null:
+        return
+    for child in _swatch_flow.get_children():
+        _swatch_flow.remove_child(child)
+        child.queue_free()
+    var settings: IWGenerateSettings = _generate.get_settings()
+    for index in settings.swatches.size():
+        _swatch_flow.add_child(_swatch_button(settings.swatches[index], index))
+    var add := Button.new()
+    add.text = "+"
+    add.custom_minimum_size = Vector2(22, 22)
+    add.focus_mode = Control.FOCUS_NONE
+    add.tooltip_text = "Saves the two boxes above as a swatch."
+    add.pressed.connect(_on_swatch_add)
+    _swatch_flow.add_child(add)
+
+
+## A Button whose tooltip wraps at a readable width instead of running the screen's
+## width, since a swatch's tooltip carries a whole prompt.
+class SwatchButton:
+    extends Button
+
+    func _make_custom_tooltip(for_text: String) -> Object:
+        var label := Label.new()
+        label.text = for_text
+        label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+        label.custom_minimum_size = Vector2(400, 0)
+        return label
+
+
+## One saved prompt, worn as its colour in every state.
+func _swatch_button(swatch: IWPromptSwatch, index: int) -> Button:
+    var button := SwatchButton.new()
+    button.custom_minimum_size = Vector2(22, 22)
+    button.focus_mode = Control.FOCUS_NONE
+    button.tooltip_text = _swatch_tooltip(swatch)
+    for state: StringName in [&"normal", &"hover", &"pressed"]:
+        var style := StyleBoxFlat.new()
+        style.bg_color = swatch.color
+        if state == &"hover":
+            style.bg_color = swatch.color.lightened(0.2)
+        elif state == &"pressed":
+            style.bg_color = swatch.color.darkened(0.2)
+        style.set_corner_radius_all(3)
+        button.add_theme_stylebox_override(state, style)
+    button.pressed.connect(_on_swatch_pressed.bind(index))
+    return button
+
+
+static func _swatch_tooltip(swatch: IWPromptSwatch) -> String:
+    var text := "Click to put this prompt back into the boxes. Ctrl+Click removes it."
+    if not swatch.positive.is_empty():
+        text += "\n\n%s" % swatch.positive
+    if not swatch.negative.is_empty():
+        text += "\n\nKeep out: %s" % swatch.negative
+    return text
+
+
+func _on_swatch_add() -> void:
+    if _generate == null:
+        return
+    var settings: IWGenerateSettings = _generate.get_settings()
+    if settings.positive.strip_edges().is_empty() \
+            and settings.negative.strip_edges().is_empty():
+        _set_status("Nothing to save: both boxes are empty.")
+        return
+    var swatch := IWPromptSwatch.new()
+    swatch.positive = settings.positive
+    swatch.negative = settings.negative
+    swatch.color = Color.from_hsv(randf(), randf_range(0.5, 0.8), randf_range(0.65, 0.95))
+    settings.swatches.append(swatch)
+    _refresh_prompt_swatches()
+    _schedule_generate_save()
+    _set_status("Saved the prompt as a swatch.")
+
+
+## Puts a swatch back into the two boxes, or with Ctrl held takes it away.
+func _on_swatch_pressed(index: int) -> void:
+    if _generate == null:
+        return
+    var settings: IWGenerateSettings = _generate.get_settings()
+    if index < 0 or index >= settings.swatches.size():
+        return
+    if Input.is_key_pressed(KEY_CTRL):
+        settings.swatches.remove_at(index)
+        _refresh_prompt_swatches()
+        _schedule_generate_save()
+        _set_status("Removed the swatch.")
+        return
+    var swatch: IWPromptSwatch = settings.swatches[index]
+    settings.positive = swatch.positive
+    settings.negative = swatch.negative
+    SettingsBuilder.refresh_values(_generate, _generate_box)
+    _schedule_generate_save()
+    _set_status("Put the swatch's prompt back into the boxes.")
+
+
 func _on_comfy_refresh_models() -> void:
     # Matches what refresh_lists itself stands down for, or the flag would raise an
     # overlay no answer is coming to lower.
@@ -5010,12 +5122,6 @@ func _on_comfy_log(text: String) -> void:
 func _on_comfy_heartbeat() -> void:
     if _comfy != null and _mode == Mode.GENERATE:
         _comfy.heartbeat()
-
-
-func _on_comfy_stop_on_exit_toggled(pressed: bool) -> void:
-    IWAddonSettings.set_comfy_stop_on_exit(pressed)
-    if _comfy != null:
-        _comfy.stop_on_exit = pressed
 
 
 func _on_comfy_state(state: int) -> void:

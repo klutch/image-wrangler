@@ -87,11 +87,6 @@ signal log_output(text: String)
 ## wrong and the tab should not say anything did.
 signal cancelled()
 
-## Whether a server this dock started is killed on the way out.
-##
-## Off leaves it up between editor sessions, which saves the PyTorch load next time.
-var stop_on_exit := true
-
 var _url := DEFAULT_URL
 var _state := State.OFFLINE
 
@@ -603,12 +598,12 @@ func cancel() -> void:
 ##
 ## A run is deliberately left alone: the reply would arrive after the dock has gone, and the
 ## picture is written to ComfyUI's own output folder whether we are here to collect it or
-## not. The process itself goes only if we started it and were asked to take it with us.
+## not. The process itself goes only if we started it.
 func shut_down() -> void:
     _shutting_down = true
     _run_id += 1
     _close_socket()
-    if stop_on_exit and owns_process():
+    if owns_process():
         OS.kill(_owned_pid)
     _owned_pid = -1
     _close_log()

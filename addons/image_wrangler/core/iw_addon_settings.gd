@@ -30,8 +30,6 @@ const KEY_COMFY_URL := "comfy_url"
 ## Where ComfyUI is installed, for Start. See [method comfy_root].
 const KEY_COMFY_ROOT := "comfy_root"
 
-## Whether Start's server is stopped on the way out. See [method comfy_stop_on_exit].
-const KEY_COMFY_STOP_ON_EXIT := "comfy_stop_on_exit"
 
 ## How the file is indented. Spaces rather than a tab, to match everything else here.
 const INDENT := "    "
@@ -128,15 +126,3 @@ static func comfy_root() -> String:
 
 static func set_comfy_root(dir: String) -> void:
     set_value(KEY_COMFY_ROOT, dir.strip_edges())
-
-
-## Whether a ComfyUI the dock started is stopped when the editor closes.
-##
-## Off leaves it up, so the next session skips the PyTorch load. On by default: a spare few
-## gigabytes of video memory held by something nobody can see is worse.
-static func comfy_stop_on_exit() -> bool:
-    return bool(get_value(KEY_COMFY_STOP_ON_EXIT, true))
-
-
-static func set_comfy_stop_on_exit(stop: bool) -> void:
-    set_value(KEY_COMFY_STOP_ON_EXIT, stop)

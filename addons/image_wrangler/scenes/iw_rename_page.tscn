@@ -1,0 +1,9 @@
+[gd_scene format=3 uid="uid://iwrenamepg01"]
+
+[node name="Rename" type="ScrollContainer" unique_id=1101453276]
+horizontal_scroll_mode = 0
+
+[node name="RenameBox" type="VBoxContainer" parent="." unique_id=1954184253]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3

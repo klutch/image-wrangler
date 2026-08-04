@@ -35,6 +35,9 @@ extends Resource
 ## What to keep out of it.
 @export var negative: String = ""
 
+## The saved prompt pairs, shown as coloured squares under the two boxes.
+@export var swatches: Array[IWPromptSwatch] = []
+
 ## Which sampler walks the noise back to a picture, and the schedule it walks on. Both are
 ## names the server offered.
 @export var sampler: String = "euler"

@@ -1,0 +1,48 @@
+[gd_scene format=3 uid="uid://iwexportpg01"]
+
+[ext_resource type="PackedScene" uid="uid://iwstackvie01" path="res://addons/image_wrangler/scenes/iw_stack_view.tscn" id="1_stack"]
+[ext_resource type="PackedScene" uid="uid://iwpivotlst01" path="res://addons/image_wrangler/scenes/iw_pivot_list.tscn" id="2_pivot"]
+
+[node name="Export" type="ScrollContainer" unique_id=1327745166]
+horizontal_scroll_mode = 0
+
+[node name="ExportPage" type="VBoxContainer" parent="." unique_id=420663877]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PackingSlot" type="VBoxContainer" parent="ExportPage" unique_id=1989921769]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="NormalSlot" type="VBoxContainer" parent="ExportPage" unique_id=317915640]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="NormalStack" parent="ExportPage/NormalSlot" unique_id=685592783 instance=ExtResource("1_stack")]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+add_prompt = "Add Normal Map Generator"
+add_tooltip = "Add a normal map generator to the bottom of the stack.
+Drag its header afterwards to move it.
+
+Each one builds on what the ones above it made, in the way its own Combine
+setting says. With none of them the sheet gets no normal map at all.
+
+Disabled while no image is open."
+fit_to_content = true
+
+[node name="PivotSlot" type="VBoxContainer" parent="ExportPage" unique_id=399106810]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="PivotView" parent="ExportPage/PivotSlot" unique_id=1666089227 instance=ExtResource("2_pivot")]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PackingStatus" type="Label" parent="ExportPage" unique_id=2009344760]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 3
