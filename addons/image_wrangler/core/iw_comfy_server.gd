@@ -54,6 +54,12 @@ signal finished(images: Array)
 ## sentence fit for a status line.
 signal failed(reason: String)
 
+## Emitted when a run was stopped on purpose.
+##
+## Its own signal rather than a [signal failed] with a polite reason, because nothing went
+## wrong and the tab should not say anything did.
+signal cancelled()
+
 var _url := DEFAULT_URL
 var _state := State.OFFLINE
 
@@ -67,9 +73,46 @@ var _shutting_down := false
 ## What the server last said it has. Kept so a second tab visit does not re-ask.
 var _lists := {}
 
+## The job in flight, so it can be taken back out of the queue. Empty between runs.
+var _prompt_id := ""
+
+## The socket the server pushes progress down, open only while a run is in flight.
+##
+## [b]A progress bar and nothing else.[/b] Nothing here decides that a run finished — if it
+## drops, the bar stops moving and the poll carries the run to its end exactly as before.
+var _socket: WebSocketPeer
+
+## When something last happened, for the watchdog. Any frame off the socket counts, since
+## the server only sends one while it is working.
+var _last_life_msec := 0
+
 
 func _exit_tree() -> void:
     shut_down()
+
+
+## Pumps the socket. On only while one is open, which is only while a run is in flight.
+func _process(_delta: float) -> void:
+    if _socket == null:
+        set_process(false)
+        return
+    _socket.poll()
+    var ready := _socket.get_ready_state()
+    if ready == WebSocketPeer.STATE_CLOSING:
+        return
+    if ready == WebSocketPeer.STATE_CLOSED:
+        # Quietly. The bar stops moving and the poll finishes the run, which is the whole
+        # point of not letting this decide anything.
+        _close_socket()
+        return
+    if ready != WebSocketPeer.STATE_OPEN:
+        return
+    while _socket.get_available_packet_count() > 0:
+        var packet := _socket.get_packet()
+        # Binary frames are preview pictures, which we never asked for. was_string_packet
+        # describes the packet just taken, so it has to be read after it.
+        if _socket.was_string_packet():
+            _read_frame(packet.get_string_from_utf8())
 
 
 # --- What the dock asks of this ------------------------------------------
@@ -147,8 +190,14 @@ func submit(graph: Dictionary) -> void:
 
     _run_id += 1
     var run := _run_id
+    _prompt_id = ""
+    _last_life_msec = Time.get_ticks_msec()
     _set_state(State.RUNNING)
     progress.emit(-1.0, "Sending the job")
+
+    # Opened before the job is sent rather than after, so the frames for its first steps
+    # are not lost to a handshake. It is loopback, so there is nothing to wait for.
+    _open_socket()
 
     var body := JSON.stringify({"prompt": graph, "client_id": _client_id()})
     var reply := await _send(_url + "/prompt", body, ASK_TIMEOUT)
@@ -163,29 +212,128 @@ func submit(graph: Dictionary) -> void:
         _end_run(_submit_refusal(answer))
         return
 
-    await _follow(String((answer as Dictionary)["prompt_id"]), run)
+    _prompt_id = String((answer as Dictionary)["prompt_id"])
+    await _follow(_prompt_id, run)
 
 
-## Drops whatever is in flight. The server is left alone — see the note on Cancel in the
-## plan; interrupting is a later job.
+## Stops the run in flight, at the server as well as here.
+##
+## Both routes are taken, because a job may be running or may still be waiting behind
+## another: interrupt reaches the first, taking it out of the queue reaches the second, and
+## neither reaches both. Neither answer is waited on — the run is over here the moment the
+## number is bumped, and a reply saying so would arrive after the fact.
+func cancel() -> void:
+    if _state != State.RUNNING:
+        return
+    var prompt_id := _prompt_id
+    # First, so the run drops out at its next checkpoint rather than reporting into a tab
+    # that has already been told it stopped.
+    _run_id += 1
+    _prompt_id = ""
+    _close_socket()
+    _set_state(State.READY)
+    cancelled.emit()
+
+    _send(_url + "/interrupt", "", ASK_TIMEOUT)
+    if not prompt_id.is_empty():
+        _send(_url + "/queue", JSON.stringify({"delete": [prompt_id]}), ASK_TIMEOUT)
+
+
+## Drops whatever is in flight on the way out.
+##
+## The server is deliberately left alone: the reply would arrive after the dock has gone,
+## and the picture is written to ComfyUI's own output folder whether we are here to collect
+## it or not.
 func shut_down() -> void:
     _shutting_down = true
     _run_id += 1
+    _close_socket()
+
+
+# --- The progress socket -------------------------------------------------
+
+## Opens the socket the server pushes progress down.
+##
+## Failing to open is not worth reporting. It costs the step-by-step bar and nothing else,
+## and saying so would be an error message about a run that is going perfectly well.
+func _open_socket() -> void:
+    _close_socket()
+    if _shutting_down:
+        return
+    var socket := WebSocketPeer.new()
+    if socket.connect_to_url(_socket_url()) != OK:
+        return
+    _socket = socket
+    set_process(true)
+
+
+func _close_socket() -> void:
+    if _socket != null:
+        _socket.close()
+        _socket = null
+    set_process(false)
+
+
+## The socket's address, worked out from the one the user typed.
+##
+## [code]https[/code] is not caught by the first replacement — after [code]http[/code] comes
+## an [code]s[/code] rather than a colon — so the two cannot both fire.
+func _socket_url() -> String:
+    var base := _url.replace("http://", "ws://").replace("https://", "wss://")
+    return "%s/ws?clientId=%s" % [base, _client_id().uri_encode()]
+
+
+## One frame off the socket.
+##
+## Only two kinds are used. Everything else is dropped, including the errors — those are
+## read off [code]/history[/code] instead, where they arrive whether the socket was up or
+## not.
+func _read_frame(text: String) -> void:
+    var json := JSON.new()
+    if json.parse(text) != OK or not (json.data is Dictionary):
+        return
+    var frame: Dictionary = json.data
+    if not (frame.get("data") is Dictionary):
+        return
+    var data: Dictionary = frame["data"]
+
+    # Anything at all is the server saying it is still working. See the watchdog in _follow.
+    _last_life_msec = Time.get_ticks_msec()
+
+    match String(frame.get("type", "")):
+        "progress":
+            var total := float(data.get("max", 0.0))
+            if total <= 0.0:
+                return
+            var value := float(data.get("value", 0.0))
+            progress.emit(clampf(value / total, 0.0, 1.0),
+                    "Step %d of %d" % [int(value), int(total)])
+        "executing":
+            # A node of null is the graph reaching its end. Nothing is confirmed by it —
+            # the picture is still fetched off /history, which is what actually says the run
+            # is done and what it made.
+            #
+            # Reported as unmeasurable so only the words change: the steps have already
+            # walked the bar to its end, and claiming a number here would be a second
+            # opinion about the same thing.
+            if data.get("node") == null:
+                progress.emit(-1.0, "Finishing")
 
 
 # --- Following a run -----------------------------------------------------
 
 ## Polls until the job is done, then fetches what it made.
+##
+## [b]The poll is what carries the run, whether or not the socket is up.[/b] All the socket
+## does is move the bar and keep the watchdog quiet.
 func _follow(prompt_id: String, run: int) -> void:
     progress.emit(-1.0, "Generating")
     var misses := 0
-    var waited := 0.0
 
     while true:
         await get_tree().create_timer(POLL_SECONDS).timeout
         if _stale(run):
             return
-        waited += POLL_SECONDS
 
         var reply := await _ask("%s/history/%s" % [_url, prompt_id], ASK_TIMEOUT)
         if _stale(run):
@@ -201,11 +349,15 @@ func _follow(prompt_id: String, run: int) -> void:
 
         var history: Variant = reply["json"]
         if not (history is Dictionary) or not (history as Dictionary).has(prompt_id):
-            # Still queued or still working. Nothing is wrong with an empty answer.
-            if waited >= STALL_SECONDS:
-                # Let go rather than cancelled: the server may well still be working, and
-                # saying it was stopped would be a lie.
-                _end_run("ComfyUI has not answered for %d minutes. The run was let go — it may still be going, so check its console."
+            # Still queued or still working. Nothing is wrong with an empty answer, so the
+            # only thing that ends the wait is the job going quiet for a long time.
+            #
+            # Measured from the last frame off the socket rather than from the start, so a
+            # long run that is plainly working is never cut off. A job waiting behind
+            # somebody else's is quiet too — which is why this is minutes, and why it says
+            # the run was let go rather than that anything failed.
+            if Time.get_ticks_msec() - _last_life_msec >= int(STALL_SECONDS * 1000.0):
+                _end_run("ComfyUI has said nothing for %d minutes. The run was let go — it may still be going, so check its console."
                         % int(STALL_SECONDS / 60.0))
                 return
             continue
@@ -276,6 +428,8 @@ func _collect(outputs: Dictionary, run: int) -> void:
         _end_run("ComfyUI made the picture but would not hand it over.")
         return
 
+    _prompt_id = ""
+    _close_socket()
     _set_state(State.READY)
     if lost > 0:
         failed.emit("Got %d of %d pictures; the rest would not come down." % [images.size(), wanted.size()])
@@ -466,5 +620,7 @@ func _set_state(state: int) -> void:
 
 ## Ends a run badly: back to ready, and one sentence saying why.
 func _end_run(reason: String) -> void:
+    _prompt_id = ""
+    _close_socket()
     _set_state(State.READY if _state == State.RUNNING else _state)
     failed.emit(reason)

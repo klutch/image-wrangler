@@ -835,6 +835,7 @@ func _build_comfy() -> void:
     _comfy.progress.connect(_on_comfy_progress)
     _comfy.finished.connect(_on_comfy_finished)
     _comfy.failed.connect(_on_comfy_failed)
+    _comfy.cancelled.connect(_on_comfy_cancelled)
     _comfy.set_url(IWAddonSettings.comfy_url())
 
 
@@ -923,6 +924,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
     if key.keycode == KEY_X and _pick_target is IslandPicker:
         var mode := (_pick_target as IslandPicker).toggle_next_mode()
         _set_status("Next region: %s." % IWAlphaMode.LABELS[mode])
+        accept_event()
+        return
+
+    # Escape stops a generation, which is the only thing on that tab it could mean.
+    if _generate_running and key.keycode == KEY_ESCAPE:
+        _cancel_generate()
         accept_event()
         return
 
@@ -2100,10 +2107,12 @@ func _build_generate_page() -> void:
     _generate_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     column.add_child(_generate_box)
 
+    # One button rather than two: while a run is going, the only thing worth pressing is
+    # the one that stops it, and a dead Generate sitting beside it says nothing.
     _generate_button = Button.new()
     _generate_button.text = "Generate"
-    _generate_button.tooltip_text = "Make a picture from the description above.\n\nNothing here runs on its own the way the other tabs do — a generation takes a\nminute and a graphics card, so it happens only when asked. Refresh asks too."
-    _generate_button.pressed.connect(_run_generate)
+    _generate_button.tooltip_text = "Make a picture from the description above.\n\nNothing here runs on its own the way the other tabs do — a generation takes a\nminute and a graphics card, so it happens only when asked. Refresh asks too.\n\nWhile one is going this stops it, as does Escape."
+    _generate_button.pressed.connect(_on_generate_pressed)
     column.add_child(_generate_button)
 
     _generate_status = Label.new()
@@ -4962,8 +4971,12 @@ func _on_comfy_info(lists: Dictionary) -> void:
 func _on_comfy_progress(fraction: float, note: String) -> void:
     # Only while this tab is up. Another tab's viewport is showing something else, and a bar
     # over it would be about work that has nothing to do with what is on screen.
-    if _mode == Mode.GENERATE and _preview != null and fraction >= 0.0:
-        _preview.set_progress(fraction)
+    if _mode == Mode.GENERATE and _preview != null:
+        if fraction >= 0.0:
+            _preview.set_progress(fraction)
+        # The caption goes up either way. A run with nothing to measure yet still has
+        # something to say, and a bar with no words under it is the thing that reads as hung.
+        _preview.set_stage_progress(maxf(fraction, 0.0), note)
     _set_generate_status(note)
 
 
@@ -4994,6 +5007,30 @@ func _on_comfy_failed(reason: String) -> void:
     _set_generate_status(reason)
     _refresh_comfy_status()
     _update_controls()
+
+
+## Nothing went wrong, so nothing is said beyond the fact that it stopped.
+func _on_comfy_cancelled() -> void:
+    _generate_running = false
+    if _preview != null:
+        _preview.set_busy(false)
+    _set_generate_status("Stopped.")
+    _set_status("Generation stopped.")
+    _refresh_comfy_status()
+    _update_controls()
+
+
+## The one button: makes a picture, or stops the one being made.
+func _on_generate_pressed() -> void:
+    if _generate_running:
+        _cancel_generate()
+    else:
+        _run_generate()
+
+
+func _cancel_generate() -> void:
+    if _comfy != null and _generate_running:
+        _comfy.cancel()
 
 
 ## Sends the form to the server, or says why it cannot.
@@ -6030,10 +6067,11 @@ func _update_controls() -> void:
         _process_selected_button.disabled = _current_generate_image() == null
         _process_all_button.disabled = true
         if _generate_button != null:
-            _generate_button.disabled = _generate_running or _comfy == null \
+            # Never disabled while a run is going: it is the way to stop one.
+            _generate_button.disabled = not _generate_running and (_comfy == null \
                     or _comfy.state() == ComfyServer.State.OFFLINE \
-                    or _generate == null or not _generate.has_catalogue()
-            _generate_button.text = "Generating..." if _generate_running else "Generate"
+                    or _generate == null or not _generate.has_catalogue())
+            _generate_button.text = "Cancel" if _generate_running else "Generate"
         return
     # Upscale is the other way round: every image comes out as its own file, so both
     # buttons mean what they mean everywhere else. They only stand down when nothing they
