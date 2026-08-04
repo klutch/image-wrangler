@@ -177,8 +177,7 @@ func _drain_log() -> void:
         if not text.is_empty():
             log_output.emit(text)
 
-    # Only after that last read. What a process says on its way out is the half worth
-    # having, and closing first would throw it away.
+    # Only after that last read: what a process says on its way out is the half worth having.
     if not owns_process():
         _close_log()
 
@@ -301,10 +300,9 @@ func start(root: String) -> void:
         await _fetch_lists()
         return
 
-    # Through pipes rather than a console, so what it says can be shown in the dock. The
-    # false is what makes the pipes non-blocking, without which reading one would stall the
-    # editor. Never through cmd: the id would be cmd's, and killing that orphans python on
-    # the graphics card.
+    # Pipes rather than a console, so the dock can show what it says. The false is what makes
+    # them non-blocking. Never through cmd: the id would be cmd's, and killing that orphans
+    # python on the graphics card.
     var pipe := OS.execute_with_pipe(String(install["python"]),
             PackedStringArray([String(install["main"]), "--port", str(_port())]), false)
     var pid := int(pipe.get("pid", -1))
@@ -368,7 +366,7 @@ func _wait_for_start(run: int) -> void:
             _owned_pid = -1
             _close_log()
             _set_state(State.OFFLINE)
-            failed.emit("ComfyUI stopped before it was ready. What it printed is above.")
+            failed.emit("ComfyUI stopped before it was ready. What it printed is over the preview.")
             return
 
         var reply := await _ask(_url + "/system_stats", ASK_TIMEOUT)

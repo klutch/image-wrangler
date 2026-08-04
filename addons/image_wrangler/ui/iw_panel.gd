@@ -268,13 +268,8 @@ const GENERATE_FOLD_SERVER := "generate/server"
 ## the spinner is the whole of it.
 const STARTING_CAPTION := "Waiting for ComfyUI Server"
 
-## How tall the start log is, and how many lines of it are kept. Trimmed from the front, so
-## a start that says a great deal cannot grow without end.
-const COMFY_LOG_HEIGHT := 120
-const COMFY_LOG_LINES := 400
-
 ## Held here because the button swaps between this and the one for Cancel.
-const START_TOOLTIP := "Runs ComfyUI from the folder above, in a console window of its own.\n\nThat console is its log, and it opens in front of the editor.\n\nStart looks first for one already answering and joins that instead, so pressing\nthis with ComfyUI already up costs nothing.\n\nThe first start of the day loads the whole of PyTorch. Give it a minute."
+const START_TOOLTIP := "Runs ComfyUI from the folder above.\n\nWhat it prints while starting is shown over the preview.\n\nStart looks first for one already answering and joins that instead, so pressing\nthis with ComfyUI already up costs nothing.\n\nThe first start of the day loads the whole of PyTorch. Give it a minute."
 
 ## Where the Generate tab's settings are kept.
 ##
@@ -754,10 +749,9 @@ var _comfy_start_button: Button
 var _comfy_stop_button: Button
 var _comfy_stop_toggle: CheckBox
 
-## What a started server has printed, and whether it is worth showing. Shown from pressing
-## Start until the server answers, and left up when a start fails so the reason survives.
-var _comfy_log: TextEdit
-var _comfy_log_wanted := false
+## Set from Start until the server answers, or Cancel is pressed. What holds the loading
+## overlay up — a failed start leaves it set, so what was printed stays readable.
+var _comfy_waiting := false
 ## Says how the last upscale went, or why it could not run at all.
 var _upscale_status: Label
 ## Says what the selected model is for, sitting under its dropdown.
@@ -1522,7 +1516,6 @@ func _forget_controls() -> void:
     _comfy_start_button = null
     _comfy_stop_button = null
     _comfy_stop_toggle = null
-    _comfy_log = null
     _upscale_box = null
     _upscale_status = null
     _upscale_model_note = null
@@ -2253,17 +2246,6 @@ func _build_generate_page() -> void:
     _comfy_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     _comfy_status.modulate = Color(1, 1, 1, 0.6)
     server.add_child(_comfy_status)
-
-    # Only up while a server this dock started is coming up. It is the one time there is
-    # nothing else to look at and every reason a start can fail is in here.
-    _comfy_log = TextEdit.new()
-    _comfy_log.editable = false
-    _comfy_log.custom_minimum_size = Vector2(0, COMFY_LOG_HEIGHT)
-    _comfy_log.scroll_fit_content_height = false
-    _comfy_log.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-    _comfy_log.tooltip_text = "What ComfyUI is printing as it starts.\n\nIt goes away once the server answers. If a start fails, it stays up with the\nreason in it."
-    _comfy_log.visible = false
-    server.add_child(_comfy_log)
 
     _generate_box = VBoxContainer.new()
     _generate_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -5243,18 +5225,11 @@ func _update_comfy_controls() -> void:
         _comfy_install_row.visible = not connected
     if _comfy_install_note != null:
         _comfy_install_note.visible = not connected
-    # A server that answered has nothing left to explain, so the log goes with the rest of
-    # the finding-one controls. A failed start keeps it up: that is where the reason is.
-    if connected:
-        _comfy_log_wanted = false
-    if _comfy_log != null:
-        _comfy_log.visible = _comfy_log_wanted and not _comfy_log.text.is_empty()
 
-    # While a start is being waited on it is the only thing worth pressing, so it becomes the
-    # way out of one rather than a dead button saying what is already on screen.
-    var starting := state == ComfyServer.State.STARTING
+    # While the wait is on it is the only thing worth pressing, so it becomes the way out
+    # of one rather than a dead button saying what is already on screen.
     _comfy_start_button.visible = not connected
-    if starting:
+    if _comfy_waiting:
         _comfy_start_button.text = "Cancel"
         _comfy_start_button.disabled = false
         _comfy_start_button.tooltip_text = "Stops waiting, and closes ComfyUI if this dock got as far as starting it."
@@ -5306,14 +5281,17 @@ func _on_comfy_start() -> void:
         return
     # The same button, because while a start is being waited on it is the only thing worth
     # pressing. See _update_comfy_controls.
-    if _comfy.state() == ComfyServer.State.STARTING:
+    if _comfy_waiting:
+        # There may be nothing to cancel at the server — a failed start already ended
+        # there, and only the overlay is left to take down.
         _comfy.cancel_start()
+        _comfy_waiting = false
+        if _preview != null:
+            _preview.clear_busy_log()
+        _refresh_generate_busy()
+        _update_controls()
         _refuse_generate("Stopped waiting for ComfyUI.")
         return
-    # A fresh start starts a fresh log. Last time's reason for failing is not this one's.
-    _comfy_log_wanted = true
-    if _comfy_log != null:
-        _comfy_log.text = ""
     # The typed folder counts even if focus never left the box, so pressing Start straight
     # after typing does what it looks like it does.
     _store_comfy_root()
@@ -5329,18 +5307,13 @@ func _on_comfy_stop() -> void:
     _set_generate_status("Stopped ComfyUI.")
 
 
-## Takes what a started server printed and puts it in the box.
+## Takes what a started server printed and puts it under the loading bars.
+##
+## Only while the wait is on. The pipes are read for the server's whole life, but what it
+## prints mid-generation belongs to the progress reports, not over them.
 func _on_comfy_log(text: String) -> void:
-    if _comfy_log == null:
-        return
-    _comfy_log.text += text
-    var lines := _comfy_log.get_line_count()
-    if lines > COMFY_LOG_LINES:
-        var kept := _comfy_log.text.split("\n")
-        _comfy_log.text = "\n".join(kept.slice(lines - COMFY_LOG_LINES))
-    # Follows the newest line, since the reason a start failed is always the last thing said.
-    _comfy_log.scroll_vertical = _comfy_log.get_line_count()
-    _update_comfy_controls()
+    if _comfy_waiting and _preview != null:
+        _preview.append_busy_log(text)
 
 
 ## Whether the server is still where it was. See [method IWComfyServer.heartbeat].
@@ -5355,7 +5328,17 @@ func _on_comfy_stop_on_exit_toggled(pressed: bool) -> void:
         _comfy.stop_on_exit = pressed
 
 
-func _on_comfy_state(_state: int) -> void:
+func _on_comfy_state(state: int) -> void:
+    # The wait is armed by a start beginning and ended by a connection — a failed start
+    # deliberately leaves it up, since the overlay is where what was printed is.
+    if state == ComfyServer.State.STARTING:
+        _comfy_waiting = true
+        if _preview != null:
+            _preview.clear_busy_log()
+    elif state == ComfyServer.State.READY or state == ComfyServer.State.RUNNING:
+        _comfy_waiting = false
+        if _preview != null:
+            _preview.clear_busy_log()
     _refresh_comfy_status()
     _refresh_generate_busy()
     _update_controls()
@@ -5368,9 +5351,8 @@ func _on_comfy_state(_state: int) -> void:
 func _refresh_generate_busy() -> void:
     if _mode != Mode.GENERATE or _preview == null:
         return
-    var starting := _comfy != null and _comfy.state() == ComfyServer.State.STARTING
-    _preview.set_busy(_generate_running or starting)
-    if starting:
+    _preview.set_busy(_generate_running or _comfy_waiting)
+    if _comfy_waiting:
         _preview.set_stage_progress(0.0, STARTING_CAPTION)
 
 
@@ -5410,7 +5392,7 @@ func _on_comfy_progress(overall: float, step: float, note: String) -> void:
         # A start keeps its own caption: what it has to say about PyTorch belongs in the
         # status line rather than across the viewport.
         var caption := note
-        if _comfy != null and _comfy.state() == ComfyServer.State.STARTING:
+        if _comfy_waiting:
             caption = STARTING_CAPTION
         _preview.set_stage_progress(maxf(step, 0.0), caption)
     _set_generate_status(note)
@@ -5501,7 +5483,11 @@ func _cancel_generate() -> void:
 ## Puts the tab back to not-running, with [param note] on its status line.
 func _end_generate_run(note: String) -> void:
     _generate_running = false
-    if _preview != null:
+    # Through the refresh rather than set_busy(false): a failed start reports through
+    # here too, and its overlay has to stay up with what was printed.
+    if _mode == Mode.GENERATE:
+        _refresh_generate_busy()
+    elif _preview != null:
         _preview.set_busy(false)
     _set_generate_status(note)
     _refresh_comfy_status()

@@ -215,6 +215,12 @@ const BUSY_STAGE_BAR_GAP := 3.0
 ## Shown while nothing has said which stage is running.
 const BUSY_CAPTION := "Processing…"
 
+## The lines a server being started has printed, drawn under the bars: how many are kept,
+## how wide the block may be, and the gap above it.
+const BUSY_LOG_LINES := 8
+const BUSY_LOG_WIDTH := 480.0
+const BUSY_LOG_GAP := 8.0
+
 ## The panel the whole overlay sits in, so that a spinner and a caption over busy
 ## artwork read as one thing rather than as marks on the image.
 const BUSY_PANEL_ALPHA := 0.72
@@ -401,6 +407,10 @@ var _progress := 0.0
 ## four seconds in one stage looks identical to one that has hung.
 var _stage_progress := 0.0
 var _stage_label := ""
+
+## What a server being started has printed, newest last. Drawn under the bars while
+## anything is in it.
+var _busy_log := PackedStringArray()
 
 ## How far the overlay has faded up, 0 to 1, ramped over [constant BUSY_FADE_TIME]
 ## towards whatever [member _busy] currently is.
@@ -910,6 +920,22 @@ func set_stage_progress(fraction: float, label: String) -> void:
     if not changed and is_equal_approx(_stage_progress, clamped):
         return
     _stage_progress = clamped
+    _canvas.queue_redraw()
+
+
+## Adds [param text] to the lines drawn under the bars, keeping the newest few.
+func append_busy_log(text: String) -> void:
+    for line: String in text.split("\n", false):
+        _busy_log.append(line)
+    while _busy_log.size() > BUSY_LOG_LINES:
+        _busy_log.remove_at(0)
+    _canvas.queue_redraw()
+
+
+func clear_busy_log() -> void:
+    if _busy_log.is_empty():
+        return
+    _busy_log.clear()
     _canvas.queue_redraw()
 
 
@@ -1958,6 +1984,14 @@ func _draw_busy() -> void:
     var spinner := _spinner_size(room, caption.y)
     var bar_width := minf(BUSY_BAR_WIDTH, room.x)
 
+    # The started server's lines, smaller than the caption: detail, not the headline.
+    var log_font_size := maxi(font_size - 3, 9)
+    var log_line := 0.0
+    var log_size := Vector2.ZERO
+    if font != null and not _busy_log.is_empty():
+        log_line = font.get_height(log_font_size)
+        log_size = Vector2(minf(BUSY_LOG_WIDTH, room.x), log_line * float(_busy_log.size()))
+
     # Stacked and centred as one group, so a short preview column drops the bar
     # rather than pushing the spinner off its middle.
     var stack := spinner.y
@@ -1965,7 +1999,10 @@ func _draw_busy() -> void:
         stack += BUSY_SPINNER_GAP + caption.y
     if bar_width > 0.0:
         stack += BUSY_SPINNER_GAP + BUSY_BAR_HEIGHT + BUSY_STAGE_BAR_GAP + BUSY_STAGE_BAR_HEIGHT
-    var content := Vector2(maxf(maxf(spinner.x, caption.x), bar_width), stack)
+    if log_size.y > 0.0:
+        stack += BUSY_LOG_GAP + log_size.y
+    var content := Vector2(
+            maxf(maxf(maxf(spinner.x, caption.x), bar_width), log_size.x), stack)
 
     # The panel first, since everything else is drawn on top of it.
     var panel := Rect2(
@@ -2010,6 +2047,23 @@ func _draw_busy() -> void:
         accent.darkened(0.35),
         false,
     )
+
+    if log_size.y <= 0.0:
+        return
+    top += BUSY_BAR_HEIGHT + BUSY_STAGE_BAR_GAP + BUSY_STAGE_BAR_HEIGHT + BUSY_LOG_GAP
+    var log_x := floorf((_viewport.x - log_size.x) * 0.5)
+    for line: String in _busy_log:
+        # The width clips a long line rather than letting it out of the panel.
+        _canvas.draw_string(
+            font,
+            Vector2(log_x, floorf(top + font.get_ascent(log_font_size))),
+            line,
+            HORIZONTAL_ALIGNMENT_LEFT,
+            log_size.x,
+            log_font_size,
+            Color(1, 1, 1, 0.5 * fade),
+        )
+        top += log_line
 
 
 ## One progress bar. Track first, then the fill over it, so a fraction of zero still
