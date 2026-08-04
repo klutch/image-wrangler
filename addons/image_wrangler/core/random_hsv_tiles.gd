@@ -6,8 +6,12 @@ extends IWStackOperation
 ##
 ## Where [HSVAdjust] waits to be handed a rectangle, this one goes looking. Every island of
 ## visible pixels is an object, the smallest rectangle containing it is its region, and
-## each region gets a random hue, saturation and value of its own. A sheet of forty
-## flowers becomes forty colours from one seed and three sliders.
+## each region gets a random hue, saturation, value and colorize of its own. A sheet of
+## forty flowers becomes forty colours from one seed and four sliders.
+##
+## [b]Every slider is a ceiling, not a setting.[/b] Each object draws its own number
+## between no change and wherever the slider sits, so turning one up widens the spread
+## rather than moving every object the same distance.
 ##
 ## [b]An island is whatever the alpha says it is.[/b] The stage reads what the run
 ## currently shows — the source's own transparency, times whatever the stages above have
@@ -124,6 +128,15 @@ func get_settings_schema() -> Array[Dictionary]:
             "step": 0.01,
             "tooltip": "The far end each object's lightness may be pulled towards, as a multiplier.\n\nAt 1 nothing moves. At 0 an object can come out anywhere down to black; at 3,\nanywhere up to three times as bright. Anything already at full brightness\nstays there.",
         },
+        {
+            "property": &"colorize_amount",
+            "label": "Colorize",
+            "type": SettingType.FLOAT,
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.01,
+            "tooltip": "How far an object may be mixed towards one flat colour, keeping each\npixel's own lightness.\n\nThe tint an object takes is its own random hue, so Hue decides how much the\ntints differ from one another. Black and white stay where they are.",
+        },
     ]
 
 
@@ -152,7 +165,8 @@ func prerequisite_note(ctx: IWPipelineContext) -> String:
 
 func process_context(ctx: IWPipelineContext) -> void:
     if is_zero_approx(settings.hue_amount) and is_equal_approx(settings.saturation_amount, 1.0) \
-            and is_equal_approx(settings.value_amount, 1.0):
+            and is_equal_approx(settings.value_amount, 1.0) \
+            and is_zero_approx(settings.colorize_amount):
         return
     if not report_progress(0.05):
         return
@@ -162,7 +176,8 @@ func process_context(ctx: IWPipelineContext) -> void:
             settings.rng_seed,
             settings.hue_amount,
             settings.saturation_amount,
-            settings.value_amount)
+            settings.value_amount,
+            settings.colorize_amount)
     if bounds.is_empty():
         report_progress(1.0)
         return

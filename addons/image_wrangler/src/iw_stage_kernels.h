@@ -226,8 +226,10 @@ public:
     // works the other way round: the caller cannot name the regions because it does not
     // know them yet — finding them is the job. Hue is how far it may wander either way, 0
     // to 1. Saturation and value are the far end each may be pulled towards, 0 to 2 and 0
-    // to 3, with 1 leaving them alone. The seed makes the same image come out the same
-    // way twice.
+    // to 3, with 1 leaving them alone. Colorize is how far an island may be mixed towards
+    // one flat hue, 0 to 1. Every one of the four is a ceiling, not a setting: each island
+    // draws its own number between no change and that end. The seed makes the same image
+    // come out the same way twice.
     //
     // Returns x, y, w, h per island: the smallest rectangle containing each one. Reads
     // the alpha the run currently shows, so where it sits in the stack decides what
@@ -235,7 +237,7 @@ public:
     // rebuild of the distance map afterwards.
     static PackedInt32Array random_hsv_tiles(const Ref<IWPipelineContext> &ctx,
             int64_t rng_seed, double hue_amount, double saturation_amount,
-            double value_amount);
+            double value_amount, double colorize_amount);
 
     // Posterize.process_context: cuts the image down to a small set of colours.
     //

@@ -230,7 +230,8 @@ void IWStageKernels::adjust_hsv(const Ref<IWPipelineContext> &ctx,
     }
 }
 
-// Finds every island of visible pixels and gives each one its own random HSV shift.
+// Finds every island of visible pixels and gives each one its own random HSV shift, and
+// optionally its own tint towards a flat colour.
 //
 // Islands are read off what the run currently shows — the source's alpha times whatever
 // the stages above have keyed out — so the same stage finds one island in an untouched
@@ -247,7 +248,8 @@ void IWStageKernels::adjust_hsv(const Ref<IWPipelineContext> &ctx,
 // rewrites the source pixels, so the caller owes the run a rebuild of the distance map
 // afterwards.
 PackedInt32Array IWStageKernels::random_hsv_tiles(const Ref<IWPipelineContext> &ctx,
-        int64_t rng_seed, double hue_amount, double saturation_amount, double value_amount) {
+        int64_t rng_seed, double hue_amount, double saturation_amount, double value_amount,
+        double colorize_amount) {
     PackedInt32Array bounds;
     ERR_FAIL_COND_V(ctx.is_null(), bounds);
     if (ctx->pixel_count <= 0) {
@@ -282,23 +284,30 @@ PackedInt32Array IWStageKernels::random_hsv_tiles(const Ref<IWPipelineContext> &
         }
     }
 
-    // Each island's three numbers, drawn from the seed and its own index. Worked out once
-    // per island rather than per pixel, and clamped here so a hand-edited file cannot ask
-    // for a hue that wraps twice.
-    // Hue reaches either way from where it is. Saturation and value reach one way, from no
+    // Each island's numbers, drawn from the seed and its own index. Worked out once per
+    // island rather than per pixel, and clamped here so a hand-edited file cannot ask for
+    // a hue that wraps twice.
+    //
+    // Hue reaches either way from where it is. The other three reach one way, from no
     // change towards whatever end was asked for.
     const double hue_reach = iw::clampf(hue_amount, 0.0, 1.0) * 0.5;
     const double sat_end = iw::clampf(saturation_amount, 0.0, 2.0);
     const double val_end = iw::clampf(value_amount, 0.0, 3.0);
+    const double tint_end = iw::clampf(colorize_amount, 0.0, 1.0);
     const uint64_t root = mix64(static_cast<uint64_t>(rng_seed));
+    // Colorize draws from a stream of its own rather than widening the stride of the one
+    // above, so a seed picked before this slider existed still gives the colours it did.
+    const uint64_t tint_root = mix64(root + 0x9E3779B97F4A7C15ULL);
     std::vector<double> turn(static_cast<size_t>(island_count), 0.0);
     std::vector<double> sat_scale(static_cast<size_t>(island_count), 1.0);
     std::vector<double> val_scale(static_cast<size_t>(island_count), 1.0);
+    std::vector<double> tint_mix(static_cast<size_t>(island_count), 0.0);
     for (int64_t n = 0; n < island_count; n++) {
         const uint64_t key = root + static_cast<uint64_t>(n) * 3;
         turn[n] = signed_unit(mix64(key)) * hue_reach;
         sat_scale[n] = 1.0 + unit(mix64(key + 1)) * (sat_end - 1.0);
         val_scale[n] = 1.0 + unit(mix64(key + 2)) * (val_end - 1.0);
+        tint_mix[n] = unit(mix64(tint_root + static_cast<uint64_t>(n))) * tint_end;
     }
 
     const double to_unit = 1.0 / 255.0;
@@ -309,11 +318,13 @@ PackedInt32Array IWStageKernels::random_hsv_tiles(const Ref<IWPipelineContext> &
             continue;
         }
         const int64_t at = i * 4;
+        const double src_r = data[at] * to_unit;
+        const double src_g = data[at + 1] * to_unit;
+        const double src_b = data[at + 2] * to_unit;
         double hue = 0.0;
         double sat = 0.0;
         double val = 0.0;
-        to_hsv(data[at] * to_unit, data[at + 1] * to_unit, data[at + 2] * to_unit,
-                hue, sat, val);
+        to_hsv(src_r, src_g, src_b, hue, sat, val);
 
         // Hue wraps rather than clamping, exactly as it does in adjust_hsv: the wheel has
         // no ends, and a turn that stopped at red would bunch every shifted island up
@@ -327,6 +338,25 @@ PackedInt32Array IWStageKernels::random_hsv_tiles(const Ref<IWPipelineContext> &
         double g = 0.0;
         double b = 0.0;
         to_rgb(hue, sat, val, r, g, b);
+
+        // The same tint adjust_hsv applies, with the island's own random numbers standing
+        // in for a region's sliders: its turn read as a place on the wheel, its saturation
+        // as the tint's strength.
+        const double mix = tint_mix[here];
+        if (mix > 0.0) {
+            const double tint_hue = turn[here] - iw::floori(turn[here]);
+            const double tint_sat = iw::clampf(sat_scale[here], 0.0, 1.0);
+            const double light = iw::clampf(
+                    to_lightness(src_r, src_g, src_b) * val_scale[here], 0.0, 1.0);
+            double tr = 0.0;
+            double tg = 0.0;
+            double tb = 0.0;
+            hsl_to_rgb(tint_hue, tint_sat, light, tr, tg, tb);
+            r = iw::lerpf(r, tr, mix);
+            g = iw::lerpf(g, tg, mix);
+            b = iw::lerpf(b, tb, mix);
+        }
+
         data[at] = static_cast<uint8_t>(iw::roundi(iw::clampf(r, 0.0, 1.0) * 255.0));
         data[at + 1] = static_cast<uint8_t>(iw::roundi(iw::clampf(g, 0.0, 1.0) * 255.0));
         data[at + 2] = static_cast<uint8_t>(iw::roundi(iw::clampf(b, 0.0, 1.0) * 255.0));

@@ -34,6 +34,12 @@ extends Resource
 ## three times as bright.
 @export var value_amount: float = 1.0
 
+## How far an island may be mixed towards one flat colour, keeping each pixel's lightness.
+##
+## The tint an island takes is its own random hue, so [member hue_amount] decides how much
+## the tints differ from one another. At 0 this does nothing.
+@export var colorize_amount: float = 0.0
+
 
 ## A copy that belongs to no image. Nothing here is a coordinate and nothing is a nested
 ## Resource, so the plain duplicate is the whole of it.
