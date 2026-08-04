@@ -1,0 +1,40 @@
+[gd_scene format=3 uid="uid://iwpolygonl01"]
+
+[ext_resource type="Script" uid="uid://dd6fje3f70pit" path="res://addons/image_wrangler/ui/iw_polygon_list.gd" id="1_script"]
+[ext_resource type="Script" uid="uid://dni7ui0rrppd6" path="res://addons/image_wrangler/ui/iw_entry_list.gd" id="2_list"]
+
+[node name="PolygonList" type="VBoxContainer"]
+script = ExtResource("1_script")
+
+[node name="Buttons" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="DrawButton" type="Button" parent="Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Click the preview to place corners.
+Right-click, press Escape, or click the first corner again to close the
+shape. Backspace takes back the last corner."
+toggle_mode = true
+text = "Draw"
+
+[node name="ClearButton" type="Button" parent="Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Remove every region for this image."
+text = "Clear"
+
+[node name="List" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 1
+script = ExtResource("2_list")
+
+[node name="Hint" type="Label" parent="."]
+unique_name_in_owner = true
+visible = false
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 3

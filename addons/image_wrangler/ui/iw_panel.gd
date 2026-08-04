@@ -16,6 +16,7 @@ const ModelFolder := preload("res://addons/image_wrangler/ui/iw_model_folder.gd"
 const SettingsIO := preload("res://addons/image_wrangler/core/iw_settings_io.gd")
 const StackView := preload("res://addons/image_wrangler/ui/iw_stack_view.gd")
 const HistoryView := preload("res://addons/image_wrangler/ui/iw_history_view.gd")
+const ChromeScene := preload("res://addons/image_wrangler/scenes/iw_panel.tscn")
 const ComfyServer := preload("res://addons/image_wrangler/core/iw_comfy_server.gd")
 
 ## Every [IWStackOperation] the stack can hold, in the order the dropdown offers them.
@@ -169,48 +170,12 @@ const DELETE_ICON_COLOR := Color(0.85, 0.25, 0.25)
 ## for itself.
 const AUTO_PREVIEW_PIXEL_LIMIT := 4_194_304
 
-## Width of the Original fade slider. Enough to aim with, short enough that the
-## toolbar does not pin the preview column open.
-const ORIGINAL_FADE_WIDTH := 90
-
-const ORIGINAL_FADE_TOOLTIP := """Fades the source image in over the result.
-
-At 0 you see the result, at 100 the untouched source, and in between both
-at once — which is how you judge whether an edge was eaten or a fringe
-left behind, since the two are then in the same place at the same time."""
-
-const INDICATOR_TOOLTIP := """Draws the outlines that say what has been picked or drawn.
-
-Picked regions get a dashed box round the pixels they reached; drawn
-regions get their outline dashed in the same way. Both sit on top of the
-edges you are trying to judge, so turning them off is how you see the
-result on its own.
-
-On the Packing tab it lays a coloured patch under each sprite instead,
-so you can see where one ends and the next begins — a packed sheet
-cannot be read off itself, since the gap between two sprites looks the
-same as the transparent margin around either of them.
-
-It changes nothing about what is processed — only what is drawn over
-the preview."""
-
 ## What a highlighted brush stroke is lit up in.
 ##
 ## The same yellow the preview picks a marker out in, so a selected row means one thing
 ## across the whole dock. Short of solid: it lies on top of the pixels that stroke changed,
 ## and those are what the row was clicked to look at.
 const BRUSH_OVERLAY_COLOR := Color(1.0, 1.0, 0.2, 0.65)
-
-const MAGENTA_TOOLTIP := """Lays solid magenta under the image instead of the checkerboard.
-
-The checkerboard is two greys a shade apart, which is what makes it read
-as backing — and also what hides a pixel at a tenth alpha. Magenta gives
-that up to answer the other question: anything short of solid takes on
-some of it, so a pinhole or a surviving fringe shows as colour rather
-than having to be spotted.
-
-Only under the image, so the margins still say where it ends. It changes
-nothing about what is processed or what is written out."""
 
 ## Whether saving one of this addon's own scripts rebuilds the interface by itself.
 ##
@@ -306,29 +271,6 @@ const _ZOOM_MATCH := 0.01
 ## Longer than the preview debounce on purpose. The preview has to feel live; a
 ## disk write must not happen seven times a second while a slider is dragged.
 const AUTOSAVE_DEBOUNCE := 0.75
-
-## Shared by the Suffix field and its label, so hovering either explains the
-## setting — and so the warning in it cannot end up on only one of them.
-##
-## Long for a tooltip, because a blank suffix is the one setting here that can
-## destroy the files being worked on, and the confirmation it leads to does not
-## say so.
-const SUFFIX_TOOLTIP := """Goes on the end of the output name, before the extension —
-flower.png with "_nobg" becomes flower_nobg.png.
-
-Save Current just suggests it, so you can still rename the file in
-the Save As dialog. Save All applies it to every file without asking
-again, which makes the suffix the only thing keeping the results
-apart from the sources.
-
-So take care when it is blank: each output then keeps its source's
-own name, and pointing Save All at the folder the sources are in
-will overwrite the originals in place. You are asked to confirm, but
-the prompt only says those files already exist — not that they are
-the images you are processing. There is no undo.
-
-Anything that rewrites pixels is saved as PNG. Rename copies the
-file untouched, so it keeps whatever format it already had."""
 
 ## What the Process buttons will run: the stack, or the file operation.
 ##
@@ -1297,7 +1239,7 @@ func _build_upscale_download() -> void:
     if is_instance_valid(_upscale_download) and _upscale_download_engine != for_engine:
         _drop_upscale_download()
     if not is_instance_valid(_upscale_download):
-        _upscale_download = ModelFolder.new()
+        _upscale_download = SettingsBuilder.ModelFolderScene.instantiate()
         _upscale_download.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         # A folder fixed in code rather than a setting: these settings never outlive the
         # session, so a path typed into one would be forgotten by the next launch.
@@ -1556,22 +1498,19 @@ func _forget_controls() -> void:
 
 # --- Layout -------------------------------------------------------------
 
+## The static tree lives in scenes/iw_panel.tscn. This instantiates it and the bind
+## functions below fetch its nodes and wire them up — a rebuild throws the instance
+## away and makes a fresh one, which is what keeps Ctrl+Shift+R honest.
 func _build_ui() -> void:
     add_theme_constant_override("separation", 4)
 
-    var columns := HSplitContainer.new()
-    columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
-    add_child(columns)
+    var chrome: Control = ChromeScene.instantiate()
+    add_child(chrome)
 
-    columns.add_child(_build_source_column())
-
-    var right_split := HSplitContainer.new()
-    right_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    columns.add_child(right_split)
-    right_split.add_child(_build_preview_column())
-    right_split.add_child(_build_operation_column())
-
-    _build_dialogs()
+    _bind_source_column(chrome)
+    _bind_preview_column(chrome)
+    _bind_operation_column(chrome)
+    _bind_dialogs(chrome)
 
     _debounce = Timer.new()
     _debounce.one_shot = true
@@ -1646,140 +1585,44 @@ func _on_magenta_toggled(pressed: bool) -> void:
         _preview.magenta_background = pressed
 
 
-func _build_source_column() -> Control:
-    var column := VBoxContainer.new()
-    column.custom_minimum_size = Vector2(140, 0)
-
-    var header := HBoxContainer.new()
-    column.add_child(header)
-
-    var title := Label.new()
-    title.text = "Images"
-    title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    header.add_child(title)
-
-    var add_button := Button.new()
-    add_button.text = "Add"
-    add_button.tooltip_text = "Add image files."
-    add_button.pressed.connect(_on_add_pressed)
-    header.add_child(add_button)
-
-    _remove_button = Button.new()
-    _remove_button.text = "Remove"
-    _remove_button.tooltip_text = "Remove the selected image from the list. The file is not touched."
+func _bind_source_column(chrome: Control) -> void:
+    chrome.get_node("%AddButton").pressed.connect(_on_add_pressed)
+    _remove_button = chrome.get_node("%RemoveButton")
     _remove_button.pressed.connect(_on_remove_pressed)
-    header.add_child(_remove_button)
-
-    _clear_button = Button.new()
-    _clear_button.text = "Clear"
-    _clear_button.tooltip_text = "Remove every image from the list. The files are not touched."
+    _clear_button = chrome.get_node("%ClearButton")
     _clear_button.pressed.connect(_on_clear_pressed)
-    header.add_child(_clear_button)
 
-    _file_list = ItemList.new()
-    _file_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-    _file_list.allow_reselect = true
+    _file_list = chrome.get_node("%FileList")
     _file_list.fixed_icon_size = Vector2i(DELETE_ICON_SIZE, DELETE_ICON_SIZE)
     _file_list.item_selected.connect(_on_file_selected)
     # Clicks on the cross at the left of a row ask to delete that file from disk.
     _file_list.item_clicked.connect(_on_file_item_clicked)
     _delete_icon = _make_delete_icon()
-    column.add_child(_file_list)
 
-    var hint := Label.new()
-    hint.text = "Drag images here from the FileSystem dock."
-    hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    hint.modulate = Color(1, 1, 1, 0.6)
-    column.add_child(hint)
-
-    _paste_all_button = Button.new()
-    _paste_all_button.text = "Paste to All Images"
-    _paste_all_button.tooltip_text = "Replaces every open image's operation stack with the stack on the clipboard.\n\nCopy a stack first — Ctrl+C over the stack, or copy one operation from its menu."
-    _paste_all_button.disabled = true
+    _paste_all_button = chrome.get_node("%PasteAllButton")
     _paste_all_button.pressed.connect(_on_paste_all_pressed)
     # The pointer arriving is the last chance to re-read a clipboard that has no change
     # signal, so a copy made moments ago enables the button before it can be missed.
     _paste_all_button.mouse_entered.connect(_refresh_paste_all_button)
-    column.add_child(_paste_all_button)
-
-    return column
 
 
-func _build_preview_column() -> Control:
-    var column := VBoxContainer.new()
-    column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    column.custom_minimum_size = Vector2(140, 0)
-
-    var toolbar := HBoxContainer.new()
-    column.add_child(toolbar)
-
-    # Labels are kept short on purpose: a container's minimum width comes from
-    # its children, so a chatty toolbar would pin this column open and stop the
-    # splitters from moving.
-    var original_label := Label.new()
-    original_label.text = "Original"
-    original_label.tooltip_text = ORIGINAL_FADE_TOOLTIP
-    original_label.mouse_filter = Control.MOUSE_FILTER_PASS
-    toolbar.add_child(original_label)
-
-    # A slider rather than the toggle this was, because the question being asked
-    # of the preview is almost never "which of these two" — it is "how much of the
-    # edge did I just eat", and that is a question about the difference between
-    # them. Fading one over the other puts the two in the same place at the same
-    # time, where a toggle makes you hold one in your head while looking at the
-    # other.
-    _original_fade = HSlider.new()
-    _original_fade.min_value = 0.0
-    _original_fade.max_value = 100.0
-    _original_fade.step = 1.0
-    _original_fade.value = 0.0
-    _original_fade.custom_minimum_size = Vector2(ORIGINAL_FADE_WIDTH, 0)
-    _original_fade.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-    _original_fade.tooltip_text = ORIGINAL_FADE_TOOLTIP
+func _bind_preview_column(chrome: Control) -> void:
+    _original_fade = chrome.get_node("%OriginalFade")
     _original_fade.value_changed.connect(_on_original_fade_changed)
-    toolbar.add_child(_original_fade)
 
-    # The one long label on this toolbar, and it does widen the column's minimum —
-    # but this is a switch you want in sight while judging an edge, not one to go
-    # hunting for. The overlays sit right on top of what they describe, so getting
-    # them out of the way has to be quick.
-    var indicator_label := Label.new()
-    indicator_label.text = "Indicators"
-    indicator_label.tooltip_text = INDICATOR_TOOLTIP
-    toolbar.add_child(indicator_label)
-
-    _indicator_choice = OptionButton.new()
-    _indicator_choice.tooltip_text = INDICATOR_TOOLTIP
+    _indicator_choice = chrome.get_node("%IndicatorChoice")
     for label: String in INDICATOR_LABELS:
         _indicator_choice.add_item(label)
     _indicator_choice.selected = Indicators.ALL
     _indicator_choice.item_selected.connect(_on_indicators_chosen)
-    toolbar.add_child(_indicator_choice)
 
-    # Beside the indicator switch because the two are the same kind of control — neither
-    # touches the result, both change what you are looking at while judging it. The second
-    # long label on this toolbar, and it widens the preview column's minimum again for the
-    # same reason that one does: a switch you reach for mid-judgement has to be in sight.
-    _magenta_toggle = CheckBox.new()
-    _magenta_toggle.text = "Magenta Background"
-    _magenta_toggle.tooltip_text = MAGENTA_TOOLTIP
-    _magenta_toggle.button_pressed = false
+    _magenta_toggle = chrome.get_node("%MagentaToggle")
     _magenta_toggle.toggled.connect(_on_magenta_toggled)
-    toolbar.add_child(_magenta_toggle)
 
-    var spacer := Control.new()
-    spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    toolbar.add_child(spacer)
-
-    _refresh_button = Button.new()
-    _refresh_button.text = "Refresh"
-    _refresh_button.tooltip_text = "Re-run the operation on the selected image."
+    _refresh_button = chrome.get_node("%RefreshButton")
     _refresh_button.pressed.connect(_on_refresh_pressed)
-    toolbar.add_child(_refresh_button)
 
-    _preview = PreviewView.new()
-    _preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-    _preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _preview = chrome.get_node("%Preview")
     _preview.pixel_picked.connect(_on_pixel_picked)
     _preview.region_picked.connect(_on_region_picked)
     _preview.stroke_point.connect(_on_stroke_point)
@@ -1789,97 +1632,38 @@ func _build_preview_column() -> Control:
     _preview.vertex_dragged.connect(_on_vertex_dragged)
     _preview.vertex_drag_ended.connect(_on_vertex_drag_ended)
     _preview.zoom_changed.connect(_on_zoom_changed)
-    column.add_child(_preview)
 
-    column.add_child(_build_status_row())
-
-    return column
+    _bind_status_row(chrome)
 
 
 ## The bar under the viewport, Photoshop-style: zoom on the left, status text
-## filling the middle, image size hard right. It belongs to the image, so it
-## spans the viewport rather than the whole dock.
-func _build_status_row() -> Control:
-    var row := HBoxContainer.new()
+## filling the middle, image size hard right.
+func _bind_status_row(chrome: Control) -> void:
+    chrome.get_node("%ZoomOutButton").pressed.connect(func() -> void: _preview.zoom_out())
+    chrome.get_node("%ZoomInButton").pressed.connect(func() -> void: _preview.zoom_in())
+    chrome.get_node("%FitButton").pressed.connect(func() -> void: _preview.fit_to_view())
 
-    # The zoom controls keep a zero separation of their own so the buttons stay
-    # flush against the field, while the outer row still spaces them off the
-    # status text.
-    var zoom := HBoxContainer.new()
-    zoom.add_theme_constant_override("separation", 0)
-    row.add_child(zoom)
-
-    var zoom_out_button := Button.new()
-    zoom_out_button.text = "-"
-    zoom_out_button.tooltip_text = "Zoom out one step."
-    zoom_out_button.pressed.connect(func() -> void: _preview.zoom_out())
-    zoom.add_child(zoom_out_button)
-
-    _zoom_select = OptionButton.new()
-    _zoom_select.custom_minimum_size = Vector2(76, 0)
-    _zoom_select.tooltip_text = "Zoom level. The buttons, the wheel and this list all step through the same\nstops. The wheel zooms towards the pixel under the cursor.\nRight-click to type an exact value instead.\nFit can land between stops; such a value is shown here too, until you\nleave it. Drag to pan — while a tool is active, use middle or Ctrl+left."
+    _zoom_select = chrome.get_node("%ZoomSelect")
     _zoom_select.item_selected.connect(_on_zoom_selected)
     # The signal fires ahead of OptionButton's own handling, so accepting the
     # event here is what stops a right-click also opening the popup.
     _zoom_select.gui_input.connect(_on_zoom_select_input)
-    zoom.add_child(_zoom_select)
 
     # Shares the slot with the dropdown; only ever one of the two is visible.
-    _zoom_entry = LineEdit.new()
-    _zoom_entry.custom_minimum_size = _zoom_select.custom_minimum_size
-    _zoom_entry.alignment = HORIZONTAL_ALIGNMENT_CENTER
-    _zoom_entry.tooltip_text = "Type a zoom from 1 to 1000. Enter accepts, Escape cancels."
-    _zoom_entry.hide()
+    _zoom_entry = chrome.get_node("%ZoomEntry")
     _zoom_entry.text_submitted.connect(_commit_zoom_entry)
     _zoom_entry.focus_exited.connect(func() -> void: _commit_zoom_entry(_zoom_entry.text))
     _zoom_entry.gui_input.connect(_on_zoom_entry_input)
-    zoom.add_child(_zoom_entry)
 
     _refresh_zoom_items(100.0)
 
-    var zoom_in_button := Button.new()
-    zoom_in_button.text = "+"
-    zoom_in_button.tooltip_text = "Zoom in one step."
-    zoom_in_button.pressed.connect(func() -> void: _preview.zoom_in())
-    zoom.add_child(zoom_in_button)
-
-    var fit_button := Button.new()
-    fit_button.text = "Fit"
-    fit_button.tooltip_text = "Zoom so the image fills the frame, whichever axis runs out first."
-    fit_button.pressed.connect(func() -> void: _preview.fit_to_view())
-    zoom.add_child(fit_button)
-
-    # Messages here name files and can run long. Ellipsising, and letting the
-    # label soak up the free space rather than demand it, stops a status message
-    # from setting a floor under the preview column's width.
-    _status_label = Label.new()
-    _status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-    _status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _status_label = chrome.get_node("%StatusLabel")
     _set_status("No image selected.")
-    row.add_child(_status_label)
-
-    _detail_label = Label.new()
-    _detail_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-    _detail_label.modulate = Color(1, 1, 1, 0.6)
-    row.add_child(_detail_label)
-
-    return row
+    _detail_label = chrome.get_node("%DetailLabel")
 
 
-func _build_operation_column() -> Control:
-    var column := VBoxContainer.new()
-    # A floor for the contents rather than for the tab strip, which sets its own below and
-    # is very likely the larger of the two. It still matters if the tabs are ever renamed
-    # shorter: a settings form has a width it stops being usable under, and that width has
-    # nothing to do with how the strip above it happens to read.
-    column.custom_minimum_size = Vector2(220, 0)
-
-    # Tabs rather than toggles, because the two are not settings of one thing: one
-    # rewrites pixels and the other rewrites names, and only one of them is ever what
-    # a Process button is about to do. A tab says "you are in here" in a way two
-    # pressed-looking buttons do not.
-    _modes = TabContainer.new()
-    _modes.size_flags_vertical = Control.SIZE_EXPAND_FILL
+func _bind_operation_column(chrome: Control) -> void:
+    _modes = chrome.get_node("%Modes")
     _modes.tab_changed.connect(_on_tab_changed)
     # [b]The strip is what sets this column's minimum width.[/b] Left to clip, a TabBar
     # reports a minimum of almost nothing and hides whatever does not fit behind scroll
@@ -1887,22 +1671,12 @@ func _build_operation_column() -> Control:
     # only reachable by scrolling a strip of four short words. Refusing to clip makes the
     # bar report what it actually needs, and a container's minimum is its children's, so
     # the splitter stops where the last tab does.
-    #
-    # Measured rather than written down as a number: the answer depends on the editor's
-    # font and scale, and on how many tabs there are. A fifth one widens this by itself.
     _modes.get_tab_bar().clip_tabs = false
-    column.add_child(_modes)
 
-    # Each tab gets its own scroll, so switching does not carry the other one's scroll
-    # position across. Operations keeps its own rather than being handed one here: the
-    # tools and the Add dropdown at the top of it must not scroll away with the stack, so
-    # the scroll starts under them. See iw_stack_view.gd.
-    _stack_view = StackView.new()
-    # The tab strip takes its label from the node's name.
-    _stack_view.name = "Operations"
-    _stack_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _stack_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-    _stack_view.operations = offered_operations()
+    # The tab strip takes each page's label from its node name in the scene, and the tab
+    # order there is the Mode enum's order.
+    _stack_view = chrome.get_node("%Operations")
+    _stack_view.set_operations(offered_operations())
     _stack_view.form_builder = _build_entry_form
     _stack_view.stack_changed.connect(_on_stack_changed)
     _stack_view.setting_changed.connect(_on_setting_changed)
@@ -1917,40 +1691,17 @@ func _build_operation_column() -> Control:
     _stack_view.load_requested.connect(_on_load_stack)
     _stack_view.reset_requested.connect(_on_reset_stack)
     _stack_view.menu_requested.connect(_on_stack_menu)
-    _modes.add_child(_stack_view)
 
-    # No scroll of its own: the list inside it scrolls, and nesting the two would give
-    # the tab a scrollbar that moved a list with a scrollbar in it.
-    _history_view = HistoryView.new()
-    _history_view.name = "History"
+    _history_view = chrome.get_node("%History")
     _history_view.revert_requested.connect(_on_history_revert)
-    _modes.add_child(_history_view)
 
-    var rename_page := ScrollContainer.new()
-    rename_page.name = "Rename"
-    rename_page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    _modes.add_child(rename_page)
+    _rename_box = chrome.get_node("%RenameBox")
 
-    _rename_box = VBoxContainer.new()
-    _rename_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    rename_page.add_child(_rename_box)
-
-    # The one scroll on this tab. The normal map stack inside it is set to stand at the
-    # height its cards need instead of bringing a scroll of its own, so the sections below
-    # it sit directly under the last card rather than at the bottom of the dock.
-    var packing_scroll := ScrollContainer.new()
-    packing_scroll.name = "Export"
-    packing_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    _modes.add_child(packing_scroll)
-
-    var packing_page := VBoxContainer.new()
-    packing_page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    packing_scroll.add_child(packing_page)
-
-    # Three sections, each folding away on its own. The same headings the settings forms
-    # use, built by hand here because these hold whole controls rather than schema rows.
-    var packing_section := SettingsBuilder.begin_group(packing_page, "Packing", false,
-            _fold_state, EXPORT_FOLD_PACKING)
+    # Three sections, each folding away on its own. The headings are still made here —
+    # they carry the session's fold state, which a scene cannot — so the scene leaves a
+    # slot per section to pin where each lands, and what the scene holds is moved in.
+    var packing_section := SettingsBuilder.begin_group(chrome.get_node("%PackingSlot"),
+            "Packing", false, _fold_state, EXPORT_FOLD_PACKING)
 
     _packing_box = VBoxContainer.new()
     _packing_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1962,20 +1713,15 @@ func _build_operation_column() -> Control:
     _packing_mode_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     _packing_mode_note.modulate = Color(1, 1, 1, 0.6)
 
-    var normal_section := SettingsBuilder.begin_group(packing_page, "Normal Maps", false,
-            _fold_state, EXPORT_FOLD_NORMALS)
+    var normal_section := SettingsBuilder.begin_group(chrome.get_node("%NormalSlot"),
+            "Normal Maps", false, _fold_state, EXPORT_FOLD_NORMALS)
 
-    # The second stack in the dock, and the same class as the first. What it offers, what a
+    # The second stack in the dock, and the same scene as the first. What it offers, what a
     # card's form looks like and what each tool button does all arrive from here — see
     # iw_stack_view.gd.
-    _normal_stack = StackView.new()
-    _normal_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    # Grows with its cards and takes no room while there are none, so Pivots below it stays
-    # under the list instead of being pushed to the bottom of the tab.
-    _normal_stack.fit_to_content = true
-    _normal_stack.operations = normal_generators()
-    _normal_stack.add_prompt = "Add Normal Map Generator"
-    _normal_stack.add_tooltip = "Add a normal map generator to the bottom of the stack.\nDrag its header afterwards to move it.\n\nEach one builds on what the ones above it made, in the way its own Combine\nsetting says. With none of them the sheet gets no normal map at all.\n\nDisabled while no image is open."
+    _normal_stack = chrome.get_node("%NormalStack")
+    _normal_stack.reparent(normal_section)
+    _normal_stack.set_operations(normal_generators())
     _normal_stack.form_builder = _build_normal_form
     _normal_stack.stack_changed.connect(_on_normal_stack_changed)
     _normal_stack.setting_changed.connect(_on_normal_setting_changed)
@@ -1987,7 +1733,6 @@ func _build_operation_column() -> Control:
     _normal_stack.load_requested.connect(_on_load_normals)
     _normal_stack.reset_requested.connect(_on_reset_normals)
     _normal_stack.menu_requested.connect(_on_normal_menu)
-    normal_section.add_child(_normal_stack)
 
     # Both of these are about the whole map rather than about any one generator, so they go
     # in the part of the stack view that does not scroll — under the Add dropdown, above the
@@ -2026,33 +1771,18 @@ func _build_operation_column() -> Control:
     _packing_reach_slider.value_changed.connect(_on_inner_reach_changed)
     extras.add_child(_packing_reach_slider)
 
-    var pivot_section := SettingsBuilder.begin_group(packing_page, "Pivots", true, _fold_state,
-            EXPORT_FOLD_PIVOTS)
+    var pivot_section := SettingsBuilder.begin_group(chrome.get_node("%PivotSlot"),
+            "Pivots", true, _fold_state, EXPORT_FOLD_PIVOTS)
 
-    _pivot_view = PivotListView.new()
-    _pivot_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _pivot_view = chrome.get_node("%PivotView")
+    _pivot_view.reparent(pivot_section)
     _pivot_view.edit_toggled.connect(_on_pivot_edit_toggled)
     _pivot_view.pivots_changed.connect(_on_pivots_changed)
     _pivot_view.selection_changed.connect(_update_pivot_overlay)
-    pivot_section.add_child(_pivot_view)
 
-    _packing_status = Label.new()
-    _packing_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _packing_status.modulate = Color(1, 1, 1, 0.6)
-    packing_page.add_child(_packing_status)
+    _packing_status = chrome.get_node("%PackingStatus")
 
-    var upscale_page := ScrollContainer.new()
-    upscale_page.name = "Upscale"
-    upscale_page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    _modes.add_child(upscale_page)
-
-    var upscale_column := VBoxContainer.new()
-    upscale_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    upscale_page.add_child(upscale_column)
-
-    _upscale_box = VBoxContainer.new()
-    _upscale_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    upscale_column.add_child(_upscale_box)
+    _upscale_box = chrome.get_node("%UpscaleBox")
 
     # Says what the model in the dropdown above it is for. Built here and moved into the
     # form by _build_upscale, exactly as Packing's note is.
@@ -2060,12 +1790,10 @@ func _build_operation_column() -> Control:
     _upscale_model_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     _upscale_model_note.modulate = Color(1, 1, 1, 0.6)
 
-    _upscale_status = Label.new()
-    _upscale_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _upscale_status.modulate = Color(1, 1, 1, 0.6)
-    upscale_column.add_child(_upscale_status)
+    _upscale_status = chrome.get_node("%UpscaleStatus")
 
-    _build_generate_page()
+    _bind_generate_page(chrome)
+    _bind_output_section(chrome)
 
     _modes.set_tab_tooltip(Mode.IMAGE, "Build a stack of operations that rewrite the pixels.")
     _modes.set_tab_tooltip(Mode.HISTORY,
@@ -2078,11 +1806,6 @@ func _build_operation_column() -> Control:
             "Enlarge every open image with waifu2x, which invents the pixels\nrather than stretching them. Runs on what each image's stack made,\nnot on the file it came from.")
     _modes.set_tab_tooltip(Mode.GENERATE,
             "Make a new picture from a written description, using ComfyUI.\nShown in the viewport; Save Current writes it.")
-
-    column.add_child(HSeparator.new())
-    column.add_child(_build_output_section())
-
-    return column
 
 
 ## Fills one stack entry's form. Handed to the stack view so it does not have to know
@@ -2163,286 +1886,118 @@ func _select_mode(mode: int) -> void:
 
 ## The Generate tab's page: where the server is, the form, and the button.
 ##
-## The server rows are hand-built rather than declared in the schema, for the reason the
-## Export tab's toggles are: an address is not a setting of the picture and does not belong
-## in the settings Resource the form writes to.
-func _build_generate_page() -> void:
-    var page := ScrollContainer.new()
-    page.name = "Generate"
-    page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    _modes.add_child(page)
+## The server rows live in the scene rather than the schema, for the reason the Export
+## tab's toggles do: an address is not a setting of the picture and does not belong in
+## the settings Resource the form writes to. The Server heading is still made here — it
+## carries the session's fold state — and the scene's rows are moved in under it.
+func _bind_generate_page(chrome: Control) -> void:
+    var server := SettingsBuilder.begin_group(chrome.get_node("%ServerSlot"), "Server",
+            false, _fold_state, GENERATE_FOLD_SERVER)
+    (chrome.get_node("%ServerRows") as Control).reparent(server)
 
-    var column := VBoxContainer.new()
-    column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    page.add_child(column)
-
-    var server := SettingsBuilder.begin_group(column, "Server", false, _fold_state,
-            GENERATE_FOLD_SERVER)
-
-    _comfy_address_row = HBoxContainer.new()
-    server.add_child(_comfy_address_row)
-    var address := _comfy_address_row
-
-    _comfy_url_edit = LineEdit.new()
-    _comfy_url_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _comfy_url_edit.tooltip_text = "Where ComfyUI is answering.\n\nIts own default is http://127.0.0.1:8188. Start ComfyUI yourself, then press\nConnect."
+    _comfy_address_row = chrome.get_node("%AddressRow")
+    _comfy_url_edit = chrome.get_node("%ComfyUrlEdit")
     _comfy_url_edit.text_submitted.connect(func(_text: String) -> void: _on_comfy_connect())
     _comfy_url_edit.focus_exited.connect(_store_comfy_url)
-    address.add_child(_comfy_url_edit)
+    chrome.get_node("%ConnectButton").pressed.connect(_on_comfy_connect)
 
-    var connect_button := Button.new()
-    connect_button.text = "Connect"
-    connect_button.tooltip_text = "Ask that address whether ComfyUI is there, and what models it has."
-    connect_button.pressed.connect(_on_comfy_connect)
-    address.add_child(connect_button)
-
-    _comfy_install_row = HBoxContainer.new()
-    server.add_child(_comfy_install_row)
-    var install := _comfy_install_row
-
-    _comfy_root_edit = LineEdit.new()
-    _comfy_root_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _comfy_root_edit.placeholder_text = "ComfyUI folder, for Start"
-    _comfy_root_edit.tooltip_text = "Where ComfyUI is installed on this machine.\n\nOnly Start needs it. If you always run ComfyUI yourself, leave it empty.\n\nPick the folder ComfyUI was installed into, not the one holding main.py."
+    _comfy_install_row = chrome.get_node("%InstallRow")
+    _comfy_root_edit = chrome.get_node("%ComfyRootEdit")
     _comfy_root_edit.text_submitted.connect(func(_text: String) -> void: _store_comfy_root())
     _comfy_root_edit.focus_exited.connect(_store_comfy_root)
-    install.add_child(_comfy_root_edit)
+    chrome.get_node("%ComfyBrowseButton").pressed.connect(_on_comfy_browse)
 
-    var browse := Button.new()
-    browse.text = "Browse"
-    browse.pressed.connect(_on_comfy_browse)
-    install.add_child(browse)
+    _comfy_install_note = chrome.get_node("%InstallNote")
 
-    _comfy_install_note = Label.new()
-    _comfy_install_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _comfy_install_note.modulate = Color(1, 1, 1, 0.6)
-    server.add_child(_comfy_install_note)
-
-    var buttons := HBoxContainer.new()
-    server.add_child(buttons)
-
-    _comfy_start_button = Button.new()
-    _comfy_start_button.text = "Start"
-    _comfy_start_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _comfy_start_button.tooltip_text = START_TOOLTIP
+    _comfy_start_button = chrome.get_node("%ComfyStartButton")
     _comfy_start_button.pressed.connect(_on_comfy_start)
-    buttons.add_child(_comfy_start_button)
-
-    _comfy_stop_button = Button.new()
-    _comfy_stop_button.text = "Stop"
-    _comfy_stop_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _comfy_stop_button.tooltip_text = "Closes the ComfyUI this dock started.\n\nDead unless the dock started it. One that was already running belongs to\nsomething else, and taking it away would be a surprise."
+    _comfy_stop_button = chrome.get_node("%ComfyStopButton")
     _comfy_stop_button.pressed.connect(_on_comfy_stop)
-    buttons.add_child(_comfy_stop_button)
 
-    _comfy_stop_toggle = CheckBox.new()
-    _comfy_stop_toggle.text = "Stop On Exit"
+    _comfy_stop_toggle = chrome.get_node("%ComfyStopToggle")
     _comfy_stop_toggle.button_pressed = IWAddonSettings.comfy_stop_on_exit()
-    _comfy_stop_toggle.tooltip_text = "Closes a ComfyUI this dock started when the editor closes.\n\nOff leaves it up, so the next session skips the load. It also leaves several\ngigabytes of video memory held by a window you may not notice."
     _comfy_stop_toggle.toggled.connect(_on_comfy_stop_on_exit_toggled)
-    server.add_child(_comfy_stop_toggle)
 
-    _comfy_status = Label.new()
-    _comfy_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _comfy_status.modulate = Color(1, 1, 1, 0.6)
-    server.add_child(_comfy_status)
-
-    _generate_box = VBoxContainer.new()
-    _generate_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    column.add_child(_generate_box)
+    _comfy_status = chrome.get_node("%ComfyStatus")
+    _generate_box = chrome.get_node("%GenerateBox")
 
     # One button rather than two: while a run is going, the only thing worth pressing is
     # the one that stops it, and a dead Generate sitting beside it says nothing.
-    _generate_button = Button.new()
-    _generate_button.text = "Generate"
-    _generate_button.tooltip_text = "Make a picture from the description above.\n\nNothing here runs on its own the way the other tabs do — a generation takes a\nminute and a graphics card, so it happens only when asked. Refresh asks too.\n\nWhile one is going this stops it, as does Escape."
+    _generate_button = chrome.get_node("%GenerateButton")
     _generate_button.pressed.connect(_on_generate_pressed)
-    column.add_child(_generate_button)
-
-    _generate_status = Label.new()
-    _generate_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _generate_status.modulate = Color(1, 1, 1, 0.6)
-    column.add_child(_generate_status)
+    _generate_status = chrome.get_node("%GenerateStatus")
 
 
 func _on_tab_changed(tab: int) -> void:
     _select_mode(tab)
 
 
-func _build_output_section() -> Control:
-    var section := VBoxContainer.new()
-
-    var title := Label.new()
-    title.text = "Output"
-    section.add_child(title)
-
-    var suffix_row := HBoxContainer.new()
-    section.add_child(suffix_row)
-    var suffix_label := Label.new()
-    suffix_label.text = "Suffix"
-    suffix_label.tooltip_text = SUFFIX_TOOLTIP
-    # A Label ignores the mouse by default, which would swallow the tooltip along
-    # with everything else. Pass rather than stop, so the label reports the hover
-    # without claiming clicks it has no use for.
-    suffix_label.mouse_filter = Control.MOUSE_FILTER_PASS
-    suffix_row.add_child(suffix_label)
-    _suffix_edit = LineEdit.new()
-    _suffix_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _suffix_edit.tooltip_text = SUFFIX_TOOLTIP
+func _bind_output_section(chrome: Control) -> void:
+    _suffix_edit = chrome.get_node("%SuffixEdit")
     _suffix_edit.text_changed.connect(func(_text: String) -> void: _suffix_is_default = false)
-    suffix_row.add_child(_suffix_edit)
 
-    # Side by side rather than stacked. They are the same kind of action on the same
-    # things, and a column of two full-width buttons reads as two unrelated decisions.
-    var save_row := HBoxContainer.new()
-    section.add_child(save_row)
-
-    _process_selected_button = Button.new()
-    _process_selected_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _process_selected_button.text = "Save Current"
-    _process_selected_button.tooltip_text = "Process the selected image and ask where to save it.
-
-On the Packing tab it saves the packed sheet instead, which is the one
-thing there is to save there — plus the lookup table beside it, if that
-switch is on. On Upscale it runs the image's operations and then the
-network, which is what the tab is showing."
+    _process_selected_button = chrome.get_node("%ProcessSelectedButton")
     _process_selected_button.pressed.connect(_on_process_selected)
-    save_row.add_child(_process_selected_button)
-
-    _process_all_button = Button.new()
-    _process_all_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _process_all_button.text = "Save All"
-    _process_all_button.tooltip_text = "Process every image in the list and ask for a folder to put them in.
-
-Nothing to do on the Packing tab, where the whole list makes one sheet —
-use Save Current for that.
-
-On Upscale it runs every image through its own operations and then the
-network. That is the slow one: it holds the editor for as long as it
-takes, and it reports nothing until it is done."
+    _process_all_button = chrome.get_node("%ProcessAllButton")
     _process_all_button.pressed.connect(_on_process_all)
-    save_row.add_child(_process_all_button)
-
-    return section
 
 
-func _build_dialogs() -> void:
-    _open_dialog = FileDialog.new()
-    _open_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILES
-    _open_dialog.access = FileDialog.ACCESS_FILESYSTEM
-    _open_dialog.title = "Add Images"
+## The dialogs live in the scene with their titles and texts; this wires them up. The
+## image filter is the one dynamic part, built from the extension list.
+func _bind_dialogs(chrome: Control) -> void:
+    _open_dialog = chrome.get_node("%OpenDialog")
     var patterns := PackedStringArray()
     for extension: String in SUPPORTED_EXTENSIONS:
         patterns.append("*." + extension)
     _open_dialog.add_filter(", ".join(patterns), "Images")
     _open_dialog.files_selected.connect(_on_files_chosen)
-    add_child(_open_dialog)
 
-    _output_dialog = FileDialog.new()
-    _output_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
-    _output_dialog.access = FileDialog.ACCESS_FILESYSTEM
-    _output_dialog.title = "Save All Into Folder"
+    _output_dialog = chrome.get_node("%OutputDialog")
     _output_dialog.dir_selected.connect(_on_output_dir_chosen)
-    add_child(_output_dialog)
 
     # Save mode prompts about an existing file itself, which is why the single
     # image path does not also go through the overwrite dialog.
-    _save_dialog = FileDialog.new()
-    _save_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
-    _save_dialog.access = FileDialog.ACCESS_FILESYSTEM
-    _save_dialog.title = "Save Processed Image"
-    _save_dialog.add_filter("*.png", "PNG Image")
+    _save_dialog = chrome.get_node("%SaveDialog")
     _save_dialog.file_selected.connect(_on_save_file_chosen)
     # Cleared on the way out as well as on the way through: it says which caller the dialog
     # is answering, and one left set by a cancel would send the next ordinary save down
     # somebody else's path.
     _save_dialog.canceled.connect(func() -> void: _save_kind = &"")
-    add_child(_save_dialog)
 
-    _overwrite_dialog = ConfirmationDialog.new()
-    _overwrite_dialog.title = "Overwrite Existing Files?"
-    _overwrite_dialog.ok_button_text = "Overwrite"
+    _overwrite_dialog = chrome.get_node("%OverwriteDialog")
     _overwrite_dialog.confirmed.connect(_write_pending_outputs)
     _overwrite_dialog.canceled.connect(func() -> void: _pending_outputs.clear())
-    add_child(_overwrite_dialog)
 
-    _removal_dialog = ConfirmationDialog.new()
-    _removal_dialog.title = "Remove Old Files?"
-    _removal_dialog.ok_button_text = "Remove"
+    _removal_dialog = chrome.get_node("%RemovalDialog")
     _removal_dialog.confirmed.connect(_verify_then_remove_sources)
     _removal_dialog.canceled.connect(func() -> void: _pending_removals.clear())
-    add_child(_removal_dialog)
 
-    _delete_dialog = ConfirmationDialog.new()
-    _delete_dialog.title = "Delete File?"
-    _delete_dialog.ok_button_text = "Delete"
+    _delete_dialog = chrome.get_node("%DeleteDialog")
     _delete_dialog.confirmed.connect(_on_delete_confirmed)
     _delete_dialog.canceled.connect(func() -> void: _pending_delete_path = "")
-    add_child(_delete_dialog)
 
-    _packing_dialog = AcceptDialog.new()
-    _packing_dialog.title = "Not Enough Room"
-    add_child(_packing_dialog)
+    _packing_dialog = chrome.get_node("%PackingDialog")
 
-    # A stack file is not an image and does not belong in the Images list, so these two
-    # are their own dialogs rather than a mode of the ones above.
-    _stack_save_dialog = FileDialog.new()
-    _stack_save_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
-    _stack_save_dialog.access = FileDialog.ACCESS_FILESYSTEM
-    _stack_save_dialog.title = "Save Operation Stack"
-    _stack_save_dialog.add_filter("*.json", "Operation Stack")
-    _stack_save_dialog.current_file = "operations.json"
+    _stack_save_dialog = chrome.get_node("%StackSaveDialog")
     _stack_save_dialog.file_selected.connect(_on_stack_save_chosen)
-    add_child(_stack_save_dialog)
 
-    _stack_load_dialog = FileDialog.new()
-    _stack_load_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-    _stack_load_dialog.access = FileDialog.ACCESS_FILESYSTEM
-    _stack_load_dialog.title = "Load Operation Stack"
-    _stack_load_dialog.add_filter("*.json", "Operation Stack")
+    _stack_load_dialog = chrome.get_node("%StackLoadDialog")
     _stack_load_dialog.file_selected.connect(_on_stack_load_chosen)
-    add_child(_stack_load_dialog)
 
-    _comfy_root_dialog = FileDialog.new()
-    _comfy_root_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
-    _comfy_root_dialog.access = FileDialog.ACCESS_FILESYSTEM
-    _comfy_root_dialog.title = "Where ComfyUI Is Installed"
+    _comfy_root_dialog = chrome.get_node("%ComfyRootDialog")
     _comfy_root_dialog.dir_selected.connect(_on_comfy_root_chosen)
-    add_child(_comfy_root_dialog)
 
-    _stack_menu = PopupMenu.new()
+    _stack_menu = chrome.get_node("%StackMenu")
     _stack_menu.id_pressed.connect(_on_stack_menu_chosen)
-    add_child(_stack_menu)
 
-    # The text is fixed, unlike the two above, which name the files they are about. There
-    # is only one thing this can do and only one image it can do it to.
-    _reset_dialog = ConfirmationDialog.new()
-    _reset_dialog.title = "Reset Operations?"
-    _reset_dialog.ok_button_text = "Reset"
-    _reset_dialog.dialog_text = ("Are you sure you want to reset to the default operation "
-            + "stack? History will be lost.")
+    _reset_dialog = chrome.get_node("%ResetDialog")
     _reset_dialog.confirmed.connect(_reset_stack)
-    add_child(_reset_dialog)
 
-    # Its own dialog rather than a flag on the one above, because what it throws away is a
-    # different thing and the wording is the whole point of asking.
-    _normal_reset_dialog = ConfirmationDialog.new()
-    _normal_reset_dialog.title = "Clear Normal Map Generators?"
-    _normal_reset_dialog.ok_button_text = "Clear"
-    _normal_reset_dialog.dialog_text = ("Are you sure you want to remove every normal map "
-            + "generator? Everything dialled into them goes with them.")
+    _normal_reset_dialog = chrome.get_node("%NormalResetDialog")
     _normal_reset_dialog.confirmed.connect(_reset_normals)
-    add_child(_normal_reset_dialog)
 
-    # Asks before one stack lands on every open image, since the closest thing to undoing
-    # it wholesale is doing it image by image.
-    _paste_all_dialog = ConfirmationDialog.new()
-    _paste_all_dialog.title = "Paste to All Images?"
-    _paste_all_dialog.ok_button_text = "Paste"
-    _paste_all_dialog.dialog_text = ("Are you sure you want to overwrite all the open images' "
-            + "operation stack with the stack in the clipboard? Can only be undone individually.")
+    _paste_all_dialog = chrome.get_node("%PasteAllDialog")
     _paste_all_dialog.confirmed.connect(_paste_stack_to_all)
-    add_child(_paste_all_dialog)
 
 
 # --- Sources ------------------------------------------------------------

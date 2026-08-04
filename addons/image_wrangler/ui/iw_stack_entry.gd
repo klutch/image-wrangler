@@ -204,51 +204,27 @@ func is_selected() -> bool:
     return _selected
 
 
+## The tree lives in scenes/iw_stack_entry.tscn; this fetches it and wires it up.
 func _build() -> void:
     _apply_panel_style()
+    if _title != null:
+        return
 
-    var column := VBoxContainer.new()
-    column.add_theme_constant_override("separation", 0)
-    add_child(column)
+    _header = %Header
+    _handle = %Handle
+    _tick = %Tick
+    _title = %Title
+    _note = %Note
+    _body = %Body
+    _settings_box = %SettingsBox
+    var close: Button = %Close
 
-    _header = HBoxContainer.new()
-    var header := _header
-    column.add_child(header)
-
-    # Passes the mouse through rather than taking it, so the press reaches the entry
-    # and _get_drag_data can see where it started.
-    _handle = Label.new()
-    _handle.text = "≡"
-    _handle.mouse_filter = Control.MOUSE_FILTER_PASS
-    _handle.mouse_default_cursor_shape = Control.CURSOR_MOVE
-    _handle.custom_minimum_size = Vector2(HANDLE_WIDTH, 0)
-    _handle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-    _handle.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-    _handle.modulate = Color(1, 1, 1, 0.55)
-    _handle.tooltip_text = "Drag to reorder. Order matters: each operation works on what the ones above it left."
-    header.add_child(_handle)
-
-    _tick = CheckBox.new()
-    _tick.focus_mode = Control.FOCUS_NONE
-    _tick.tooltip_text = "Run this operation.\nUnticking it keeps everything dialled into it, which removing the entry would not."
     _tick.toggled.connect(func(pressed: bool) -> void:
         stage.enabled = pressed
         refresh_enabled_state()
         enabled_toggled.emit(self, pressed))
-    header.add_child(_tick)
 
-    # A flat toggle rather than a Label: it reads as a heading, but the whole width of
-    # it is the hit target, which a disclosure arrow on its own is not.
-    _title = Button.new()
     _title.text = stage.get_operation_name()
-    _title.toggle_mode = true
-    _title.flat = true
-    _title.alignment = HORIZONTAL_ALIGNMENT_LEFT
-    _title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    # Never focused: the form is tabbed through to reach the controls, and a heading
-    # in that path is a stop nobody wants.
-    _title.focus_mode = Control.FOCUS_NONE
-    _title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
     # What the item does goes on the title, because the title is the only part of a folded
     # card left to hover. Nothing has one where the name says the whole of it.
     var about := stage.get_description()
@@ -263,24 +239,8 @@ func _build() -> void:
         fold_changed.emit(self))
     _title.theme_changed.connect(_apply_fold_arrow)
     _title.gui_input.connect(_on_title_input)
-    header.add_child(_title)
 
-    # Text rather than the editor's Remove icon: that one is colour-coded by the theme
-    # and would arrive tinted.
-    #
-    # Grey rather than red, and brighter on hover. Six red crosses down a column read
-    # as six warnings; the button only becomes the loudest thing on the entry at the
-    # moment the pointer is on it, which is the moment it matters.
-    var close := Button.new()
-    close.flat = true
-    close.focus_mode = Control.FOCUS_NONE
-    close.text = "✕"
-    close.add_theme_color_override(&"font_color", Color(0.62, 0.62, 0.62))
-    close.add_theme_color_override(&"font_hover_color", Color(0.92, 0.92, 0.92))
-    close.add_theme_color_override(&"font_pressed_color", Color(1.0, 1.0, 1.0))
-    close.tooltip_text = "Remove this operation from the stack.\nIts settings go with it."
     close.pressed.connect(func() -> void: remove_requested.emit(self))
-    header.add_child(close)
 
     # The three controls in the header take their own mouse events, so a press on one
     # never reaches this entry's _get_drag_data. Each hands the drag back here instead.
@@ -290,21 +250,6 @@ func _build() -> void:
         grabbable.set_drag_forwarding(
                 func(_at: Vector2) -> Variant: return _begin_drag(),
                 Callable(), Callable())
-
-    _note = Label.new()
-    _note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _note.modulate = Color(1.0, 0.85, 0.4)
-    _note.visible = false
-    _note.add_theme_font_size_override("font_size", 10)
-    column.add_child(_note)
-
-    _body = MarginContainer.new()
-    _body.add_theme_constant_override("margin_left", INDENT)
-    column.add_child(_body)
-
-    _settings_box = VBoxContainer.new()
-    _settings_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _body.add_child(_settings_box)
 
 
 ## Fades a switched-off entry and takes its settings out of use, so the stack reads at

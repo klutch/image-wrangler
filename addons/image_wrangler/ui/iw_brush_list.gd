@@ -95,65 +95,42 @@ func setup(operation: IWOperation, property: StringName) -> void:
     _refresh()
 
 
+## The tree lives in scenes/iw_brush_list.tscn; this fetches it and wires it up.
+##
+## The two pairs of sliders are the one part still made here: [EditorSpinSlider] is an
+## editor-only class, so it cannot sit in a scene the user opens. The brush pair slots
+## in under the caption above the list; the stroke pair goes after the caption in the
+## editor below it.
 func _build() -> void:
-    # Buttons first so they sit flush under the group heading. This control has no title
-    # of its own — the settings form already provides one.
-    var buttons := HBoxContainer.new()
-    add_child(buttons)
+    if _list != null:
+        return
+    _draw_button = %DrawButton
+    _clear_button = %ClearButton
+    _list = %List
+    _editor = %Editor
+    _editor_caption = %EditorCaption
+    _hint = %Hint
 
-    _draw_button = Button.new()
-    _draw_button.text = "Draw"
-    _draw_button.toggle_mode = true
-    _draw_button.tooltip_text = "Drag over the preview to paint a stroke. Each drag is one entry.\n\nA click without moving puts down a single dab. Press Escape or right-click\nto stop drawing."
-    _draw_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _draw_button.toggled.connect(func(pressed: bool) -> void: draw_toggled.emit(pressed))
-    buttons.add_child(_draw_button)
-
-    _clear_button = Button.new()
-    _clear_button.text = "Clear"
-    _clear_button.tooltip_text = "Remove every stroke for this image."
     _clear_button.pressed.connect(_on_clear_pressed)
-    buttons.add_child(_clear_button)
 
-    var brush_caption := Label.new()
-    brush_caption.text = "Brush for the next stroke"
-    brush_caption.modulate = Color(1, 1, 1, 0.6)
-    brush_caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-    add_child(brush_caption)
-
-    _brush_radius = _add_slider(self, "Radius", BrushStroke.MIN_RADIUS,
-            BrushStroke.MAX_RADIUS, 1, true, RADIUS_TOOLTIP, _on_brush_changed)
     _brush_sharpness = _add_slider(self, "Sharpness", 0.0, 1.0, 0.01, false,
             SHARPNESS_TOOLTIP, _on_brush_changed)
+    move_child(_brush_sharpness, _list.get_index())
+    _brush_radius = _add_slider(self, "Radius", BrushStroke.MIN_RADIUS,
+            BrushStroke.MAX_RADIUS, 1, true, RADIUS_TOOLTIP, _on_brush_changed)
+    move_child(_brush_radius, _brush_sharpness.get_index())
 
-    _list = EntryList.new()
     _list.configure(true)
-    _list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _list.row_selected.connect(_on_row_selected)
     _list.enabled_toggled.connect(_on_enabled_toggled)
     _list.mode_changed.connect(_on_mode_changed)
     _list.remove_requested.connect(_remove_entry)
-    add_child(_list)
-
-    _editor = VBoxContainer.new()
-    _editor.add_theme_constant_override("separation", 0)
-    add_child(_editor)
-
-    _editor_caption = Label.new()
-    _editor_caption.modulate = Color(1, 1, 1, 0.6)
-    _editor_caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-    _editor.add_child(_editor_caption)
 
     _radius = _add_slider(_editor, "Radius", BrushStroke.MIN_RADIUS, BrushStroke.MAX_RADIUS,
             1, true, RADIUS_TOOLTIP, _on_stroke_slider_changed)
     _sharpness = _add_slider(_editor, "Sharpness", 0.0, 1.0, 0.01, false, SHARPNESS_TOOLTIP,
             _on_stroke_slider_changed)
-
-    _hint = Label.new()
-    _hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _hint.modulate = Color(1, 1, 1, 0.6)
-    _hint.visible = false
-    add_child(_hint)
 
 
 func _add_slider(into: Container, label: String, low: float, high: float, step: float,

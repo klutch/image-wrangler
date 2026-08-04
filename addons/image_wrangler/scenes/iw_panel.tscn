@@ -1,0 +1,597 @@
+[gd_scene format=3 uid="uid://iwpanelui001"]
+
+[ext_resource type="Script" uid="uid://86ubvgpbw0c2" path="res://addons/image_wrangler/ui/iw_preview_view.gd" id="1_preview"]
+[ext_resource type="PackedScene" uid="uid://iwstackvie01" path="res://addons/image_wrangler/scenes/iw_stack_view.tscn" id="2_stack"]
+[ext_resource type="PackedScene" uid="uid://iwhistview01" path="res://addons/image_wrangler/scenes/iw_history_view.tscn" id="3_history"]
+[ext_resource type="PackedScene" uid="uid://iwpivotlst01" path="res://addons/image_wrangler/scenes/iw_pivot_list.tscn" id="4_pivot"]
+
+[node name="Columns" type="HSplitContainer"]
+size_flags_vertical = 3
+
+[node name="SourceColumn" type="VBoxContainer" parent="."]
+custom_minimum_size = Vector2(140, 0)
+layout_mode = 2
+
+[node name="Header" type="HBoxContainer" parent="SourceColumn"]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="SourceColumn/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Images"
+
+[node name="AddButton" type="Button" parent="SourceColumn/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Add image files."
+text = "Add"
+
+[node name="RemoveButton" type="Button" parent="SourceColumn/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Remove the selected image from the list. The file is not touched."
+text = "Remove"
+
+[node name="ClearButton" type="Button" parent="SourceColumn/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Remove every image from the list. The files are not touched."
+text = "Clear"
+
+[node name="FileList" type="ItemList" parent="SourceColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+allow_reselect = true
+
+[node name="SourceHint" type="Label" parent="SourceColumn"]
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+text = "Drag images here from the FileSystem dock."
+autowrap_mode = 3
+
+[node name="PasteAllButton" type="Button" parent="SourceColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Replaces every open image's operation stack with the stack on the clipboard.
+
+Copy a stack first — Ctrl+C over the stack, or copy one operation from its menu."
+disabled = true
+text = "Paste to All Images"
+
+[node name="RightSplit" type="HSplitContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PreviewColumn" type="VBoxContainer" parent="RightSplit"]
+custom_minimum_size = Vector2(140, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Toolbar" type="HBoxContainer" parent="RightSplit/PreviewColumn"]
+layout_mode = 2
+
+[node name="OriginalLabel" type="Label" parent="RightSplit/PreviewColumn/Toolbar"]
+layout_mode = 2
+tooltip_text = "Fades the source image in over the result.
+
+At 0 you see the result, at 100 the untouched source, and in between both
+at once — which is how you judge whether an edge was eaten or a fringe
+left behind, since the two are then in the same place at the same time."
+mouse_filter = 1
+text = "Original"
+
+[node name="OriginalFade" type="HSlider" parent="RightSplit/PreviewColumn/Toolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+size_flags_vertical = 4
+tooltip_text = "Fades the source image in over the result.
+
+At 0 you see the result, at 100 the untouched source, and in between both
+at once — which is how you judge whether an edge was eaten or a fringe
+left behind, since the two are then in the same place at the same time."
+max_value = 100.0
+step = 1.0
+
+[node name="IndicatorLabel" type="Label" parent="RightSplit/PreviewColumn/Toolbar"]
+layout_mode = 2
+tooltip_text = "Draws the outlines that say what has been picked or drawn.
+
+Picked regions get a dashed box round the pixels they reached; drawn
+regions get their outline dashed in the same way. Both sit on top of the
+edges you are trying to judge, so turning them off is how you see the
+result on its own.
+
+On the Packing tab it lays a coloured patch under each sprite instead,
+so you can see where one ends and the next begins — a packed sheet
+cannot be read off itself, since the gap between two sprites looks the
+same as the transparent margin around either of them.
+
+It changes nothing about what is processed — only what is drawn over
+the preview."
+text = "Indicators"
+
+[node name="IndicatorChoice" type="OptionButton" parent="RightSplit/PreviewColumn/Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Draws the outlines that say what has been picked or drawn.
+
+Picked regions get a dashed box round the pixels they reached; drawn
+regions get their outline dashed in the same way. Both sit on top of the
+edges you are trying to judge, so turning them off is how you see the
+result on its own.
+
+On the Packing tab it lays a coloured patch under each sprite instead,
+so you can see where one ends and the next begins — a packed sheet
+cannot be read off itself, since the gap between two sprites looks the
+same as the transparent margin around either of them.
+
+It changes nothing about what is processed — only what is drawn over
+the preview."
+
+[node name="MagentaToggle" type="CheckBox" parent="RightSplit/PreviewColumn/Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Lays solid magenta under the image instead of the checkerboard.
+
+The checkerboard is two greys a shade apart, which is what makes it read
+as backing — and also what hides a pixel at a tenth alpha. Magenta gives
+that up to answer the other question: anything short of solid takes on
+some of it, so a pinhole or a surviving fringe shows as colour rather
+than having to be spotted.
+
+Only under the image, so the margins still say where it ends. It changes
+nothing about what is processed or what is written out."
+text = "Magenta Background"
+
+[node name="Spacer" type="Control" parent="RightSplit/PreviewColumn/Toolbar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="RefreshButton" type="Button" parent="RightSplit/PreviewColumn/Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Re-run the operation on the selected image."
+text = "Refresh"
+
+[node name="Preview" type="Control" parent="RightSplit/PreviewColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("1_preview")
+
+[node name="StatusRow" type="HBoxContainer" parent="RightSplit/PreviewColumn"]
+layout_mode = 2
+
+[node name="Zoom" type="HBoxContainer" parent="RightSplit/PreviewColumn/StatusRow"]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="ZoomOutButton" type="Button" parent="RightSplit/PreviewColumn/StatusRow/Zoom"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Zoom out one step."
+text = "-"
+
+[node name="ZoomSelect" type="OptionButton" parent="RightSplit/PreviewColumn/StatusRow/Zoom"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(76, 0)
+layout_mode = 2
+tooltip_text = "Zoom level. The buttons, the wheel and this list all step through the same
+stops. The wheel zooms towards the pixel under the cursor.
+Right-click to type an exact value instead.
+Fit can land between stops; such a value is shown here too, until you
+leave it. Drag to pan — while a tool is active, use middle or Ctrl+left."
+
+[node name="ZoomEntry" type="LineEdit" parent="RightSplit/PreviewColumn/StatusRow/Zoom"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(76, 0)
+layout_mode = 2
+tooltip_text = "Type a zoom from 1 to 1000. Enter accepts, Escape cancels."
+alignment = 1
+
+[node name="ZoomInButton" type="Button" parent="RightSplit/PreviewColumn/StatusRow/Zoom"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Zoom in one step."
+text = "+"
+
+[node name="FitButton" type="Button" parent="RightSplit/PreviewColumn/StatusRow/Zoom"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Zoom so the image fills the frame, whichever axis runs out first."
+text = "Fit"
+
+[node name="StatusLabel" type="Label" parent="RightSplit/PreviewColumn/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text_overrun_behavior = 3
+
+[node name="DetailLabel" type="Label" parent="RightSplit/PreviewColumn/StatusRow"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+text_overrun_behavior = 3
+
+[node name="OperationColumn" type="VBoxContainer" parent="RightSplit"]
+custom_minimum_size = Vector2(220, 0)
+layout_mode = 2
+
+[node name="Modes" type="TabContainer" parent="RightSplit/OperationColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Operations" parent="RightSplit/OperationColumn/Modes" instance=ExtResource("2_stack")]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="History" parent="RightSplit/OperationColumn/Modes" instance=ExtResource("3_history")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Rename" type="ScrollContainer" parent="RightSplit/OperationColumn/Modes"]
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="RenameBox" type="VBoxContainer" parent="RightSplit/OperationColumn/Modes/Rename"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Export" type="ScrollContainer" parent="RightSplit/OperationColumn/Modes"]
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="ExportPage" type="VBoxContainer" parent="RightSplit/OperationColumn/Modes/Export"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PackingSlot" type="VBoxContainer" parent="RightSplit/OperationColumn/Modes/Export/ExportPage"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="NormalSlot" type="VBoxContainer" parent="RightSplit/OperationColumn/Modes/Export/ExportPage"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="NormalStack" parent="RightSplit/OperationColumn/Modes/Export/ExportPage/NormalSlot" instance=ExtResource("2_stack")]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+add_prompt = "Add Normal Map Generator"
+add_tooltip = "Add a normal map generator to the bottom of the stack.
+Drag its header afterwards to move it.
+
+Each one builds on what the ones above it made, in the way its own Combine
+setting says. With none of them the sheet gets no normal map at all.
+
+Disabled while no image is open."
+fit_to_content = true
+
+[node name="PivotSlot" type="VBoxContainer" parent="RightSplit/OperationColumn/Modes/Export/ExportPage"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="PivotView" parent="RightSplit/OperationColumn/Modes/Export/ExportPage/PivotSlot" instance=ExtResource("4_pivot")]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PackingStatus" type="Label" parent="RightSplit/OperationColumn/Modes/Export/ExportPage"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="Upscale" type="ScrollContainer" parent="RightSplit/OperationColumn/Modes"]
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="UpscaleColumn" type="VBoxContainer" parent="RightSplit/OperationColumn/Modes/Upscale"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="UpscaleBox" type="VBoxContainer" parent="RightSplit/OperationColumn/Modes/Upscale/UpscaleColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="UpscaleStatus" type="Label" parent="RightSplit/OperationColumn/Modes/Upscale/UpscaleColumn"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="Generate" type="ScrollContainer" parent="RightSplit/OperationColumn/Modes"]
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="GenerateColumn" type="VBoxContainer" parent="RightSplit/OperationColumn/Modes/Generate"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ServerSlot" type="VBoxContainer" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ServerRows" type="VBoxContainer" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="AddressRow" type="HBoxContainer" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot/ServerRows"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ComfyUrlEdit" type="LineEdit" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot/ServerRows/AddressRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Where ComfyUI is answering.
+
+Its own default is http://127.0.0.1:8188. Start ComfyUI yourself, then press
+Connect."
+
+[node name="ConnectButton" type="Button" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot/ServerRows/AddressRow"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Ask that address whether ComfyUI is there, and what models it has."
+text = "Connect"
+
+[node name="InstallRow" type="HBoxContainer" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot/ServerRows"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ComfyRootEdit" type="LineEdit" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot/ServerRows/InstallRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Where ComfyUI is installed on this machine.
+
+Only Start needs it. If you always run ComfyUI yourself, leave it empty.
+
+Pick the folder ComfyUI was installed into, not the one holding main.py."
+placeholder_text = "ComfyUI folder, for Start"
+
+[node name="ComfyBrowseButton" type="Button" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot/ServerRows/InstallRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Browse"
+
+[node name="InstallNote" type="Label" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot/ServerRows"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="ServerButtons" type="HBoxContainer" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot/ServerRows"]
+layout_mode = 2
+
+[node name="ComfyStartButton" type="Button" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot/ServerRows/ServerButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Runs ComfyUI from the folder above.
+
+What it prints while starting is shown over the preview.
+
+Start looks first for one already answering and joins that instead, so pressing
+this with ComfyUI already up costs nothing.
+
+The first start of the day loads the whole of PyTorch. Give it a minute."
+text = "Start"
+
+[node name="ComfyStopButton" type="Button" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot/ServerRows/ServerButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Closes the ComfyUI this dock started.
+
+Dead unless the dock started it. One that was already running belongs to
+something else, and taking it away would be a surprise."
+text = "Stop"
+
+[node name="ComfyStopToggle" type="CheckBox" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot/ServerRows"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Closes a ComfyUI this dock started when the editor closes.
+
+Off leaves it up, so the next session skips the load. It also leaves several
+gigabytes of video memory held by a window you may not notice."
+text = "Stop On Exit"
+
+[node name="ComfyStatus" type="Label" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn/ServerSlot/ServerRows"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="GenerateBox" type="VBoxContainer" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="GenerateButton" type="Button" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Make a picture from the description above.
+
+Nothing here runs on its own the way the other tabs do — a generation takes a
+minute and a graphics card, so it happens only when asked. Refresh asks too.
+
+While one is going this stops it, as does Escape."
+text = "Generate"
+
+[node name="GenerateStatus" type="Label" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="OutputSeparator" type="HSeparator" parent="RightSplit/OperationColumn"]
+layout_mode = 2
+
+[node name="Output" type="VBoxContainer" parent="RightSplit/OperationColumn"]
+layout_mode = 2
+
+[node name="OutputTitle" type="Label" parent="RightSplit/OperationColumn/Output"]
+layout_mode = 2
+text = "Output"
+
+[node name="SuffixRow" type="HBoxContainer" parent="RightSplit/OperationColumn/Output"]
+layout_mode = 2
+
+[node name="SuffixLabel" type="Label" parent="RightSplit/OperationColumn/Output/SuffixRow"]
+layout_mode = 2
+tooltip_text = "Goes on the end of the output name, before the extension —
+flower.png with \"_nobg\" becomes flower_nobg.png.
+
+Save Current just suggests it, so you can still rename the file in
+the Save As dialog. Save All applies it to every file without asking
+again, which makes the suffix the only thing keeping the results
+apart from the sources.
+
+So take care when it is blank: each output then keeps its source's
+own name, and pointing Save All at the folder the sources are in
+will overwrite the originals in place. You are asked to confirm, but
+the prompt only says those files already exist — not that they are
+the images you are processing. There is no undo.
+
+Anything that rewrites pixels is saved as PNG. Rename copies the
+file untouched, so it keeps whatever format it already had."
+mouse_filter = 1
+text = "Suffix"
+
+[node name="SuffixEdit" type="LineEdit" parent="RightSplit/OperationColumn/Output/SuffixRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Goes on the end of the output name, before the extension —
+flower.png with \"_nobg\" becomes flower_nobg.png.
+
+Save Current just suggests it, so you can still rename the file in
+the Save As dialog. Save All applies it to every file without asking
+again, which makes the suffix the only thing keeping the results
+apart from the sources.
+
+So take care when it is blank: each output then keeps its source's
+own name, and pointing Save All at the folder the sources are in
+will overwrite the originals in place. You are asked to confirm, but
+the prompt only says those files already exist — not that they are
+the images you are processing. There is no undo.
+
+Anything that rewrites pixels is saved as PNG. Rename copies the
+file untouched, so it keeps whatever format it already had."
+
+[node name="SaveRow" type="HBoxContainer" parent="RightSplit/OperationColumn/Output"]
+layout_mode = 2
+
+[node name="ProcessSelectedButton" type="Button" parent="RightSplit/OperationColumn/Output/SaveRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Process the selected image and ask where to save it.
+
+On the Packing tab it saves the packed sheet instead, which is the one
+thing there is to save there — plus the lookup table beside it, if that
+switch is on. On Upscale it runs the image's operations and then the
+network, which is what the tab is showing."
+text = "Save Current"
+
+[node name="ProcessAllButton" type="Button" parent="RightSplit/OperationColumn/Output/SaveRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Process every image in the list and ask for a folder to put them in.
+
+Nothing to do on the Packing tab, where the whole list makes one sheet —
+use Save Current for that.
+
+On Upscale it runs every image through its own operations and then the
+network. That is the slow one: it holds the editor for as long as it
+takes, and it reports nothing until it is done."
+text = "Save All"
+
+[node name="OpenDialog" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "Add Images"
+file_mode = 1
+access = 2
+
+[node name="OutputDialog" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "Save All Into Folder"
+file_mode = 2
+access = 2
+
+[node name="SaveDialog" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "Save Processed Image"
+access = 2
+filters = PackedStringArray("*.png ; PNG Image")
+
+[node name="OverwriteDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "Overwrite Existing Files?"
+ok_button_text = "Overwrite"
+
+[node name="RemovalDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "Remove Old Files?"
+ok_button_text = "Remove"
+
+[node name="DeleteDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "Delete File?"
+ok_button_text = "Delete"
+
+[node name="PackingDialog" type="AcceptDialog" parent="."]
+unique_name_in_owner = true
+title = "Not Enough Room"
+
+[node name="StackSaveDialog" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "Save Operation Stack"
+access = 2
+filters = PackedStringArray("*.json ; Operation Stack")
+current_file = "operations.json"
+
+[node name="StackLoadDialog" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "Load Operation Stack"
+file_mode = 0
+access = 2
+filters = PackedStringArray("*.json ; Operation Stack")
+
+[node name="ComfyRootDialog" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "Where ComfyUI Is Installed"
+file_mode = 2
+access = 2
+
+[node name="StackMenu" type="PopupMenu" parent="."]
+unique_name_in_owner = true
+
+[node name="ResetDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "Reset Operations?"
+ok_button_text = "Reset"
+dialog_text = "Are you sure you want to reset to the default operation stack? History will be lost."
+
+[node name="NormalResetDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "Clear Normal Map Generators?"
+ok_button_text = "Clear"
+dialog_text = "Are you sure you want to remove every normal map generator? Everything dialled into them goes with them."
+
+[node name="PasteAllDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "Paste to All Images?"
+ok_button_text = "Paste"
+dialog_text = "Are you sure you want to overwrite all the open images' operation stack with the stack in the clipboard? Can only be undone individually."

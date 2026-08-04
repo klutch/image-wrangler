@@ -49,37 +49,19 @@ func setup(operation: IWOperation, property: StringName) -> void:
     _refresh()
 
 
+## The tree lives in scenes/iw_pivot_list.tscn; this fetches it and wires it up.
 func _build() -> void:
-    var buttons := HBoxContainer.new()
-    add_child(buttons)
+    _edit_button = %EditButton
+    _clear_button = %ClearButton
+    _list = %List
+    _hint = %Hint
 
-    _edit_button = Button.new()
-    _edit_button.text = "Edit"
-    _edit_button.toggle_mode = true
-    _edit_button.tooltip_text = "Shows every sprite's pivot on the sheet, and lets one be redrawn.\n\nPress inside a sprite to put its pivot there, then drag to aim it. Letting go\nwithout moving leaves it facing the way it already did.\n\nSprites you never touch keep the middle of their rectangle facing up."
-    _edit_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _edit_button.toggled.connect(func(pressed: bool) -> void: edit_toggled.emit(pressed))
-    buttons.add_child(_edit_button)
-
-    _clear_button = Button.new()
-    _clear_button.text = "Clear"
-    _clear_button.tooltip_text = "Give every sprite its default pivot back."
     _clear_button.pressed.connect(_on_clear_pressed)
-    buttons.add_child(_clear_button)
-
-    _list = EntryList.new()
     _list.configure(false)
-    _list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _list.row_selected.connect(_on_row_selected)
     _list.enabled_toggled.connect(_on_enabled_toggled)
     _list.remove_requested.connect(_remove_entry)
-    add_child(_list)
-
-    _hint = Label.new()
-    _hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _hint.modulate = Color(1, 1, 1, 0.6)
-    _hint.visible = false
-    add_child(_hint)
 
 
 ## Shows [param text] under the list, or gives the line back when it is empty. See

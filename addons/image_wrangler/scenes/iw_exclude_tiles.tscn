@@ -1,0 +1,44 @@
+[gd_scene format=3 uid="uid://iwexcltile01"]
+
+[ext_resource type="Script" uid="uid://be5edde022jr4" path="res://addons/image_wrangler/ui/iw_exclude_tiles.gd" id="1_script"]
+[ext_resource type="Script" uid="uid://dni7ui0rrppd6" path="res://addons/image_wrangler/ui/iw_entry_list.gd" id="2_list"]
+
+[node name="ExcludeTiles" type="VBoxContainer"]
+script = ExtResource("1_script")
+
+[node name="Buttons" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="PickButton" type="Button" parent="Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Click a tile on the preview to pick it, or drag a rectangle to pick every
+tile it touches. Clicking a tile that is already picked lets it go again.
+
+Every tile is outlined, including the ones this has removed, so there is
+always something to click.
+
+Press H over the dock to show or hide the outlines."
+toggle_mode = true
+text = "Pick"
+
+[node name="ClearButton" type="Button" parent="Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Let every picked tile go."
+text = "Clear"
+
+[node name="List" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 1
+script = ExtResource("2_list")
+
+[node name="Hint" type="Label" parent="."]
+unique_name_in_owner = true
+visible = false
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 3

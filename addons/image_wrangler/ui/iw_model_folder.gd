@@ -218,50 +218,34 @@ func bind_download(begin: Callable, step: Callable, finish: Callable) -> void:
     _finish = finish
 
 
+## The tree lives in scenes/iw_model_folder.tscn; this fetches it and wires it up.
+##
+## The two rows the schema can turn off are hidden rather than skipped, and their
+## variables left null so everything downstream reads them the way it always has.
 func _build() -> void:
-    # Left out for a fixed folder: a path that cannot be edited is one more row saying
+    if _download != null:
+        return
+    _warning = %Warning
+    _download = %DownloadButton
+
+    # Hidden for a fixed folder: a path that cannot be edited is one more row saying
     # something the warning below already says when it matters.
     if _fixed.is_empty():
-        var row := HBoxContainer.new()
-        add_child(row)
-
-        var caption := Label.new()
-        caption.text = _label
-        caption.custom_minimum_size = Vector2(LABEL_WIDTH, 0)
-        caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-        row.add_child(caption)
-
-        _field = LineEdit.new()
-        _field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        (%Caption as Label).text = _label
+        _field = %Field
         _field.text = _stored()
         _field.text_changed.connect(_on_typed)
-        row.add_child(_field)
-
-        # Narrow and wordless. The row is already at the width the dock can give it, and a
-        # button saying "Browse" would take that width off the path it is about.
-        _browse = Button.new()
-        _browse.text = "..."
-        _browse.tooltip_text = "Pick the folder holding the model."
+        _browse = %Browse
         _browse.pressed.connect(_on_browse)
-        row.add_child(_browse)
-
-    _warning = Label.new()
-    _warning.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _warning.add_theme_font_size_override("font_size", 10)
-    # The same amber a stack entry's prerequisite note uses, since it is saying the same
-    # kind of thing: not broken, just not ready.
-    _warning.modulate = Color(1.0, 0.85, 0.4)
-    _warning.visible = false
-    add_child(_warning)
+    else:
+        (%PathRow as Control).visible = false
 
     if _show_refresh:
-        _refresh_button = Button.new()
-        _refresh_button.text = "Refresh"
-        _refresh_button.tooltip_text = "Runs the export again now, network included."
+        _refresh_button = %RefreshButton
         _refresh_button.pressed.connect(func() -> void: refresh_requested.emit())
-        add_child(_refresh_button)
+    else:
+        (%RefreshButton as Control).visible = false
 
-    _download = Button.new()
     _download.text = _download_label
     if _url.is_empty():
         _download.tooltip_text = "No archive is published for this model yet.\nConvert one yourself and point the folder above at it."
@@ -271,7 +255,6 @@ func _build() -> void:
                 "the folder above" if _fixed.is_empty() else _fixed,
                 String.humanize_size(_bytes)]
     _download.pressed.connect(_on_download)
-    add_child(_download)
 
     # Off until there are bytes to count. Godot turns processing on for any node whose
     # script defines _process, and this one has nothing to do between downloads.

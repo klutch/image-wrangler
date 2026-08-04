@@ -41,37 +41,21 @@ func setup(operation: IWOperation, property: StringName) -> void:
     _refresh()
 
 
+## The tree lives in scenes/iw_exclude_tiles.tscn; this fetches it and wires it up.
 func _build() -> void:
-    var buttons := HBoxContainer.new()
-    add_child(buttons)
+    if _list != null:
+        return
+    _pick_button = %PickButton
+    _clear_button = %ClearButton
+    _list = %List
+    _hint = %Hint
 
-    _pick_button = Button.new()
-    _pick_button.text = "Pick"
-    _pick_button.toggle_mode = true
-    _pick_button.tooltip_text = "Click a tile on the preview to pick it, or drag a rectangle to pick every\ntile it touches. Clicking a tile that is already picked lets it go again.\n\nEvery tile is outlined, including the ones this has removed, so there is\nalways something to click.\n\nPress H over the dock to show or hide the outlines."
-    _pick_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _pick_button.toggled.connect(func(pressed: bool) -> void: pick_toggled.emit(pressed))
-    buttons.add_child(_pick_button)
-
-    _clear_button = Button.new()
-    _clear_button.text = "Clear"
-    _clear_button.tooltip_text = "Let every picked tile go."
     _clear_button.pressed.connect(_on_clear_pressed)
-    buttons.add_child(_clear_button)
-
-    _list = EntryList.new()
     _list.configure(false)
-    _list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _list.row_selected.connect(func(_index: int) -> void: selection_changed.emit())
     _list.enabled_toggled.connect(_on_enabled_toggled)
     _list.remove_requested.connect(_remove_pick)
-    add_child(_list)
-
-    _hint = Label.new()
-    _hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _hint.modulate = Color(1, 1, 1, 0.6)
-    _hint.visible = false
-    add_child(_hint)
 
 
 func _notification(what: int) -> void:

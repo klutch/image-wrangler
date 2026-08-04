@@ -1,0 +1,78 @@
+[gd_scene format=3 uid="uid://iwislandpk01"]
+
+[ext_resource type="Script" uid="uid://ccvr17sqi62k3" path="res://addons/image_wrangler/ui/iw_island_picker.gd" id="1_script"]
+[ext_resource type="Script" uid="uid://dni7ui0rrppd6" path="res://addons/image_wrangler/ui/iw_entry_list.gd" id="2_list"]
+
+[node name="IslandPicker" type="VBoxContainer"]
+script = ExtResource("1_script")
+
+[node name="Buttons" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="PickButton" type="Button" parent="Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Drag a rectangle over the preview to add that region to the list,
+or click once for a single pixel.
+Press H over the dock to show or hide the markers."
+toggle_mode = true
+text = "Pick"
+
+[node name="ModeChoice" type="OptionButton" parent="Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "What the next region picked will do: Subtract makes its area transparent,
+Add makes it opaque. Press X over the dock to switch.
+
+Only sets new regions. Change one already in the list from its own row."
+
+[node name="ClearButton" type="Button" parent="Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Remove every region for this image."
+text = "Clear"
+
+[node name="List" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 1
+script = ExtResource("2_list")
+
+[node name="Editor" type="HBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="MixedLabel" type="Label" parent="Editor"]
+unique_name_in_owner = true
+visible = false
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+tooltip_text = "The pixels in this region have different tolerances.
+The slider shows one of them; moving it sets them all."
+text = "mixed"
+
+[node name="PicksToggle" type="Button" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "The pixels this region floods from, each with a tolerance of its own."
+toggle_mode = true
+flat = true
+alignment = 0
+
+[node name="PicksBox" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 1
+
+[node name="Hint" type="Label" parent="."]
+unique_name_in_owner = true
+visible = false
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 3

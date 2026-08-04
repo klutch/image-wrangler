@@ -1,0 +1,58 @@
+[gd_scene format=3 uid="uid://iwbrushlst01"]
+
+[ext_resource type="Script" uid="uid://dnnw0iq8j46u5" path="res://addons/image_wrangler/ui/iw_brush_list.gd" id="1_script"]
+[ext_resource type="Script" uid="uid://dni7ui0rrppd6" path="res://addons/image_wrangler/ui/iw_entry_list.gd" id="2_list"]
+
+[node name="BrushList" type="VBoxContainer"]
+script = ExtResource("1_script")
+
+[node name="Buttons" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="DrawButton" type="Button" parent="Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Drag over the preview to paint a stroke. Each drag is one entry.
+
+A click without moving puts down a single dab. Press Escape or right-click
+to stop drawing."
+toggle_mode = true
+text = "Draw"
+
+[node name="ClearButton" type="Button" parent="Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Remove every stroke for this image."
+text = "Clear"
+
+[node name="BrushCaption" type="Label" parent="."]
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+text = "Brush for the next stroke"
+text_overrun_behavior = 3
+
+[node name="List" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 1
+script = ExtResource("2_list")
+
+[node name="Editor" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="EditorCaption" type="Label" parent="Editor"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+text_overrun_behavior = 3
+
+[node name="Hint" type="Label" parent="."]
+unique_name_in_owner = true
+visible = false
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 3

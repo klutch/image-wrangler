@@ -33,6 +33,9 @@ signal mode_changed(index: int, mode: int)
 ## to close, a selection to move, a settings Resource to write.
 signal remove_requested(index: int)
 
+## One row's controls. The scene is the source of truth for how a row looks.
+const RowScene := preload("res://addons/image_wrangler/scenes/iw_entry_row.tscn")
+
 const SWATCH_SIZE := 14
 
 ## The remove cross: what it says, and the two shades it says it in.
@@ -41,6 +44,9 @@ const SWATCH_SIZE := 14
 ## so it is unmistakably a thing you can press. Flat, and the last control on the row, so
 ## the eye reaches the swatch and the label first — removing an entry is not what the row
 ## is for.
+##
+## The live values are on the Remove button in the row scene; these copies are what the
+## test checks the scene against.
 const REMOVE_GLYPH := "✕"
 const REMOVE_COLOR := Color(1, 1, 1, 0.45)
 const REMOVE_HOVER_COLOR := Color(1, 1, 1, 1)
@@ -74,35 +80,28 @@ var _loading := false
 
 
 func _init() -> void:
-	add_theme_constant_override("separation", 1)
+    add_theme_constant_override("separation", 1)
 
 
 ## Turns every row's controls, and row selection itself, on or off.
 ##
 ## Remembered, so rows built after this call come up in the same state.
 func set_interactive(value: bool) -> void:
-	_interactive = value
-	for row in _rows:
-		_apply_interactive(row)
+    _interactive = value
+    for row in _rows:
+        _apply_interactive(row)
 
 
 ## Applies the current state to one row's controls.
 func _apply_interactive(row: PanelContainer) -> void:
-	var box := row.get_meta(&"check") as CheckBox
-	if box != null:
-		box.disabled = not _interactive
-	if row.has_meta(&"mode"):
-		var choice := row.get_meta(&"mode") as OptionButton
-		if choice != null:
-			choice.disabled = not _interactive
-	var cross := row.get_meta(&"remove") as Button
-	if cross != null:
-		cross.disabled = not _interactive
+    (row.get_node("%Check") as CheckBox).disabled = not _interactive
+    (row.get_node("%Mode") as OptionButton).disabled = not _interactive
+    (row.get_node("%Remove") as Button).disabled = not _interactive
 
 
 ## Whether rows should carry a mode dropdown. Call before the first [method set_rows].
 func configure(shows_mode: bool) -> void:
-	_shows_mode = shows_mode
+    _shows_mode = shows_mode
 
 
 ## Rebuilds every row from [param entries], each a Dictionary of
@@ -112,178 +111,138 @@ func configure(shows_mode: bool) -> void:
 ## The selection is kept when it still points at a row, since rebuilding happens
 ## on edits that should not throw the user's place away.
 func set_rows(entries: Array) -> void:
-	_loading = true
-	for row in _rows:
-		remove_child(row)
-		row.queue_free()
-	_rows.clear()
+    _loading = true
+    for row in _rows:
+        remove_child(row)
+        row.queue_free()
+    _rows.clear()
 
-	for i in entries.size():
-		var row := _build_row(i, entries[i])
-		add_child(row)
-		_rows.append(row)
-		_apply_interactive(row)
+    for i in entries.size():
+        var row := _build_row(i, entries[i])
+        add_child(row)
+        _rows.append(row)
+        _apply_interactive(row)
 
-	if _selected >= _rows.size():
-		_selected = -1
-	_apply_selection()
-	_loading = false
+    if _selected >= _rows.size():
+        _selected = -1
+    _apply_selection()
+    _loading = false
 
 
 ## Rewrites one row without touching the rest, for an edit that changes a label
 ## or a swatch while the user is working in that row.
 func update_row(index: int, entry: Dictionary) -> void:
-	if index < 0 or index >= _rows.size():
-		return
-	var row := _rows[index]
-	_loading = true
-	var swatch := row.get_meta(&"swatch") as TextureRect
-	var label := row.get_meta(&"label") as Label
-	swatch.texture = make_swatch(entry.get("color", Color.MAGENTA))
-	label.text = String(entry.get("text", ""))
-	var box := row.get_meta(&"check") as CheckBox
-	box.button_pressed = bool(entry.get("enabled", true))
-	if _shows_mode:
-		var choice := row.get_meta(&"mode") as OptionButton
-		choice.selected = IWAlphaMode.sanitise(int(entry.get("mode", 0)))
-	row.modulate = Color.WHITE if bool(entry.get("enabled", true)) else DISABLED_MODULATE
-	_loading = false
+    if index < 0 or index >= _rows.size():
+        return
+    var row := _rows[index]
+    _loading = true
+    (row.get_node("%Swatch") as TextureRect).texture = make_swatch(entry.get("color", Color.MAGENTA))
+    (row.get_node("%Text") as Label).text = String(entry.get("text", ""))
+    (row.get_node("%Check") as CheckBox).button_pressed = bool(entry.get("enabled", true))
+    if _shows_mode:
+        var choice := row.get_node("%Mode") as OptionButton
+        choice.selected = IWAlphaMode.sanitise(int(entry.get("mode", 0)))
+    row.modulate = Color.WHITE if bool(entry.get("enabled", true)) else DISABLED_MODULATE
+    _loading = false
 
 
 func selected_index() -> int:
-	return _selected
+    return _selected
 
 
 func count() -> int:
-	return _rows.size()
+    return _rows.size()
 
 
 ## Highlights [param index], or clears the selection when it is out of range.
 ## Silent: the caller already knows, so this does not emit.
 func select(index: int) -> void:
-	_selected = index if index >= 0 and index < _rows.size() else -1
-	_apply_selection()
+    _selected = index if index >= 0 and index < _rows.size() else -1
+    _apply_selection()
 
 
+## One row, instanced from the row scene and filled from [param entry]. The nodes are
+## fetched by unique name on update rather than tracked in parallel arrays, which would
+## need keeping in step with every insert and removal.
 func _build_row(index: int, entry: Dictionary) -> PanelContainer:
-	var row := PanelContainer.new()
-	var enabled := bool(entry.get("enabled", true))
-	row.modulate = Color.WHITE if enabled else DISABLED_MODULATE
-	# The whole row is the hit target for selecting, so the click lands wherever
-	# the pointer is rather than only on the text.
-	row.gui_input.connect(_on_row_input.bind(index))
+    var row: PanelContainer = RowScene.instantiate()
+    var enabled := bool(entry.get("enabled", true))
+    row.modulate = Color.WHITE if enabled else DISABLED_MODULATE
+    # The whole row is the hit target for selecting, so the click lands wherever
+    # the pointer is rather than only on the text.
+    row.gui_input.connect(_on_row_input.bind(index))
 
-	var line := HBoxContainer.new()
-	row.add_child(line)
+    (row.get_node("%Swatch") as TextureRect).texture = make_swatch(entry.get("color", Color.MAGENTA))
+    (row.get_node("%Text") as Label).text = String(entry.get("text", ""))
 
-	var swatch := TextureRect.new()
-	swatch.texture = make_swatch(entry.get("color", Color.MAGENTA))
-	swatch.custom_minimum_size = Vector2(SWATCH_SIZE, SWATCH_SIZE)
-	swatch.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
-	line.add_child(swatch)
+    if _shows_mode:
+        var choice := row.get_node("%Mode") as OptionButton
+        choice.visible = true
+        for option in IWAlphaMode.LABELS:
+            choice.add_item(String(option))
+        choice.selected = IWAlphaMode.sanitise(int(entry.get("mode", 0)))
+        choice.item_selected.connect(
+            func(selected_mode: int) -> void:
+                if not _loading:
+                    mode_changed.emit(index, selected_mode)
+        )
 
-	var label := Label.new()
-	label.text = String(entry.get("text", ""))
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# The dock column is narrow and cannot scroll sideways, so a long label has to
-	# give rather than set a floor under the whole panel.
-	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	label.mouse_filter = Control.MOUSE_FILTER_PASS
-	line.add_child(label)
+    var box := row.get_node("%Check") as CheckBox
+    box.button_pressed = enabled
+    box.toggled.connect(
+        func(on: bool) -> void:
+            if not _loading:
+                enabled_toggled.emit(index, on)
+    )
 
-	var choice: OptionButton = null
-	if _shows_mode:
-		choice = OptionButton.new()
-		for option in IWAlphaMode.LABELS:
-			choice.add_item(String(option))
-		choice.selected = IWAlphaMode.sanitise(int(entry.get("mode", 0)))
-		choice.focus_mode = Control.FOCUS_NONE
-		choice.tooltip_text = "Subtract makes this area transparent.\nAdd makes it opaque, whatever the keying decided —\nand wins wherever the two overlap."
-		choice.item_selected.connect(
-			func(selected_mode: int) -> void:
-				if not _loading:
-					mode_changed.emit(index, selected_mode)
-		)
-		line.add_child(choice)
-
-	var box := CheckBox.new()
-	box.button_pressed = enabled
-	box.focus_mode = Control.FOCUS_NONE
-	box.tooltip_text = "Include this entry. Unticked leaves it in the list but out of the result."
-	box.toggled.connect(
-		func(on: bool) -> void:
-			if not _loading:
-				enabled_toggled.emit(index, on)
-	)
-	line.add_child(box)
-
-	var cross := Button.new()
-	cross.text = REMOVE_GLYPH
-	cross.flat = true
-	cross.focus_mode = Control.FOCUS_NONE
-	cross.tooltip_text = "Remove this entry."
-	cross.add_theme_color_override(&"font_color", REMOVE_COLOR)
-	cross.add_theme_color_override(&"font_hover_color", REMOVE_HOVER_COLOR)
-	# Pressed reads the same as hovered, since the pointer is on it either way and a
-	# third shade would be a state nobody is looking for.
-	cross.add_theme_color_override(&"font_pressed_color", REMOVE_HOVER_COLOR)
-	cross.pressed.connect(
-		func() -> void:
-			if not _loading and _interactive:
-				remove_requested.emit(index)
-	)
-	line.add_child(cross)
-
-	# Fetched by name on update rather than tracked in parallel arrays, which
-	# would need keeping in step with every insert and removal.
-	row.set_meta(&"swatch", swatch)
-	row.set_meta(&"label", label)
-	row.set_meta(&"check", box)
-	row.set_meta(&"remove", cross)
-	if choice != null:
-		row.set_meta(&"mode", choice)
-	return row
+    var cross := row.get_node("%Remove") as Button
+    cross.pressed.connect(
+        func() -> void:
+            if not _loading and _interactive:
+                remove_requested.emit(index)
+    )
+    return row
 
 
 func _notification(what: int) -> void:
-	# The accent comes out of the theme, so the highlight has to be rebuilt when
-	# the theme changes under it.
-	if what == NOTIFICATION_THEME_CHANGED and not _rows.is_empty():
-		_apply_selection()
+    # The accent comes out of the theme, so the highlight has to be rebuilt when
+    # the theme changes under it.
+    if what == NOTIFICATION_THEME_CHANGED and not _rows.is_empty():
+        _apply_selection()
 
 
 func _on_row_input(event: InputEvent, index: int) -> void:
-	if not _interactive:
-		return
-	var button := event as InputEventMouseButton
-	if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_LEFT:
-		return
-	# Clicking the highlighted row clears the selection rather than reasserting
-	# it, so there is a way back to nothing selected without reaching elsewhere.
-	_selected = -1 if _selected == index else index
-	_apply_selection()
-	row_selected.emit(_selected)
-	_rows[index].accept_event()
+    if not _interactive:
+        return
+    var button := event as InputEventMouseButton
+    if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_LEFT:
+        return
+    # Clicking the highlighted row clears the selection rather than reasserting
+    # it, so there is a way back to nothing selected without reaching elsewhere.
+    _selected = -1 if _selected == index else index
+    _apply_selection()
+    row_selected.emit(_selected)
+    _rows[index].accept_event()
 
 
 func _apply_selection() -> void:
-	for i in _rows.size():
-		_rows[i].add_theme_stylebox_override(&"panel", _row_style(i == _selected))
+    for i in _rows.size():
+        _rows[i].add_theme_stylebox_override(&"panel", _row_style(i == _selected))
 
 
 ## Backing for a row. Flat accent for the selected one, nothing for the rest.
 func _row_style(selected: bool) -> StyleBox:
-	if not selected:
-		return StyleBoxEmpty.new()
-	var style := StyleBoxFlat.new()
-	# Asked for rather than assumed: rows are built before this control is in the
-	# tree, and reading a theme colour that is not there logs an error.
-	var accent := Color(0.4, 0.6, 1.0)
-	if has_theme_color(&"accent_color", &"Editor"):
-		accent = get_theme_color(&"accent_color", &"Editor")
-	style.bg_color = Color(accent, SELECTION_ALPHA)
-	style.set_corner_radius_all(3)
-	return style
+    if not selected:
+        return StyleBoxEmpty.new()
+    var style := StyleBoxFlat.new()
+    # Asked for rather than assumed: rows are built before this control is in the
+    # tree, and reading a theme colour that is not there logs an error.
+    var accent := Color(0.4, 0.6, 1.0)
+    if has_theme_color(&"accent_color", &"Editor"):
+        accent = get_theme_color(&"accent_color", &"Editor")
+    style.bg_color = Color(accent, SELECTION_ALPHA)
+    style.set_corner_radius_all(3)
+    return style
 
 
 ## Small bordered colour chip, so a white entry is still visible on its row.
@@ -292,7 +251,7 @@ func _row_style(selected: bool) -> StyleBox:
 ## group, and two of these drifting apart would be two sizes of the same thing in one
 ## control.
 static func make_swatch(color: Color) -> Texture2D:
-	var image := Image.create_empty(SWATCH_SIZE, SWATCH_SIZE, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0, 0, 0, 1))
-	image.fill_rect(Rect2i(1, 1, SWATCH_SIZE - 2, SWATCH_SIZE - 2), color)
-	return ImageTexture.create_from_image(image)
+    var image := Image.create_empty(SWATCH_SIZE, SWATCH_SIZE, false, Image.FORMAT_RGBA8)
+    image.fill(Color(0, 0, 0, 1))
+    image.fill_rect(Rect2i(1, 1, SWATCH_SIZE - 2, SWATCH_SIZE - 2), color)
+    return ImageTexture.create_from_image(image)

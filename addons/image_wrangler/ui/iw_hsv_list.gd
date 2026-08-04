@@ -65,38 +65,30 @@ func setup(operation: IWOperation, property: StringName) -> void:
     _refresh()
 
 
+## The tree lives in scenes/iw_hsv_list.tscn; this fetches it and wires it up.
+##
+## The four sliders are the one part still made here: [EditorSpinSlider] is an
+## editor-only class, so it cannot sit in a scene the user opens. They slot in
+## above the scene's own Reset button.
 func _build() -> void:
-    # Buttons first so they sit flush under the group heading. This control has no title
-    # of its own — the settings form already provides one.
-    var buttons := HBoxContainer.new()
-    add_child(buttons)
+    if _list != null:
+        return
+    _pick_button = %PickButton
+    _clear_button = %ClearButton
+    _list = %List
+    _editor = %Editor
+    _reset_button = %ResetButton
+    _hint = %Hint
 
-    _pick_button = Button.new()
-    _pick_button.text = "Pick"
-    _pick_button.toggle_mode = true
-    _pick_button.tooltip_text = "Drag a rectangle over the preview to add that region to the list.\n\nRegions may overlap. They are applied in the order they were picked,\neach working on what the one before it left."
-    _pick_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _pick_button.toggled.connect(func(pressed: bool) -> void: pick_toggled.emit(pressed))
-    buttons.add_child(_pick_button)
-
-    _clear_button = Button.new()
-    _clear_button.text = "Clear"
-    _clear_button.tooltip_text = "Remove every region for this image."
     _clear_button.pressed.connect(_on_clear_pressed)
-    buttons.add_child(_clear_button)
 
-    _list = EntryList.new()
     # No mode dropdown: a region here has nothing to add or subtract, only the
     # adjustments on the sliders below.
     _list.configure(false)
-    _list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _list.row_selected.connect(_on_row_selected)
     _list.enabled_toggled.connect(_on_enabled_toggled)
     _list.remove_requested.connect(_remove_entry)
-    add_child(_list)
-
-    _editor = VBoxContainer.new()
-    add_child(_editor)
 
     # Hue in turns rather than degrees, matching what the kernel takes, but stepped
     # finely enough that the slider still lands on a whole degree.
@@ -109,17 +101,7 @@ func _build() -> void:
     _colorize = _add_slider("Colorize", 0.0, 1.0, 0.01,
             "How far to mix towards one flat colour, keeping each pixel's own lightness.\n\nAt 0 the sliders above work as usual. Turning it up re-reads Hue as a place\non the wheel rather than a distance round it, and Saturation as how strong\nthe tint is. Black and white stay where they are.")
 
-    _reset_button = Button.new()
-    _reset_button.text = "Reset Sliders"
-    _reset_button.tooltip_text = "Put this region's sliders back where they do nothing.\nThe region stays on the list."
     _reset_button.pressed.connect(_on_reset_pressed)
-    _editor.add_child(_reset_button)
-
-    _hint = Label.new()
-    _hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _hint.modulate = Color(1, 1, 1, 0.6)
-    _hint.visible = false
-    add_child(_hint)
 
 
 func _add_slider(label: String, low: float, high: float, step: float, hint: String) -> EditorSpinSlider:
@@ -132,6 +114,7 @@ func _add_slider(label: String, low: float, high: float, step: float, hint: Stri
     slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     slider.value_changed.connect(_on_slider_changed)
     _editor.add_child(slider)
+    _editor.move_child(slider, _reset_button.get_index())
     return slider
 
 

@@ -1,0 +1,73 @@
+[gd_scene format=3 uid="uid://iwstackent01"]
+
+[ext_resource type="Script" uid="uid://c5krvcvsk1s7g" path="res://addons/image_wrangler/ui/iw_stack_entry.gd" id="1_script"]
+
+[node name="StackEntry" type="PanelContainer"]
+script = ExtResource("1_script")
+
+[node name="Column" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="Header" type="HBoxContainer" parent="Column"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Handle" type="Label" parent="Column/Header"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.55)
+custom_minimum_size = Vector2(22, 0)
+layout_mode = 2
+tooltip_text = "Drag to reorder. Order matters: each operation works on what the ones above it left."
+mouse_filter = 1
+mouse_default_cursor_shape = 13
+text = "≡"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Tick" type="CheckBox" parent="Column/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Run this operation.
+Unticking it keeps everything dialled into it, which removing the entry would not."
+
+[node name="Title" type="Button" parent="Column/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+toggle_mode = true
+flat = true
+alignment = 0
+text_overrun_behavior = 3
+
+[node name="Close" type="Button" parent="Column/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Remove this operation from the stack.
+Its settings go with it."
+theme_override_colors/font_color = Color(0.62, 0.62, 0.62, 1)
+theme_override_colors/font_hover_color = Color(0.92, 0.92, 0.92, 1)
+theme_override_colors/font_pressed_color = Color(1, 1, 1, 1)
+text = "✕"
+flat = true
+
+[node name="Note" type="Label" parent="Column"]
+unique_name_in_owner = true
+visible = false
+modulate = Color(1, 0.85, 0.4, 1)
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+autowrap_mode = 3
+
+[node name="Body" type="MarginContainer" parent="Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/margin_left = 8
+
+[node name="SettingsBox" type="VBoxContainer" parent="Column/Body"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3

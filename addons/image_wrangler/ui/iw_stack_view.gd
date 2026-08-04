@@ -17,6 +17,7 @@ extends VBoxContainer
 ## exactly what a reorder changes.
 
 const StackEntry := preload("res://addons/image_wrangler/ui/iw_stack_entry.gd")
+const StackEntryScene := preload("res://addons/image_wrangler/scenes/iw_stack_entry.tscn")
 const ToolButton := preload("res://addons/image_wrangler/ui/iw_tool_button.gd")
 
 ## Room above and below the column of entries, and between one entry and the next.
@@ -91,10 +92,10 @@ var form_builder := Callable()
 ## were somehow current. This is a button wearing a list's clothes.
 ##
 ## Set before the view enters the tree, alongside [member operations].
-var add_prompt := "Add New Operation"
+@export var add_prompt := "Add New Operation"
 
 ## What the dropdown says when it is hovered.
-var add_tooltip := "Add an operation to the bottom of the stack.\nDrag its header afterwards to move it.\n\nPicking the same one twice adds a second of it, which is what duplicates are for.\nDisabled while no image is open."
+@export_multiline var add_tooltip := "Add an operation to the bottom of the stack.\nDrag its header afterwards to move it.\n\nPicking the same one twice adds a second of it, which is what duplicates are for.\nDisabled while no image is open."
 
 ## Whether the list is exactly as tall as its cards rather than as tall as the room it is
 ## given. Empty, it takes no height at all.
@@ -103,7 +104,7 @@ var add_tooltip := "Add an operation to the bottom of the stack.\nDrag its heade
 ## to the bottom whether or not there was anything in the list. Set before the view enters
 ## the tree. Whatever holds the view needs a scroll of its own, since this one stops having
 ## anything to scroll.
-var fit_to_content := false
+@export var fit_to_content := false
 
 ## Where a tool button keeps the icon it wants and the word to fall back on.
 const META_ICON := &"iw_icon"
@@ -261,26 +262,12 @@ func _edge_speed(depth: float) -> float:
     return AUTO_SCROLL_SPEED * reach * reach
 
 
-## One button on the tool row.
+## Wires one of the scene's tool buttons: press it, and it reports on [param report].
 ##
-## The label is the tooltip as well as the word the button falls back on. These do what
-## they are called and nothing more, so a sentence explaining one would only be the same
-## word again with padding.
-func _add_tool(icon: StringName, label: String, on_press: Callable) -> void:
-    var button := Button.new()
-    button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    button.tooltip_text = label
-    # The icon grows to fill whatever width the button ends up with, and the height
-    # follows in _square_up, so the buttons stay square however wide the dock is.
-    button.expand_icon = true
-    button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-    # Never focused: these sit between the dropdown and the entries, and tabbing through
-    # the form should not stop at five of them on the way.
-    button.focus_mode = Control.FOCUS_NONE
-    button.set_meta(META_ICON, icon)
-    button.set_meta(META_LABEL, label)
-    button.pressed.connect(on_press)
-    _tools.add_child(button)
+## The icon name and the word to fall back on ride on the button as metadata, set in the
+## scene, so [method _dress] can redo them on every theme change.
+func _bind_tool(button: Button, report: Signal) -> void:
+    button.pressed.connect(func() -> void: report.emit())
     _dress(button)
 
 
@@ -329,84 +316,40 @@ func _dress(button: Button) -> void:
     button.text = String(button.get_meta(META_LABEL, ""))
 
 
+## The tree lives in scenes/iw_stack_view.tscn; this fetches it and wires it up.
 func _build() -> void:
-    # First, because these are the ways a whole stack arrives at once, and the dropdown
-    # under them is for adding to whatever they left. Icons rather than names: five of
-    # these across a dock this narrow leaves no room for words, and what each one does is
-    # the sort of thing an icon says faster than a label anyway.
-    #
-    # In the order they are reached for — the two that go through a file, the two that go
-    # through the clipboard, and then the one that throws everything away, which is last
-    # because it is the only one with nothing to bring back what it took.
-    _tools = HBoxContainer.new()
-    _tools.resized.connect(_square_up)
-    add_child(_tools)
+    if _list != null:
+        return
+    _tools = %Tools
+    _selector = %Selector
+    _extras = %Extras
+    _scroll = %Scroll
+    _inset = %Inset
+    _list = %List
 
-    _add_tool(&"Save", "Save", func() -> void: save_requested.emit())
-    _add_tool(&"Load", "Load", func() -> void: load_requested.emit())
-    _add_tool(&"ActionCopy", "Copy", func() -> void: copy_requested.emit())
-    _add_tool(&"ActionPaste", "Paste", func() -> void: paste_requested.emit())
-    _add_tool(&"Reload", "Reset", func() -> void: reset_requested.emit())
+    _tools.resized.connect(_square_up)
+    _bind_tool(%SaveButton, save_requested)
+    _bind_tool(%LoadButton, load_requested)
+    _bind_tool(%CopyButton, copy_requested)
+    _bind_tool(%PasteButton, paste_requested)
+    _bind_tool(%ResetButton, reset_requested)
 
     # Picking from the list is the whole gesture — there is no button beside it to press
     # afterwards, so the popup's own index_pressed is what this listens to rather than
     # item_selected. item_selected does not fire when the item picked is the one already
     # showing, and adding a second Polygon Edit is an ordinary thing to want.
-    _selector = OptionButton.new()
-    _selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _selector.tooltip_text = add_tooltip
-    _selector.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
     _selector.get_popup().index_pressed.connect(_on_pick)
-    add_child(_selector)
 
     # Empty unless the dock puts something here. See [method extras_box].
-    _extras = VBoxContainer.new()
-    _extras.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _extras.visible = false
     _extras.child_order_changed.connect(_settle_extras)
-    add_child(_extras)
-
-    # [b]The scroll starts here, under the tools and the dropdown rather than above
-    # them.[/b] It used to wrap the whole of this view, which meant a stack long enough to
-    # scroll took its own Add dropdown off the top of the screen — so adding a second
-    # operation meant scrolling back up, picking, and scrolling down again to reach what
-    # you had just added. The two things that are always worth reaching are the two that
-    # now never move.
-    _scroll = ScrollContainer.new()
-    var scroll := _scroll
-    scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    if not fit_to_content:
-        scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-    # The dock column is narrow and the forms inside give rather than overflow, so a
-    # sideways bar would only ever be a second thing to nudge past the vertical one.
-    scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    add_child(scroll)
-
-    # The entries are cards standing off the panel, so they need room above and below
-    # to read as separate things rather than as one block with lines in it.
-    #
-    # Both containers are see-through to the mouse. Neither has anything to do with a
-    # click, and leaving them solid would swallow every right-click that missed an entry
-    # — which is exactly the one that means "paste at the end".
-    var inset := MarginContainer.new()
-    _inset = inset
-    inset.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    inset.mouse_filter = Control.MOUSE_FILTER_IGNORE
-    for side in ["margin_top", "margin_bottom"]:
-        inset.add_theme_constant_override(side, ENTRY_MARGIN)
-    scroll.add_child(inset)
-
-    _list = VBoxContainer.new()
-    _list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _list.mouse_filter = Control.MOUSE_FILTER_IGNORE
-    _list.add_theme_constant_override("separation", ENTRY_GAP)
-    inset.add_child(_list)
 
     # A ScrollContainer asks for no height of its own, so left alone it would sit at nothing
     # and the cards would be unreachable. Followed rather than set once: a card folding or a
     # form growing changes what the list needs.
     if fit_to_content:
-        inset.minimum_size_changed.connect(_fit_scroll)
+        _scroll.size_flags_vertical = Control.SIZE_FILL
+        _inset.minimum_size_changed.connect(_fit_scroll)
         _fit_scroll()
 
     # Off until a drag of ours starts. See _notification.
@@ -443,6 +386,15 @@ func extras_box() -> VBoxContainer:
 func _settle_extras() -> void:
     if _extras != null:
         _extras.visible = _extras.get_child_count() > 0
+
+
+## Points the dropdown at [param offered] and refills it.
+##
+## For a view that sits in a scene: it enters the tree and builds before the dock gets
+## a word in, so assigning [member operations] alone would arrive after the fill.
+func set_operations(offered: Array) -> void:
+    operations = offered
+    _refresh_selector()
 
 
 ## Fills the dropdown from [member operations].
@@ -574,7 +526,7 @@ func rebuild() -> void:
         child.queue_free()
 
     for record: Dictionary in _entries:
-        var entry: Control = StackEntry.new()
+        var entry: Control = StackEntryScene.instantiate()
         _list.add_child(entry)
         # Before setup, since the card carries it into every drag payload it hands out.
         entry.stack_id = get_instance_id()

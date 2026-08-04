@@ -16,6 +16,16 @@ const ExcludeTilesList := preload("res://addons/image_wrangler/ui/iw_exclude_til
 const ModelFolder := preload("res://addons/image_wrangler/ui/iw_model_folder.gd")
 const RangeSlider := preload("res://addons/image_wrangler/ui/iw_range_slider.gd")
 
+# The scenes those scripts sit on. The scripts stay above for the type checks in
+# refresh_values; these are what a form actually instantiates.
+const IslandPickerScene := preload("res://addons/image_wrangler/scenes/iw_island_picker.tscn")
+const ColorListScene := preload("res://addons/image_wrangler/scenes/iw_color_list.tscn")
+const PolygonListScene := preload("res://addons/image_wrangler/scenes/iw_polygon_list.tscn")
+const HSVListScene := preload("res://addons/image_wrangler/scenes/iw_hsv_list.tscn")
+const BrushListScene := preload("res://addons/image_wrangler/scenes/iw_brush_list.tscn")
+const ExcludeTilesScene := preload("res://addons/image_wrangler/scenes/iw_exclude_tiles.tscn")
+const ModelFolderScene := preload("res://addons/image_wrangler/scenes/iw_model_folder.tscn")
+
 ## Left indent applied to the contents of a named group.
 const GROUP_INDENT := 8
 
@@ -285,7 +295,7 @@ static func _apply_fold_arrow(heading: Button) -> void:
 ## needs the preview, which only the dock can reach, so it connects the picker's
 ## signals itself and re-runs the operation from there.
 static func _build_island_picker(operation: IWOperation, property: StringName) -> Control:
-    var picker := IslandPicker.new()
+    var picker: Control = IslandPickerScene.instantiate()
     picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     picker.setup(operation, property)
     return picker
@@ -295,7 +305,7 @@ static func _build_island_picker(operation: IWOperation, property: StringName) -
 ## their Pick button needs the preview, and only the dock can reach it. The dock
 ## connects the signals and re-runs the operation from there.
 static func _build_color_list(operation: IWOperation, property: StringName) -> Control:
-    var list := ColorList.new()
+    var list: Control = ColorListScene.instantiate()
     list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     list.setup(operation, property)
     return list
@@ -304,7 +314,7 @@ static func _build_color_list(operation: IWOperation, property: StringName) -> C
 ## Polygon lists are left unwired here for the same reason the other two are:
 ## drawing needs the preview, and only the dock can reach it.
 static func _build_polygon_list(operation: IWOperation, property: StringName) -> Control:
-    var list := PolygonList.new()
+    var list: Control = PolygonListScene.instantiate()
     list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     list.setup(operation, property)
     return list
@@ -313,7 +323,7 @@ static func _build_polygon_list(operation: IWOperation, property: StringName) ->
 ## Left unwired here for the same reason the other three are: picking needs the
 ## preview, and only the dock can reach it.
 static func _build_hsv_list(operation: IWOperation, property: StringName) -> Control:
-    var list := HSVList.new()
+    var list: Control = HSVListScene.instantiate()
     list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     list.setup(operation, property)
     return list
@@ -322,7 +332,7 @@ static func _build_hsv_list(operation: IWOperation, property: StringName) -> Con
 ## Left unwired here for the same reason the other four are: painting needs the
 ## preview, and only the dock can reach it.
 static func _build_brush_list(operation: IWOperation, property: StringName) -> Control:
-    var list := BrushList.new()
+    var list: Control = BrushListScene.instantiate()
     list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     list.setup(operation, property)
     return list
@@ -331,7 +341,7 @@ static func _build_brush_list(operation: IWOperation, property: StringName) -> C
 ## Left unwired here for the same reason the other five are: picking needs the
 ## preview, and only the dock can reach it.
 static func _build_exclude_tiles(operation: IWOperation, property: StringName) -> Control:
-    var list := ExcludeTilesList.new()
+    var list: Control = ExcludeTilesScene.instantiate()
     list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     list.setup(operation, property)
     return list
@@ -344,7 +354,7 @@ static func _build_exclude_tiles(operation: IWOperation, property: StringName) -
 ## [code]IWModelFolder.bind_download[/code].
 static func _build_model_folder(operation: IWOperation, property: StringName,
         setting: Dictionary) -> Control:
-    var field := ModelFolder.new()
+    var field: Control = ModelFolderScene.instantiate()
     field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     # The whole entry goes along either way: the control reads its label and where its model
     # can be fetched from off the schema, so a second operation with a different model needs

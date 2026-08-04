@@ -1,0 +1,24 @@
+[gd_scene format=3 uid="uid://iwhistview01"]
+
+[ext_resource type="Script" uid="uid://cgnt2st0q7t2i" path="res://addons/image_wrangler/ui/iw_history_view.gd" id="1_script"]
+
+[node name="HistoryView" type="VBoxContainer"]
+script = ExtResource("1_script")
+
+[node name="Title" type="Label" parent="."]
+layout_mode = 2
+text = "History"
+
+[node name="Hint" type="Label" parent="."]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+text = "Select an image to see its history."
+autowrap_mode = 3
+
+[node name="List" type="ItemList" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+allow_reselect = true

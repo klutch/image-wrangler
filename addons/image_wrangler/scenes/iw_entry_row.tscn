@@ -1,0 +1,45 @@
+[gd_scene format=3 uid="uid://iwentryrow01"]
+
+[node name="EntryRow" type="PanelContainer"]
+
+[node name="Line" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="Swatch" type="TextureRect" parent="Line"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(14, 14)
+layout_mode = 2
+stretch_mode = 3
+
+[node name="Text" type="Label" parent="Line"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 1
+text_overrun_behavior = 3
+
+[node name="Mode" type="OptionButton" parent="Line"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Subtract makes this area transparent.
+Add makes it opaque, whatever the keying decided —
+and wins wherever the two overlap."
+
+[node name="Check" type="CheckBox" parent="Line"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Include this entry. Unticked leaves it in the list but out of the result."
+
+[node name="Remove" type="Button" parent="Line"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Remove this entry."
+theme_override_colors/font_color = Color(1, 1, 1, 0.45)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+theme_override_colors/font_pressed_color = Color(1, 1, 1, 1)
+text = "✕"
+flat = true

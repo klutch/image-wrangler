@@ -1,0 +1,77 @@
+[gd_scene format=3 uid="uid://iwcolorlst01"]
+
+[ext_resource type="Script" uid="uid://cdld45umewrmt" path="res://addons/image_wrangler/ui/iw_color_list.gd" id="1_script"]
+[ext_resource type="Script" uid="uid://dni7ui0rrppd6" path="res://addons/image_wrangler/ui/iw_entry_list.gd" id="2_list"]
+
+[node name="ColorList" type="VBoxContainer"]
+script = ExtResource("1_script")
+
+[node name="Buttons" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="PickButton" type="Button" parent="Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Drag a region over the preview to take every color in it,
+or click once for a single pixel."
+toggle_mode = true
+text = "Pick"
+
+[node name="ClearButton" type="Button" parent="Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Remove every color for this image.
+An empty list keys nothing out from the border."
+text = "Clear"
+
+[node name="List" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 1
+script = ExtResource("2_list")
+
+[node name="Editor" type="HBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ColorButton" type="ColorPickerButton" parent="Editor"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(92, 24)
+layout_mode = 2
+tooltip_text = "The background color this entry keys out.
+The picker's eyedropper can sample it off the screen."
+edit_alpha = false
+
+[node name="MixedLabel" type="Label" parent="Editor"]
+unique_name_in_owner = true
+visible = false
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+tooltip_text = "The colors in this row have different tolerances.
+The slider shows one of them; moving it sets them all."
+text = "mixed"
+
+[node name="PicksToggle" type="Button" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "The colors this row keys out, each with a tolerance of its own."
+toggle_mode = true
+flat = true
+alignment = 0
+
+[node name="SamplesBox" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 1
+
+[node name="Hint" type="Label" parent="."]
+unique_name_in_owner = true
+visible = false
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 3

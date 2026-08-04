@@ -99,46 +99,35 @@ func setup(operation: IWOperation, property: StringName) -> void:
     _refresh()
 
 
+## The tree lives in scenes/iw_island_picker.tscn; this fetches it and wires it up.
+##
+## The tolerance slider is the one part still made here: [EditorSpinSlider] is an
+## editor-only class, so it cannot sit in a scene the user opens.
 func _build() -> void:
-    # The buttons come first so they sit flush under the group heading. This
-    # control has no title of its own — the settings form already provides one.
-    var buttons := HBoxContainer.new()
-    add_child(buttons)
+    if _list != null:
+        return
+    _pick_button = %PickButton
+    _mode_choice = %ModeChoice
+    _clear_button = %ClearButton
+    _list = %List
+    _editor = %Editor
+    _mixed_label = %MixedLabel
+    _picks_toggle = %PicksToggle
+    _picks_box = %PicksBox
+    _hint = %Hint
 
-    _pick_button = Button.new()
-    _pick_button.text = "Pick"
-    _pick_button.toggle_mode = true
-    _pick_button.tooltip_text = "Drag a rectangle over the preview to add that region to the list,\nor click once for a single pixel.\nPress H over the dock to show or hide the markers."
-    _pick_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _pick_button.toggled.connect(func(pressed: bool) -> void: pick_toggled.emit(pressed))
-    buttons.add_child(_pick_button)
-
-    _mode_choice = OptionButton.new()
     for option in IWAlphaMode.LABELS:
         _mode_choice.add_item(String(option))
     _mode_choice.selected = _next_mode
-    _mode_choice.focus_mode = Control.FOCUS_NONE
-    _mode_choice.tooltip_text = "What the next region picked will do: Subtract makes its area transparent,\nAdd makes it opaque. Press X over the dock to switch.\n\nOnly sets new regions. Change one already in the list from its own row."
     _mode_choice.item_selected.connect(_on_next_mode_selected)
-    buttons.add_child(_mode_choice)
-
-    _clear_button = Button.new()
-    _clear_button.text = "Clear"
-    _clear_button.tooltip_text = "Remove every region for this image."
     _clear_button.pressed.connect(_on_clear_pressed)
-    buttons.add_child(_clear_button)
 
-    _list = EntryList.new()
     _list.configure(true)
-    _list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _list.row_selected.connect(_on_row_selected)
     _list.enabled_toggled.connect(_on_enabled_toggled)
     _list.remove_requested.connect(_remove_entry)
     _list.mode_changed.connect(_on_mode_changed)
-    add_child(_list)
-
-    _editor = HBoxContainer.new()
-    add_child(_editor)
 
     _tolerance_slider = EditorSpinSlider.new()
     _tolerance_slider.label = "Tolerance"
@@ -149,33 +138,9 @@ func _build() -> void:
     _tolerance_slider.tooltip_text = "How far a pixel may drift from the color under a picked pixel and still be\npart of the region it floods.\n\nWrites every pixel in the highlighted region at once. Open Pixels below to\nset one of them on its own.\n\nIts own, not shared between regions: how clean one region is says nothing\nabout the one beside it. A new region starts on whatever the last one was\nset to."
     _tolerance_slider.value_changed.connect(_on_tolerance_changed)
     _editor.add_child(_tolerance_slider)
+    _editor.move_child(_tolerance_slider, 0)
 
-    _mixed_label = Label.new()
-    _mixed_label.text = "mixed"
-    _mixed_label.modulate = Color(1, 1, 1, 0.6)
-    _mixed_label.tooltip_text = "The pixels in this region have different tolerances.\nThe slider shows one of them; moving it sets them all."
-    _mixed_label.visible = false
-    _editor.add_child(_mixed_label)
-
-    _picks_toggle = Button.new()
-    _picks_toggle.toggle_mode = true
-    _picks_toggle.flat = true
-    _picks_toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
-    _picks_toggle.tooltip_text = "The pixels this region floods from, each with a tolerance of its own."
     _picks_toggle.toggled.connect(func(_pressed: bool) -> void: _rebuild_pick_rows())
-    _picks_toggle.visible = false
-    add_child(_picks_toggle)
-
-    _picks_box = VBoxContainer.new()
-    _picks_box.add_theme_constant_override("separation", 1)
-    _picks_box.visible = false
-    add_child(_picks_box)
-
-    _hint = Label.new()
-    _hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    _hint.modulate = Color(1, 1, 1, 0.6)
-    _hint.visible = false
-    add_child(_hint)
 
 
 ## Shows [param text] under the list, or gives the line back when it is empty.
