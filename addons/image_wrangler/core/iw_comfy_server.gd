@@ -59,7 +59,11 @@ signal info_ready(lists: Dictionary)
 ## which is most of a run until the pictures start coming back.
 signal progress(fraction: float, note: String)
 
-## Emitted when a run finishes, with one [Image] per picture made.
+## Emitted as each picture arrives, before the rest of the batch is made. [param index]
+## counts from zero.
+signal image_ready(image: Image, index: int, total: int)
+
+## Emitted when a whole batch finishes, with one [Image] per picture made.
 signal finished(images: Array)
 
 ## Emitted when a run could not be made or could not be finished. [param reason] is one
@@ -98,6 +102,11 @@ var _lists := {}
 
 ## The job in flight, so it can be taken back out of the queue. Empty between runs.
 var _prompt_id := ""
+
+## Which picture of the batch is being made, and how many there are. Used to work the
+## progress bar and its caption across the whole batch rather than one picture at a time.
+var _batch_index := 0
+var _batch_total := 1
 
 ## The socket the server pushes progress down, open only while a run is in flight.
 ##
@@ -352,15 +361,23 @@ func source_filename() -> String:
     return "%s_source.png" % _client_id()
 
 
-## Sends a graph and follows it to its end.
-##
-## [param source] is the picture the run starts from, or null for a run from noise. It goes
-## up first, under [method source_filename] — the name the graph must already be using.
-##
-## One run at a time. A second press while one is going is refused rather than queued: a
-## generation costs a minute of graphics card, and nobody asks for two by accident.
+## Sends one graph and follows it to its end. See [method submit_batch].
 func submit(graph: Dictionary, source: Image = null) -> void:
-    if _shutting_down or _state == State.RUNNING:
+    await submit_batch([graph], source)
+
+
+## Sends each graph in turn, one whole picture at a time.
+##
+## [param source] is the picture the runs start from, or null for runs from noise. It goes
+## up once, under [method source_filename] — the name the graphs must already be using.
+##
+## [b]One graph at a time rather than one job of many.[/b] It is what lets each picture be
+## handed over the moment it is made, and what lets each carry its own seed.
+##
+## One batch at a time. A second press while one is going is refused rather than queued: a
+## generation costs a minute of graphics card, and nobody asks for two by accident.
+func submit_batch(graphs: Array, source: Image = null) -> void:
+    if _shutting_down or _state == State.RUNNING or graphs.is_empty():
         return
     if _state == State.OFFLINE:
         failed.emit("Not connected to ComfyUI.")
@@ -369,6 +386,8 @@ func submit(graph: Dictionary, source: Image = null) -> void:
     _run_id += 1
     var run := _run_id
     _prompt_id = ""
+    _batch_index = 0
+    _batch_total = graphs.size()
     _last_life_msec = Time.get_ticks_msec()
     _set_state(State.RUNNING)
 
@@ -381,27 +400,64 @@ func submit(graph: Dictionary, source: Image = null) -> void:
             _end_run(upload_trouble)
             return
 
-    progress.emit(-1.0, "Sending the job")
-
-    # Opened before the job is sent rather than after, so the frames for its first steps
-    # are not lost to a handshake. It is loopback, so there is nothing to wait for.
+    # Opened before the first job is sent rather than after, so the frames for its first
+    # steps are not lost to a handshake. Held open for the whole batch.
     _open_socket()
 
+    var made: Array[Image] = []
+    for i in graphs.size():
+        _batch_index = i
+        progress.emit(_overall(0.0), "%sSending the job" % _batch_prefix())
+        var images: Variant = await _run_one(graphs[i], run)
+        if images == null:
+            # Already reported, or overtaken. Either way the batch is over.
+            return
+        for image: Image in images:
+            made.append(image)
+            image_ready.emit(image, made.size() - 1, _batch_total)
+
+    if made.is_empty():
+        _end_run("The batch finished but made no pictures.")
+        return
+
+    _prompt_id = ""
+    _close_socket()
+    _set_state(State.READY)
+    finished.emit(made)
+
+
+## One graph, start to finish. Null when it could not be finished, with the reason already
+## reported — the batch stops there rather than carrying on into the same wall.
+func _run_one(graph: Dictionary, run: int) -> Variant:
     var body := JSON.stringify({"prompt": graph, "client_id": _client_id()})
     var reply := await _send(_url + "/prompt", body, ASK_TIMEOUT)
     if _stale(run):
-        return
+        return null
     if not reply["ok"]:
         _end_run("Could not send the job. %s" % reply["note"])
-        return
+        return null
 
     var answer: Variant = reply["json"]
     if not (answer is Dictionary) or not (answer as Dictionary).has("prompt_id"):
         _end_run(_submit_refusal(answer))
-        return
+        return null
 
     _prompt_id = String((answer as Dictionary)["prompt_id"])
-    await _follow(_prompt_id, run)
+    return await _follow(_prompt_id, run)
+
+
+## Where a fraction of the picture being made sits across the whole batch.
+func _overall(within: float) -> float:
+    if _batch_total <= 1:
+        return within
+    return clampf((float(_batch_index) + within) / float(_batch_total), 0.0, 1.0)
+
+
+## Names which picture is being made, or empty when there is only one.
+func _batch_prefix() -> String:
+    if _batch_total <= 1:
+        return ""
+    return "Picture %d of %d — " % [_batch_index + 1, _batch_total]
 
 
 ## Stops the run in flight, at the server as well as here.
@@ -497,8 +553,8 @@ func _read_frame(text: String) -> void:
             if total <= 0.0:
                 return
             var value := float(data.get("value", 0.0))
-            progress.emit(clampf(value / total, 0.0, 1.0),
-                    "Step %d of %d" % [int(value), int(total)])
+            progress.emit(_overall(clampf(value / total, 0.0, 1.0)),
+                    "%sStep %d of %d" % [_batch_prefix(), int(value), int(total)])
         "executing":
             # A node of null is the graph reaching its end. Nothing is confirmed by it —
             # the picture is still fetched off /history, which is what actually says the run
@@ -517,24 +573,24 @@ func _read_frame(text: String) -> void:
 ##
 ## [b]The poll is what carries the run, whether or not the socket is up.[/b] All the socket
 ## does is move the bar and keep the watchdog quiet.
-func _follow(prompt_id: String, run: int) -> void:
-    progress.emit(-1.0, "Generating")
+func _follow(prompt_id: String, run: int) -> Variant:
+    progress.emit(_overall(0.0), "%sGenerating" % _batch_prefix())
     var misses := 0
 
     while true:
         await get_tree().create_timer(POLL_SECONDS).timeout
         if _stale(run):
-            return
+            return null
 
         var reply := await _ask("%s/history/%s" % [_url, prompt_id], ASK_TIMEOUT)
         if _stale(run):
-            return
+            return null
 
         if not reply["ok"]:
             misses += 1
             if misses >= POLL_FAILURES_ALLOWED:
                 _end_run("ComfyUI stopped answering. It may have run out of memory and closed — check its console.")
-                return
+                return null
             continue
         misses = 0
 
@@ -550,19 +606,20 @@ func _follow(prompt_id: String, run: int) -> void:
             if Time.get_ticks_msec() - _last_life_msec >= int(STALL_SECONDS * 1000.0):
                 _end_run("ComfyUI has said nothing for %d minutes. The run was let go — it may still be going, so check its console."
                         % int(STALL_SECONDS / 60.0))
-                return
+                return null
             continue
 
         var entry: Dictionary = (history as Dictionary)[prompt_id]
         var trouble := _run_trouble(entry)
         if not trouble.is_empty():
             _end_run(trouble)
-            return
+            return null
         var outputs: Dictionary = entry.get("outputs", {})
         if outputs.is_empty():
             continue
-        await _collect(outputs, run)
-        return
+        return await _collect(outputs, run)
+    # Never reached. The loop above only ends by returning, but the compiler cannot see it.
+    return null
 
 
 ## Why a finished run failed, or empty when it did not.
@@ -588,8 +645,8 @@ func _run_trouble(entry: Dictionary) -> String:
     return "The run failed, and ComfyUI did not say why."
 
 
-## Fetches every picture the run made.
-func _collect(outputs: Dictionary, run: int) -> void:
+## Fetches every picture one graph made, or null when it could not be finished.
+func _collect(outputs: Dictionary, run: int) -> Variant:
     var wanted := []
     for node_id in outputs:
         for entry in (outputs[node_id] as Dictionary).get("images", []):
@@ -600,16 +657,16 @@ func _collect(outputs: Dictionary, run: int) -> void:
 
     if wanted.is_empty():
         _end_run("The run finished but made no pictures.")
-        return
+        return null
 
-    var images := []
+    var images: Array[Image] = []
     var lost := 0
     for i in wanted.size():
-        progress.emit(float(i) / float(wanted.size()),
-                "Fetching %d of %d" % [i + 1, wanted.size()])
+        progress.emit(_overall(float(i) / float(wanted.size())),
+                "%sFetching %d of %d" % [_batch_prefix(), i + 1, wanted.size()])
         var image := await _fetch_image(wanted[i])
         if _stale(run):
-            return
+            return null
         if image == null:
             lost += 1
             continue
@@ -617,14 +674,15 @@ func _collect(outputs: Dictionary, run: int) -> void:
 
     if images.is_empty():
         _end_run("ComfyUI made the picture but would not hand it over.")
-        return
+        return null
 
     _prompt_id = ""
-    _close_socket()
-    _set_state(State.READY)
+    # Said rather than failed: some of it came down, and the rest of the batch is still to
+    # make. A failure here would stop everything over a picture that is already in hand.
     if lost > 0:
-        failed.emit("Got %d of %d pictures; the rest would not come down." % [images.size(), wanted.size()])
-    finished.emit(images)
+        progress.emit(-1.0, "Got %d of %d pictures; the rest would not come down."
+                % [images.size(), wanted.size()])
+    return images
 
 
 ## One picture off the server, or null.

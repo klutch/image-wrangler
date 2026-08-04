@@ -386,12 +386,19 @@ var _upscale: Upscale
 var _generate: IWGenerate
 var _comfy: IWComfyServer
 
-## What the last run made, and which of them the viewport is showing.
+## What the last batch made, one entry per picture, filled as they arrive.
 ##
 ## Kept rather than written straight out: a generation is asked for and then stands, the way
 ## a packed sheet does, and Save Current is what puts it on disk.
 var _generate_images: Array[Image] = []
-var _generate_index := 0
+
+## Those pictures laid out as one, which is what the viewport shows and what Save Current
+## writes. Null until the first of a batch arrives. See [method _rebuild_generate_sheet].
+var _generate_sheet: Image
+
+## How many the batch in flight was asked for, so the grid is the right size from the first
+## picture and does not jump about as the rest land.
+var _generate_batch_total := 1
 
 ## Whether a run is in flight. Its own flag rather than asking the server, because the
 ## button and the busy overlay both follow it and the server is null while the dock builds.
@@ -875,6 +882,7 @@ func _build_comfy() -> void:
     _comfy.state_changed.connect(_on_comfy_state)
     _comfy.info_ready.connect(_on_comfy_info)
     _comfy.progress.connect(_on_comfy_progress)
+    _comfy.image_ready.connect(_on_comfy_image_ready)
     _comfy.finished.connect(_on_comfy_finished)
     _comfy.failed.connect(_on_comfy_failed)
     _comfy.cancelled.connect(_on_comfy_cancelled)
@@ -5031,11 +5039,52 @@ func _update_pivot_overlay() -> void:
 
 # --- Generate ------------------------------------------------------------
 
-## The picture of the last run, or null.
+## What the last batch made, laid out as one picture, or null.
 func _current_generate_image() -> Image:
-    if _generate_index < 0 or _generate_index >= _generate_images.size():
-        return null
-    return _generate_images[_generate_index]
+    return _generate_sheet
+
+
+## Lays the batch out as one picture, so every result is on screen at once.
+##
+## [param total] is how many are still to come, so the grid is sized for the whole batch
+## from the first picture rather than growing under it.
+func _rebuild_generate_sheet(total: int) -> void:
+    if _generate_images.is_empty():
+        _generate_sheet = null
+        return
+
+    # One cell fits the largest of them. They are all made at one size, so this is a guard
+    # rather than a layout — a stray size must not shift the row it is in.
+    var cell := Vector2i.ZERO
+    for image: Image in _generate_images:
+        cell.x = maxi(cell.x, image.get_width())
+        cell.y = maxi(cell.y, image.get_height())
+
+    var grid := _generate_grid(maxi(total, _generate_images.size()))
+    var sheet := Image.create_empty(grid.x * cell.x, grid.y * cell.y, false,
+            Image.FORMAT_RGBA8)
+    # Transparent, so the cells still to be filled read as waiting rather than as black.
+    sheet.fill(Color(0, 0, 0, 0))
+    for i in _generate_images.size():
+        var image: Image = _generate_images[i]
+        var at := Vector2i(i % grid.x, i / grid.x) * cell
+        at += (cell - image.get_size()) / 2
+        sheet.blit_rect(image, Rect2i(Vector2i.ZERO, image.get_size()), at)
+    _generate_sheet = sheet
+
+
+## How many across and down to hold [param count] pictures.
+##
+## Grows wide, then tall, then wide again, so the grid stays as square as it can and a batch
+## of four is a square rather than a strip.
+func _generate_grid(count: int) -> Vector2i:
+    var grid := Vector2i.ONE
+    while grid.x * grid.y < count:
+        if grid.x == grid.y:
+            grid.x += 1
+        else:
+            grid.y += 1
+    return grid
 
 
 ## What the Generate tab's viewport shows.
@@ -5248,22 +5297,49 @@ func _on_comfy_progress(fraction: float, note: String) -> void:
     _set_generate_status(note)
 
 
+## Takes one picture of a batch, before the rest are made.
+##
+## The grid is rebuilt and shown each time, so a long batch fills in under you rather than
+## arriving all at once at the end.
+func _on_comfy_image_ready(image: Image, index: int, total: int) -> void:
+    # Back to the size it came from, whatever the server was asked to work at.
+    if _generate_source_size != Vector2i.ZERO and image.get_size() != _generate_source_size:
+        image.resize(_generate_source_size.x, _generate_source_size.y,
+                Image.INTERPOLATE_LANCZOS)
+    # A PNG with nothing transparent in it comes back without an alpha channel, and blit_rect
+    # wants the sheet's format.
+    if image.get_format() != Image.FORMAT_RGBA8:
+        image.convert(Image.FORMAT_RGBA8)
+
+    if index < _generate_images.size():
+        _generate_images[index] = image
+    else:
+        _generate_images.append(image)
+    _generate_batch_total = maxi(total, _generate_batch_total)
+    _rebuild_generate_sheet(_generate_batch_total)
+
+    if _mode == Mode.GENERATE and _preview != null:
+        _update_preview_texture()
+        # Only the first, which is what sets the grid's size. Fitting again on every arrival
+        # would take the view back off anything being looked at.
+        if index == 0:
+            _preview.fit_to_view()
+    _update_controls()
+
+
 func _on_comfy_finished(images: Array) -> void:
     _generate_running = false
     if _preview != null:
         _preview.set_busy(false)
-    # Back to the size it came from, whatever the server was asked to work at.
-    if _generate_source_size != Vector2i.ZERO:
-        for image: Image in images:
-            if image.get_size() != _generate_source_size:
-                image.resize(_generate_source_size.x, _generate_source_size.y,
-                        Image.INTERPOLATE_LANCZOS)
-    _generate_images.assign(images)
-    _generate_index = 0
     var made := _current_generate_image()
-    if made != null:
-        _set_generate_status("Made %d x %d." % [made.get_width(), made.get_height()])
-        _set_status("Generated %d x %d." % [made.get_width(), made.get_height()])
+    if made != null and not images.is_empty():
+        var first: Image = images[0]
+        var note := "Made %d x %d." % [first.get_width(), first.get_height()]
+        if images.size() > 1:
+            note = "Made %d pictures, %d x %d each." % [images.size(),
+                    first.get_width(), first.get_height()]
+        _set_generate_status(note)
+        _set_status(note)
     # The viewport only follows if this tab is up. Coming back to it runs this again, so
     # nothing is lost by leaving another tab's picture alone.
     if _mode == Mode.GENERATE:
@@ -5349,12 +5425,25 @@ func _run_generate() -> void:
         SettingsBuilder.refresh_values(_generate, _generate_box)
         _schedule_generate_save()
 
+    # One graph per picture, each with its own seed, so any one of them can be made again on
+    # its own. See IWComfyServer.submit_batch for why they are not one job of many.
+    var source_name := _comfy.source_filename() if source != null else ""
+    var count := clampi(settings.batch, IWGenerate.MIN_BATCH, IWGenerate.MAX_BATCH)
+    var graphs := []
+    for i in count:
+        # Wrapped, so a seed near the top still gives numbers the form can hold — a picture
+        # whose seed cannot be typed back in cannot be made again.
+        var each := wrapi(seed_value + i, 0, IWComfyGraph.MAX_SEED + 1)
+        graphs.append(IWComfyGraph.build(settings, each, source_name))
+
+    _generate_images.clear()
+    _generate_sheet = null
+    _generate_batch_total = count
     _generate_running = true
     if _preview != null:
         _preview.set_busy(true)
     _update_controls()
-    var source_name := _comfy.source_filename() if source != null else ""
-    _comfy.submit(IWComfyGraph.build(settings, seed_value, source_name), source)
+    _comfy.submit_batch(graphs, source)
 
 
 ## The highlighted image with its stack applied, scaled to what the server works at, or

@@ -44,6 +44,10 @@ extends Resource
 ## [member seed], so the picture on screen can always be made again.
 @export var randomize_seed: bool = true
 
+## How many pictures one press makes. The nth uses [member seed] plus n, so every one of
+## them can be made again on its own.
+@export var batch: int = 1
+
 ## Whether the run starts from the highlighted image, with its stack applied, rather than
 ## from noise. [member denoise] decides how much of it survives.
 @export var use_source: bool = false

@@ -20,6 +20,10 @@ const MAX_SIZE := 4096
 const MIN_STEPS := 1
 const MAX_STEPS := 150
 
+## How many pictures one press may make. Capped because each one is a whole generation.
+const MIN_BATCH := 1
+const MAX_BATCH := 10
+
 ## The largest useful guidance. ComfyUI allows a hundred; past about twenty the picture is
 ## burnt, and a slider that spends most of its travel in the ruined part is no use.
 const MAX_CFG := 30.0
@@ -194,6 +198,16 @@ func get_settings_schema() -> Array[Dictionary]:
             "step": 1,
             "group": "Sampling",
             "tooltip": "The number the noise is made from.\n\nThe same seed with the same settings gives the same picture back. Change one\nword of the description and it will not.",
+        },
+        {
+            "property": &"batch",
+            "label": "Pictures",
+            "type": SettingType.INT,
+            "min": MIN_BATCH,
+            "max": MAX_BATCH,
+            "step": 1,
+            "group": "Picture",
+            "tooltip": "How many to make from one press.\n\nEach uses the seed above plus its own number, so any one of them can be made\nagain on its own. They are made one at a time and appear in a grid as they\narrive.\n\nEvery one costs what a single picture costs, so ten is ten times the wait.",
         },
         {
             "property": &"use_source",
