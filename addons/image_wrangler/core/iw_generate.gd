@@ -22,7 +22,7 @@ const MAX_STEPS := 150
 
 ## How many pictures one press may make. Capped because each one is a whole generation.
 const MIN_BATCH := 1
-const MAX_BATCH := 10
+const MAX_BATCH := 64
 
 ## The largest useful guidance. ComfyUI allows a hundred; past about twenty the picture is
 ## burnt, and a slider that spends most of its travel in the ruined part is no use.
@@ -201,19 +201,19 @@ func get_settings_schema() -> Array[Dictionary]:
         },
         {
             "property": &"batch",
-            "label": "Pictures",
+            "label": "Number of Images",
             "type": SettingType.INT,
             "min": MIN_BATCH,
             "max": MAX_BATCH,
             "step": 1,
-            "group": "Picture",
-            "tooltip": "How many to make from one press.\n\nEach uses the seed above plus its own number, so any one of them can be made\nagain on its own. They are made one at a time and appear in a grid as they\narrive.\n\nEvery one costs what a single picture costs, so ten is ten times the wait.",
+            "group": "Batches",
+            "tooltip": "How many to make from one press.\n\nEach uses the seed above plus its own number, so any one of them can be made\nagain on its own. They are made one at a time and appear in a grid as they\narrive.\n\nEvery one costs what a single picture costs, so a large number is a long wait.",
         },
         {
             "property": &"use_source",
             "label": "Start From Selected Image",
             "type": SettingType.BOOL,
-            "group": "Picture",
+            "group": "Batches",
             "tooltip": "Starts the run from the highlighted image instead of from nothing.\n\nIt is sent with its stack already applied, so what goes over is what the other\ntabs show. The result comes back at the size it went in at, whatever the two\nboxes below say.",
         },
         {
@@ -223,7 +223,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "min": 0.0,
             "max": 1.0,
             "step": 0.01,
-            "group": "Picture",
+            "group": "Batches",
             "shown_when": &"use_source",
             "shown_values": [true],
             "tooltip": "How much of the original is thrown away.\n\nAround 0.4 keeps the layout and repaints the surface. Past about 0.8 there is\nlittle of the original left, and at 1 there is none.",
@@ -235,7 +235,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "min": MIN_SIZE,
             "max": MAX_SIZE,
             "step": IWComfyGraph.SIZE_STEP,
-            "group": "Picture",
+            "group": "Batches",
             "tooltip": "How wide the picture is, in pixels.\n\nRounded down to a multiple of %d. Models are trained at a size — around 512 for\nthe older ones, 1024 for SDXL — and asking for much more than that gives you\nthe same picture twice in one frame rather than more detail.\n\nStarting from a selected image, this is only the size the server works at: the\nsource is scaled to it on the way over and the result is put back on the way\nhome." % IWComfyGraph.SIZE_STEP,
         },
         {
@@ -245,7 +245,7 @@ func get_settings_schema() -> Array[Dictionary]:
             "min": MIN_SIZE,
             "max": MAX_SIZE,
             "step": IWComfyGraph.SIZE_STEP,
-            "group": "Picture",
+            "group": "Batches",
             "tooltip": "How tall the picture is, in pixels.\n\nRounded down to a multiple of %d, for the reason the width is." % IWComfyGraph.SIZE_STEP,
         },
     ]

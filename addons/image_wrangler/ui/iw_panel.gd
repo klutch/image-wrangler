@@ -393,8 +393,12 @@ var _comfy: IWComfyServer
 var _generate_images: Array[Image] = []
 
 ## Those pictures laid out as one, which is what the viewport shows and what Save Current
-## writes. Null until the first of a batch arrives. See [method _rebuild_generate_sheet].
+## writes. Null until the first of a batch arrives. See [method _place_generate_image].
 var _generate_sheet: Image
+
+## The cell that sheet was laid out with, so a picture can be dropped into it without the
+## whole thing being made again.
+var _generate_cell := Vector2i.ZERO
 
 ## How many the batch in flight was asked for, so the grid is the right size from the first
 ## picture and does not jump about as the rest land.
@@ -5044,33 +5048,55 @@ func _current_generate_image() -> Image:
     return _generate_sheet
 
 
-## Lays the batch out as one picture, so every result is on screen at once.
+## Puts one picture into the sheet.
 ##
-## [param total] is how many are still to come, so the grid is sized for the whole batch
-## from the first picture rather than growing under it.
+## [b]The sheet is made once, sized for the whole batch, and each picture dropped into its
+## own cell.[/b] Laying the whole thing out again per arrival would be square work, and a
+## batch can be sixty-four pictures.
+func _place_generate_image(index: int, total: int) -> void:
+    if index < 0 or index >= _generate_images.size():
+        return
+    var image: Image = _generate_images[index]
+    var grid := _generate_grid(maxi(total, _generate_images.size()))
+    # Every cell moves if one arrives larger than the sheet was built for, or if the grid
+    # itself grew. All of a batch are one size, so neither is expected.
+    if _generate_sheet == null or image.get_width() > _generate_cell.x \
+            or image.get_height() > _generate_cell.y \
+            or _generate_sheet.get_size() != grid * _generate_cell:
+        _rebuild_generate_sheet(total)
+        return
+    _blit_generate_cell(image, index, grid)
+
+
+## Lays the whole batch out again, sized for [param total] so the grid does not grow under
+## the pictures still to come.
 func _rebuild_generate_sheet(total: int) -> void:
     if _generate_images.is_empty():
         _generate_sheet = null
+        _generate_cell = Vector2i.ZERO
         return
 
     # One cell fits the largest of them. They are all made at one size, so this is a guard
     # rather than a layout — a stray size must not shift the row it is in.
-    var cell := Vector2i.ZERO
+    _generate_cell = Vector2i.ZERO
     for image: Image in _generate_images:
-        cell.x = maxi(cell.x, image.get_width())
-        cell.y = maxi(cell.y, image.get_height())
+        _generate_cell.x = maxi(_generate_cell.x, image.get_width())
+        _generate_cell.y = maxi(_generate_cell.y, image.get_height())
 
     var grid := _generate_grid(maxi(total, _generate_images.size()))
-    var sheet := Image.create_empty(grid.x * cell.x, grid.y * cell.y, false,
-            Image.FORMAT_RGBA8)
+    _generate_sheet = Image.create_empty(grid.x * _generate_cell.x,
+            grid.y * _generate_cell.y, false, Image.FORMAT_RGBA8)
     # Transparent, so the cells still to be filled read as waiting rather than as black.
-    sheet.fill(Color(0, 0, 0, 0))
+    _generate_sheet.fill(Color(0, 0, 0, 0))
     for i in _generate_images.size():
-        var image: Image = _generate_images[i]
-        var at := Vector2i(i % grid.x, i / grid.x) * cell
-        at += (cell - image.get_size()) / 2
-        sheet.blit_rect(image, Rect2i(Vector2i.ZERO, image.get_size()), at)
-    _generate_sheet = sheet
+        _blit_generate_cell(_generate_images[i], i, grid)
+
+
+## Paints one picture into its cell, centred in case it is smaller than the rest.
+func _blit_generate_cell(image: Image, index: int, grid: Vector2i) -> void:
+    var at := Vector2i(index % grid.x, index / grid.x) * _generate_cell
+    at += (_generate_cell - image.get_size()) / 2
+    _generate_sheet.blit_rect(image, Rect2i(Vector2i.ZERO, image.get_size()), at)
 
 
 ## How many across and down to hold [param count] pictures.
@@ -5316,7 +5342,7 @@ func _on_comfy_image_ready(image: Image, index: int, total: int) -> void:
     else:
         _generate_images.append(image)
     _generate_batch_total = maxi(total, _generate_batch_total)
-    _rebuild_generate_sheet(_generate_batch_total)
+    _place_generate_image(index, _generate_batch_total)
 
     if _mode == Mode.GENERATE and _preview != null:
         _update_preview_texture()
@@ -5438,6 +5464,7 @@ func _run_generate() -> void:
 
     _generate_images.clear()
     _generate_sheet = null
+    _generate_cell = Vector2i.ZERO
     _generate_batch_total = count
     _generate_running = true
     if _preview != null:
