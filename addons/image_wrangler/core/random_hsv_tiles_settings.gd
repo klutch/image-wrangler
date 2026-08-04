@@ -27,11 +27,12 @@ extends Resource
 ## arrived at.
 @export var saturation_amount: float = 1.0
 
-## How far each island's lightness is allowed to wander, as a share either way.
+## The far end each island's lightness may be pulled towards, as a multiplier.
 ##
-## At 1 an island can come out anywhere between black and twice as bright. Starts at 0, so
-## nothing moves until it is asked for.
-@export var value_amount: float = 0.0
+## Reads the same way as [HSVAdjust]'s value slider, only picked at random per island. At 1
+## nothing moves. At 0 an island can come out anywhere down to black; at 3, anywhere up to
+## three times as bright.
+@export var value_amount: float = 1.0
 
 
 ## A copy that belongs to no image. Nothing here is a coordinate and nothing is a nested

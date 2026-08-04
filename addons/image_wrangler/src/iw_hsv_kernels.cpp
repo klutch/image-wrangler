@@ -285,11 +285,11 @@ PackedInt32Array IWStageKernels::random_hsv_tiles(const Ref<IWPipelineContext> &
     // Each island's three numbers, drawn from the seed and its own index. Worked out once
     // per island rather than per pixel, and clamped here so a hand-edited file cannot ask
     // for a hue that wraps twice.
-    // Hue and value reach either way from where they are; saturation reaches one way, from
-    // no change towards whatever end was asked for.
+    // Hue reaches either way from where it is. Saturation and value reach one way, from no
+    // change towards whatever end was asked for.
     const double hue_reach = iw::clampf(hue_amount, 0.0, 1.0) * 0.5;
     const double sat_end = iw::clampf(saturation_amount, 0.0, 2.0);
-    const double val_reach = iw::clampf(value_amount, 0.0, 1.0);
+    const double val_end = iw::clampf(value_amount, 0.0, 3.0);
     const uint64_t root = mix64(static_cast<uint64_t>(rng_seed));
     std::vector<double> turn(static_cast<size_t>(island_count), 0.0);
     std::vector<double> sat_scale(static_cast<size_t>(island_count), 1.0);
@@ -298,7 +298,7 @@ PackedInt32Array IWStageKernels::random_hsv_tiles(const Ref<IWPipelineContext> &
         const uint64_t key = root + static_cast<uint64_t>(n) * 3;
         turn[n] = signed_unit(mix64(key)) * hue_reach;
         sat_scale[n] = 1.0 + unit(mix64(key + 1)) * (sat_end - 1.0);
-        val_scale[n] = 1.0 + signed_unit(mix64(key + 2)) * val_reach;
+        val_scale[n] = 1.0 + unit(mix64(key + 2)) * (val_end - 1.0);
     }
 
     const double to_unit = 1.0 / 255.0;

@@ -120,9 +120,9 @@ func get_settings_schema() -> Array[Dictionary]:
             "label": "Value",
             "type": SettingType.FLOAT,
             "min": 0.0,
-            "max": 1.0,
+            "max": 3.0,
             "step": 0.01,
-            "tooltip": "How far each object's lightness is allowed to wander, either way.\n\nAt 1 an object can come out anywhere between black and twice as bright.\nAnything already at full brightness stays there.",
+            "tooltip": "The far end each object's lightness may be pulled towards, as a multiplier.\n\nAt 1 nothing moves. At 0 an object can come out anywhere down to black; at 3,\nanywhere up to three times as bright. Anything already at full brightness\nstays there.",
         },
     ]
 
@@ -152,7 +152,7 @@ func prerequisite_note(ctx: IWPipelineContext) -> String:
 
 func process_context(ctx: IWPipelineContext) -> void:
     if is_zero_approx(settings.hue_amount) and is_equal_approx(settings.saturation_amount, 1.0) \
-            and is_zero_approx(settings.value_amount):
+            and is_equal_approx(settings.value_amount, 1.0):
         return
     if not report_progress(0.05):
         return
