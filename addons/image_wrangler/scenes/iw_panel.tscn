@@ -428,12 +428,6 @@ minute and a graphics card, so it happens only when asked. Refresh asks too.
 While one is going this stops it, as does Escape."
 text = "Generate"
 
-[node name="GenerateStatus" type="Label" parent="RightSplit/OperationColumn/Modes/Generate/GenerateColumn"]
-unique_name_in_owner = true
-modulate = Color(1, 1, 1, 0.6)
-layout_mode = 2
-autowrap_mode = 3
-
 [node name="OutputSeparator" type="HSeparator" parent="RightSplit/OperationColumn"]
 layout_mode = 2
 

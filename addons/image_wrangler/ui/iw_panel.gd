@@ -672,10 +672,10 @@ var _pivot_editing := false
 ## in does not hand it straight back.
 var _arming_pivots := false
 var _upscale_box: VBoxContainer
-## The Generate tab's form, the button that starts a run, and the line under both.
+## The Generate tab's form and the button that starts a run. What either has to say goes
+## to the main status label, like every other tab.
 var _generate_box: VBoxContainer
 var _generate_button: Button
-var _generate_status: Label
 ## The address of the server, and what it last said about itself.
 var _comfy_url_edit: LineEdit
 var _comfy_status: Label
@@ -694,6 +694,10 @@ var _comfy_stop_toggle: CheckBox
 ## Set from Start until the server answers, or Cancel is pressed. What holds the loading
 ## overlay up — a failed start leaves it set, so what was printed stays readable.
 var _comfy_waiting := false
+
+## Set while the Model group's Refresh waits on the server's answer. Local answers land
+## inside the overlay's fade and show nothing; a remote server's slowness shows a spinner.
+var _comfy_refreshing := false
 ## Says how the last upscale went, or why it could not run at all.
 var _upscale_status: Label
 ## Says what the selected model is for, sitting under its dropdown.
@@ -1449,7 +1453,6 @@ func _forget_controls() -> void:
     # The controls only. _comfy and _generate outlive a rebuild, like _upscale does.
     _generate_box = null
     _generate_button = null
-    _generate_status = null
     _comfy_url_edit = null
     _comfy_status = null
     _comfy_address_row = null
@@ -1926,7 +1929,6 @@ func _bind_generate_page(chrome: Control) -> void:
     # the one that stops it, and a dead Generate sitting beside it says nothing.
     _generate_button = chrome.get_node("%GenerateButton")
     _generate_button.pressed.connect(_on_generate_pressed)
-    _generate_status = chrome.get_node("%GenerateStatus")
 
 
 func _on_tab_changed(tab: int) -> void:
@@ -4713,20 +4715,6 @@ func _forget_generate_preview() -> void:
     _generate_preview_of = null
 
 
-func _set_generate_status(text: String) -> void:
-    if _generate_status != null:
-        _generate_status.text = text
-
-
-## Says why a run will not start, in both places.
-##
-## The tab's own line is dim and easily missed, and a press that looks ignored is worse than
-## a noisy one.
-func _refuse_generate(note: String) -> void:
-    _set_generate_status(note)
-    _set_status(note)
-
-
 ## Says where the server is and what it said, under the address row.
 func _refresh_comfy_status() -> void:
     if _comfy_status == null:
@@ -4762,7 +4750,7 @@ func _on_comfy_connect() -> void:
     if _comfy == null:
         return
     _store_comfy_url()
-    _set_generate_status("Asking %s what it has." % _comfy.url())
+    _set_status("Asking %s what it has." % _comfy.url())
     _comfy.probe()
 
 
@@ -4854,13 +4842,13 @@ func _on_comfy_start() -> void:
             _preview.clear_busy_log()
         _refresh_generate_busy()
         _update_controls()
-        _refuse_generate("Stopped waiting for ComfyUI.")
+        _set_status("Stopped waiting for ComfyUI.")
         return
     # The typed folder counts even if focus never left the box, so pressing Start straight
     # after typing does what it looks like it does.
     _store_comfy_root()
     _store_comfy_url()
-    _set_generate_status("Starting ComfyUI.")
+    _set_status("Starting ComfyUI.")
     _comfy.start(IWAddonSettings.comfy_root())
 
 
@@ -4868,7 +4856,7 @@ func _on_comfy_stop() -> void:
     if _comfy == null:
         return
     _comfy.stop()
-    _set_generate_status("Stopped ComfyUI.")
+    _set_status("Stopped ComfyUI.")
 
 
 ## Puts Refresh at the foot of the Model group, for models added while the server was up.
@@ -4888,9 +4876,14 @@ func _add_model_refresh_button() -> void:
 
 
 func _on_comfy_refresh_models() -> void:
-    if _comfy == null:
+    # Matches what refresh_lists itself stands down for, or the flag would raise an
+    # overlay no answer is coming to lower.
+    if _comfy == null or _comfy.is_running() \
+            or _comfy.state() == ComfyServer.State.STARTING:
         return
-    _set_generate_status("Asking the server what it has.")
+    _set_status("Asking the server what it has.")
+    _comfy_refreshing = true
+    _refresh_generate_busy()
     _comfy.refresh_lists()
 
 
@@ -4938,9 +4931,11 @@ func _on_comfy_state(state: int) -> void:
 func _refresh_generate_busy() -> void:
     if _mode != Mode.GENERATE or _preview == null:
         return
-    _preview.set_busy(_generate_running or _comfy_waiting)
+    _preview.set_busy(_generate_running or _comfy_waiting or _comfy_refreshing)
     if _comfy_waiting:
         _preview.set_stage_progress(0.0, STARTING_CAPTION)
+    elif _comfy_refreshing and not _generate_running:
+        _preview.set_stage_progress(0.0, "Refreshing Models")
 
 
 ## Takes the lists the server offered and puts them in the dropdowns.
@@ -4948,6 +4943,8 @@ func _refresh_generate_busy() -> void:
 ## Refilled rather than rebuilt: the lists land a moment after the tab is opened, which is
 ## exactly when somebody may be typing a description.
 func _on_comfy_info(lists: Dictionary) -> void:
+    _comfy_refreshing = false
+    _refresh_generate_busy()
     if _generate == null:
         return
     _generate.set_catalogue(lists)
@@ -4956,9 +4953,15 @@ func _on_comfy_info(lists: Dictionary) -> void:
     _refresh_comfy_status()
     _update_controls()
     if _generate.checkpoints.is_empty():
-        _set_generate_status("The server has no checkpoints. Put one in ComfyUI's models/checkpoints folder and press Connect again.")
+        _set_status("The server has no checkpoints. Put one in ComfyUI's models/checkpoints folder and press Connect again.")
     else:
-        _set_generate_status("")
+        # Said rather than cleared, so a press of Refresh visibly lands even when the
+        # answer comes back faster than the overlay can fade in.
+        var checkpoints: int = lists.get("checkpoints", []).size()
+        var loras: int = lists.get("loras", []).size()
+        _set_status("Found %d %s and %d %s." % [
+                checkpoints, "checkpoint" if checkpoints == 1 else "checkpoints",
+                loras, "LoRA" if loras == 1 else "LoRAs"])
     # Picking the first checkpoint counts as a change worth keeping.
     _schedule_generate_save()
 
@@ -4982,7 +4985,10 @@ func _on_comfy_progress(overall: float, step: float, note: String) -> void:
         if _comfy_waiting:
             caption = STARTING_CAPTION
         _preview.set_stage_progress(maxf(step, 0.0), caption)
-    _set_generate_status(note)
+    # Only while the tab is up. A run left going in the background must not write over
+    # whatever another tab is saying, once a second, for a minute.
+    if _mode == Mode.GENERATE:
+        _set_status(note)
 
 
 ## Takes one picture of a batch, before the rest are made.
@@ -5026,7 +5032,6 @@ func _on_comfy_finished(images: Array) -> void:
         if images.size() > 1:
             note = "Made %d pictures, %d x %d each." % [images.size(),
                     first.get_width(), first.get_height()]
-        _set_generate_status(note)
         _set_status(note)
     # The viewport only follows if this tab is up. Coming back to it runs this again, so
     # nothing is lost by leaving another tab's picture alone.
@@ -5039,13 +5044,14 @@ func _on_comfy_finished(images: Array) -> void:
 
 
 func _on_comfy_failed(reason: String) -> void:
+    # A refresh that went through probe reports here rather than through info_ready.
+    _comfy_refreshing = false
     _end_generate_run(reason)
 
 
 ## Nothing went wrong, so nothing is said beyond the fact that it stopped.
 func _on_comfy_cancelled() -> void:
-    _end_generate_run("Stopped.")
-    _set_status("Generation stopped.")
+    _end_generate_run("Generation stopped.")
 
 
 ## The one button: makes a picture, or stops the one being made.
@@ -5067,7 +5073,7 @@ func _cancel_generate() -> void:
     _comfy.cancel()
 
 
-## Puts the tab back to not-running, with [param note] on its status line.
+## Puts the tab back to not-running, with [param note] on the status label.
 func _end_generate_run(note: String) -> void:
     _generate_running = false
     # Through the refresh rather than set_busy(false): a failed start reports through
@@ -5076,7 +5082,10 @@ func _end_generate_run(note: String) -> void:
         _refresh_generate_busy()
     elif _preview != null:
         _preview.set_busy(false)
-    _set_generate_status(note)
+    # An ending with nothing to say leaves the label alone rather than wiping what
+    # another tab put there.
+    if not note.is_empty():
+        _set_status(note)
     _refresh_comfy_status()
     _update_controls()
 
@@ -5086,15 +5095,15 @@ func _run_generate() -> void:
     if _generate == null or _comfy == null:
         return
     if _generate_running:
-        _refuse_generate("A generation is already going. Press Cancel to stop it.")
+        _set_status("A generation is already going. Press Cancel to stop it.")
         return
     if _comfy.state() == ComfyServer.State.OFFLINE:
-        _refuse_generate("Not connected to ComfyUI. Set the address above and press Connect.")
+        _set_status("Not connected to ComfyUI. Set the address above and press Connect.")
         return
     var settings: IWGenerateSettings = _generate.get_settings()
     var trouble := IWComfyGraph.trouble(settings, _source_image != null)
     if not trouble.is_empty():
-        _refuse_generate(trouble)
+        _set_status(trouble)
         return
 
     # Before the seed is drawn, so a source that could not be read costs nothing.
@@ -5104,7 +5113,7 @@ func _run_generate() -> void:
     if settings.use_source:
         source = _generate_source(settings)
         if source == null:
-            _refuse_generate("Could not process %s to send." % _current_path().get_file())
+            _set_status("Could not process %s to send." % _current_path().get_file())
             return
         _generate_source_of = _source_image
 
@@ -5188,7 +5197,6 @@ func _write_generated_image(destination: String) -> void:
         _set_status("Could not write %s." % destination.get_file())
         return
     _set_status("Saved %s." % destination.get_file())
-    _set_generate_status("Saved %s." % destination.get_file())
     if Engine.is_editor_hint():
         EditorInterface.get_resource_filesystem().scan()
 
