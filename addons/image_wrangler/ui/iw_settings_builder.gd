@@ -41,6 +41,10 @@ const META_SHOWN_VALUES := &"iw_shown_values"
 ## Where a readout keeps the name of the settings method that produces its line.
 const META_TEXT_FROM := &"iw_text_from"
 
+## Marks the box holding a named group's controls, so a caller can reach a whole group
+## again without keeping a reference to it. See [method set_group_enabled].
+const META_GROUP := &"iw_group"
+
 ## Where a string dropdown keeps the values behind its rows, so a refill can find where a
 ## stored string now sits. Its presence is also what tells a refresh which kind of dropdown
 ## it is looking at.
@@ -214,8 +218,57 @@ static func begin_group(container: Container, title: String, collapsed: bool,
 
     var body := VBoxContainer.new()
     body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    body.set_meta(META_GROUP, title)
     indent.add_child(body)
     return body
+
+
+## Turns every control under the group headed [param title] on or off.
+##
+## For a group that cannot mean anything yet — the model lists before a server has said what
+## it has. Dead rather than hidden, so the tab keeps its shape and the rows read as waiting
+## rather than appearing out of nowhere once they fill.
+##
+## The heading is left alone, so a group can still be folded away while it is switched off.
+static func set_group_enabled(container: Node, title: String, enabled: bool) -> void:
+    var body := _find_group(container, title)
+    if body == null:
+        return
+    body.modulate = Color(1.0, 1.0, 1.0, 1.0 if enabled else 0.5)
+    _enable_into(body, enabled)
+
+
+static func _find_group(node: Node, title: String) -> Control:
+    for child in node.get_children():
+        if child is Control and child.has_meta(META_GROUP) \
+                and String(child.get_meta(META_GROUP)) == title:
+            return child as Control
+        var found := _find_group(child, title)
+        if found != null:
+            return found
+    return null
+
+
+## Sets whatever each control calls being switched off.
+##
+## The property differs by class — buttons have [code]disabled[/code], text boxes have
+## [code]editable[/code], [EditorSpinSlider] has [code]read_only[/code] — so each is taken
+## by type rather than assumed. A control that switches itself off is asked to and then left
+## alone, since reaching inside one would fight what it does for its own children.
+static func _enable_into(node: Node, enabled: bool) -> void:
+    for child in node.get_children():
+        if child is Control and child.has_method(&"set_controls_enabled"):
+            child.call(&"set_controls_enabled", enabled)
+            continue
+        if child is BaseButton:
+            (child as BaseButton).disabled = not enabled
+        elif child is LineEdit:
+            (child as LineEdit).editable = enabled
+        elif child is TextEdit:
+            (child as TextEdit).editable = enabled
+        elif child is EditorSpinSlider:
+            (child as EditorSpinSlider).read_only = not enabled
+        _enable_into(child, enabled)
 
 
 ## Points the heading's disclosure arrow at its current fold state.

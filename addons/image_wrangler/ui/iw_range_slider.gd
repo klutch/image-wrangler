@@ -38,6 +38,10 @@ var _dragging := -1
 var _keyed := 0
 var _hover := -1
 
+## Whether this answers the pointer at all. Named to match what the settings form asks of a
+## control it is switching off.
+var _interactive := true
+
 
 func _init() -> void:
     focus_mode = Control.FOCUS_CLICK
@@ -64,6 +68,16 @@ func get_span() -> Vector2:
 func set_span(at: Vector2) -> void:
     low = clampf(minf(at.x, at.y), min_value, max_value)
     high = clampf(maxf(at.x, at.y), min_value, max_value)
+    queue_redraw()
+
+
+## Turns the grabbers on or off, for a group the form has switched off.
+func set_controls_enabled(enabled: bool) -> void:
+    _interactive = enabled
+    focus_mode = Control.FOCUS_CLICK if enabled else Control.FOCUS_NONE
+    if not enabled:
+        _dragging = -1
+        _hover = -1
     queue_redraw()
 
 
@@ -122,6 +136,8 @@ func _draw_handle(at_x: float, mid: float, accent: Color, lit: bool) -> void:
 
 
 func _gui_input(event: InputEvent) -> void:
+    if not _interactive:
+        return
     var click := event as InputEventMouseButton
     if click != null and click.button_index == MOUSE_BUTTON_LEFT:
         if click.pressed:

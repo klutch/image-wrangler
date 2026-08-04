@@ -5215,10 +5215,18 @@ func _on_comfy_connect() -> void:
 ## The three ways of finding one — address, folder, Start — go away once there is one, and
 ## come back if it drops. Stop follows ownership and nothing else.
 func _update_comfy_controls() -> void:
-    if _comfy_start_button == null or _comfy_stop_button == null:
-        return
     var state: int = _comfy.state() if _comfy != null else ComfyServer.State.OFFLINE
     var connected := state == ComfyServer.State.READY or state == ComfyServer.State.RUNNING
+
+    # Nothing under Model can mean anything until a server has said what it has: the two
+    # lists are its files, and the strength belongs to a LoRA that cannot be picked yet.
+    # Ahead of the guard below, since those rows exist whether or not the server buttons do.
+    if _generate_box != null:
+        SettingsBuilder.set_group_enabled(_generate_box, "Model",
+                connected and _generate != null and _generate.has_catalogue())
+
+    if _comfy_start_button == null or _comfy_stop_button == null:
+        return
     if _comfy_address_row != null:
         _comfy_address_row.visible = not connected
     if _comfy_install_row != null:
