@@ -4962,7 +4962,7 @@ func _sampling_note_row(row: Dictionary) -> Control:
     set_button.text = "Set"
     set_button.add_theme_font_size_override(&"font_size", 10)
     set_button.size_flags_vertical = Control.SIZE_SHRINK_END
-    set_button.tooltip_text = "Sets the sampler, scheduler, steps and guidance to the low end of what this\nline suggests, and the CLIP skip when the line names one."
+    set_button.tooltip_text = "Sets the sampler, scheduler, steps, guidance and CLIP skip to the low end of\nwhat this line suggests."
     set_button.pressed.connect(_on_sampling_advice_set.bind(row))
     box.add_child(set_button)
     return box
@@ -4977,14 +4977,12 @@ func _on_sampling_advice_set(hint: Dictionary) -> void:
     settings.scheduler = String(hint["scheduler"])
     settings.steps = int(hint["steps"])
     settings.cfg = float(hint["cfg"])
-    var skip_note := ""
-    if hint.has("clip_skip"):
-        settings.clip_skip = int(hint["clip_skip"])
-        skip_note = ", CLIP skip %d" % settings.clip_skip
+    settings.clip_skip = int(hint["clip_skip"])
     SettingsBuilder.refresh_values(_generate, _generate_box)
     _schedule_generate_save()
-    _set_status("Set %s + %s, %d steps, CFG %s%s." % [settings.sampler, settings.scheduler,
-            settings.steps, String.num(settings.cfg, 1), skip_note])
+    _set_status("Set %s + %s, %d steps, CFG %s, CLIP skip %d." % [settings.sampler,
+            settings.scheduler, settings.steps, String.num(settings.cfg, 1),
+            settings.clip_skip])
 
 
 func _on_comfy_refresh_models() -> void:

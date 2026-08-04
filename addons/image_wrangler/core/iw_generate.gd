@@ -36,20 +36,27 @@ const MAX_CLIP_SKIP := 4
 ## order, first match wins — so the speed words beat the family words.
 ##
 ## The value keys are the low end of what the note's prose suggests, and are what Set
-## applies. clip_skip is only present where a family is known to want one.
+## applies. Every row carries clip_skip — one where the family has no opinion — so Set
+## never leaves a stale two behind.
 const NAME_HINTS := [
     {"word": "lightning", "note": "few-step model: 4-6 steps, CFG 1-2, euler + sgm_uniform",
-        "sampler": "euler", "scheduler": "sgm_uniform", "steps": 4, "cfg": 1.0},
+        "sampler": "euler", "scheduler": "sgm_uniform", "steps": 4, "cfg": 1.0,
+        "clip_skip": 1},
     {"word": "hyper", "note": "few-step model: 8 steps, CFG 1-1.5, euler + sgm_uniform",
-        "sampler": "euler", "scheduler": "sgm_uniform", "steps": 8, "cfg": 1.0},
+        "sampler": "euler", "scheduler": "sgm_uniform", "steps": 8, "cfg": 1.0,
+        "clip_skip": 1},
     {"word": "turbo", "note": "few-step model: 4-8 steps, CFG 1-2, dpmpp_sde + karras",
-        "sampler": "dpmpp_sde", "scheduler": "karras", "steps": 4, "cfg": 1.0},
+        "sampler": "dpmpp_sde", "scheduler": "karras", "steps": 4, "cfg": 1.0,
+        "clip_skip": 1},
     {"word": "lcm", "note": "wants its own sampler: lcm + sgm_uniform, 4-8 steps, CFG 1-2",
-        "sampler": "lcm", "scheduler": "sgm_uniform", "steps": 4, "cfg": 1.0},
+        "sampler": "lcm", "scheduler": "sgm_uniform", "steps": 4, "cfg": 1.0,
+        "clip_skip": 1},
     {"word": "schnell", "note": "few-step model: 4 steps, CFG 1, euler + simple",
-        "sampler": "euler", "scheduler": "simple", "steps": 4, "cfg": 1.0},
+        "sampler": "euler", "scheduler": "simple", "steps": 4, "cfg": 1.0,
+        "clip_skip": 1},
     {"word": "flux", "note": "20 steps, CFG 1, euler + simple",
-        "sampler": "euler", "scheduler": "simple", "steps": 20, "cfg": 1.0},
+        "sampler": "euler", "scheduler": "simple", "steps": 20, "cfg": 1.0,
+        "clip_skip": 1},
     {"word": "pony", "note": "SDXL family: 25 steps, CFG 6-7, euler_ancestral + normal, CLIP skip 2",
         "sampler": "euler_ancestral", "scheduler": "normal", "steps": 25, "cfg": 6.0,
         "clip_skip": 2},
@@ -57,7 +64,8 @@ const NAME_HINTS := [
         "sampler": "euler_ancestral", "scheduler": "normal", "steps": 25, "cfg": 5.0,
         "clip_skip": 2},
     {"word": "xl", "note": "SDXL family: 20-30 steps, CFG 5-7, dpmpp_2m + karras",
-        "sampler": "dpmpp_2m", "scheduler": "karras", "steps": 20, "cfg": 5.0},
+        "sampler": "dpmpp_2m", "scheduler": "karras", "steps": 20, "cfg": 5.0,
+        "clip_skip": 1},
 ]
 
 @export var settings: IWGenerateSettings
@@ -211,16 +219,6 @@ func get_settings_schema() -> Array[Dictionary]:
             "tooltip": "How hard the second LoRA leans. Same rules as the first.",
         },
         {
-            "property": &"clip_skip",
-            "label": "CLIP Skip",
-            "type": SettingType.INT,
-            "min": 1,
-            "max": MAX_CLIP_SKIP,
-            "step": 1,
-            "group": "Model",
-            "tooltip": "How many layers of the text encoder go unused, counted from the end.\n\nOne is the whole encoder, which is what most models want. Anime-family models\n— Pony, Illustrious, NoobAI — were trained at two, and read prompts worse\nat one.",
-        },
-        {
             "property": &"positive",
             "label": "Description",
             "type": SettingType.TEXT,
@@ -273,6 +271,16 @@ func get_settings_schema() -> Array[Dictionary]:
             "step": 0.1,
             "group": "Sampling",
             "tooltip": "How hard the description is pushed.\n\nSeven or so is the usual place. Too low and it wanders off; too high and the\ncolours burn out and the shapes go hard.\n\nModels and LoRAs built for few steps want far less, around two to four.",
+        },
+        {
+            "property": &"clip_skip",
+            "label": "CLIP Skip",
+            "type": SettingType.INT,
+            "min": 1,
+            "max": MAX_CLIP_SKIP,
+            "step": 1,
+            "group": "Sampling",
+            "tooltip": "How many layers of the text encoder go unused, counted from the end.\n\nOne is the whole encoder, which is what most models want. Anime-family models\n— Pony, Illustrious, NoobAI — were trained at two, and read prompts worse\nat one.",
         },
         {
             "property": &"randomize_seed",
