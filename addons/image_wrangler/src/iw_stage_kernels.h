@@ -224,9 +224,10 @@ public:
     //
     // Takes numbers rather than a list of regions, which is the one kernel here that
     // works the other way round: the caller cannot name the regions because it does not
-    // know them yet — finding them is the job. The three amounts are how far the hue,
-    // the saturation and the value are allowed to wander, 0 to 1, and the seed is what
-    // makes the same image come out the same way twice.
+    // know them yet — finding them is the job. Hue and value are how far each is allowed
+    // to wander either way, 0 to 1; saturation is the far end it may be pulled towards, 0
+    // to 2, with 1 leaving it alone. The seed makes the same image come out the same way
+    // twice.
     //
     // Returns x, y, w, h per island: the smallest rectangle containing each one. Reads
     // the alpha the run currently shows, so where it sits in the stack decides what

@@ -111,9 +111,9 @@ func get_settings_schema() -> Array[Dictionary]:
             "label": "Saturation",
             "type": SettingType.FLOAT,
             "min": 0.0,
-            "max": 1.0,
+            "max": 2.0,
             "step": 0.01,
-            "tooltip": "How far each object's colourfulness is allowed to wander, either way.\n\nAt 1 an object can come out anywhere between grey and twice as deep. Nothing\ncan invent colour in an object that has none.",
+            "tooltip": "The far end each object's colourfulness may be pulled towards.\n\nAt 1 nothing moves. At 0 an object can come out anywhere between its own\ncolour and grey; at 2, anywhere between its own colour and twice as deep.\nNothing can invent colour in an object that has none.",
         },
         {
             "property": &"value_amount",
@@ -151,7 +151,7 @@ func prerequisite_note(ctx: IWPipelineContext) -> String:
 
 
 func process_context(ctx: IWPipelineContext) -> void:
-    if is_zero_approx(settings.hue_amount) and is_zero_approx(settings.saturation_amount) \
+    if is_zero_approx(settings.hue_amount) and is_equal_approx(settings.saturation_amount, 1.0) \
             and is_zero_approx(settings.value_amount):
         return
     if not report_progress(0.05):

@@ -19,17 +19,18 @@ extends Resource
 ## 1, since a random hue per object is what this stage is for.
 @export var hue_amount: float = 1.0
 
-## How far each island's colourfulness is allowed to wander, as a share either way.
+## The far end each island's colourfulness may be pulled towards, as a scale.
 ##
-## At 1 an island can come out anywhere between grey and twice as deep. Starts at 0: a
-## random saturation reads as damage rather than as a colour, so it is asked for rather
-## than arrived at.
-@export var saturation_amount: float = 0.0
+## At 1 nothing moves. At 0 an island can come out anywhere between its own colour and
+## grey; at 2, anywhere between its own colour and twice as deep. Starts at 1: a random
+## saturation reads as damage rather than as a colour, so it is asked for rather than
+## arrived at.
+@export var saturation_amount: float = 1.0
 
 ## How far each island's lightness is allowed to wander, as a share either way.
 ##
-## At 1 an island can come out anywhere between black and twice as bright. Starts at 0,
-## for the same reason [member saturation_amount] does.
+## At 1 an island can come out anywhere between black and twice as bright. Starts at 0, so
+## nothing moves until it is asked for.
 @export var value_amount: float = 0.0
 
 

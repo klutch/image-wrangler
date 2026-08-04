@@ -22,11 +22,15 @@ uint64_t mix64(uint64_t value) {
     return value ^ (value >> 31);
 }
 
-// A number from -1 to 1, out of the top 53 bits of a hash — the ones a double can hold
+// A number from 0 to 1, out of the top 53 bits of a hash — the ones a double can hold
 // without rounding.
+double unit(uint64_t hash) {
+    return static_cast<double>(hash >> 11) * (1.0 / 9007199254740992.0);
+}
+
+// The same number spread from -1 to 1, for the amounts that reach either way.
 double signed_unit(uint64_t hash) {
-    const double unit = static_cast<double>(hash >> 11) * (1.0 / 9007199254740992.0);
-    return unit * 2.0 - 1.0;
+    return unit(hash) * 2.0 - 1.0;
 }
 
 // Colour as hue, how colourful it is, and how light it is.
@@ -213,8 +217,10 @@ PackedInt32Array IWStageKernels::random_hsv_tiles(const Ref<IWPipelineContext> &
     // Each island's three numbers, drawn from the seed and its own index. Worked out once
     // per island rather than per pixel, and clamped here so a hand-edited file cannot ask
     // for a hue that wraps twice.
+    // Hue and value reach either way from where they are; saturation reaches one way, from
+    // no change towards whatever end was asked for.
     const double hue_reach = iw::clampf(hue_amount, 0.0, 1.0) * 0.5;
-    const double sat_reach = iw::clampf(saturation_amount, 0.0, 1.0);
+    const double sat_end = iw::clampf(saturation_amount, 0.0, 2.0);
     const double val_reach = iw::clampf(value_amount, 0.0, 1.0);
     const uint64_t root = mix64(static_cast<uint64_t>(rng_seed));
     std::vector<double> turn(static_cast<size_t>(island_count), 0.0);
@@ -223,7 +229,7 @@ PackedInt32Array IWStageKernels::random_hsv_tiles(const Ref<IWPipelineContext> &
     for (int64_t n = 0; n < island_count; n++) {
         const uint64_t key = root + static_cast<uint64_t>(n) * 3;
         turn[n] = signed_unit(mix64(key)) * hue_reach;
-        sat_scale[n] = 1.0 + signed_unit(mix64(key + 1)) * sat_reach;
+        sat_scale[n] = 1.0 + unit(mix64(key + 1)) * (sat_end - 1.0);
         val_scale[n] = 1.0 + signed_unit(mix64(key + 2)) * val_reach;
     }
 
