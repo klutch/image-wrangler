@@ -101,7 +101,10 @@ signal image_ready(image: Image, index: int, total: int)
 ## [b]A look at the work, never a result.[/b] It is small, rough and made by a shortcut
 ## rather than by the real decoder, so it is shown and thrown away — nothing saves one.
 ## There may be none at all: see [constant PREVIEW_METHOD] for what decides that.
-signal preview_ready(image: Image)
+##
+## [param index] is which picture of the batch it belongs to, counting from zero, so it can
+## be shown in that picture's own place rather than in front of the whole batch.
+signal preview_ready(image: Image, index: int)
 
 ## Emitted when a whole batch finishes, with one [Image] per picture made.
 signal finished(images: Array)
@@ -775,7 +778,7 @@ func _read_preview(packet: PackedByteArray) -> void:
     # A picture is the server working just as plainly as a progress frame is. See the
     # watchdog in _follow.
     _last_life_msec = Time.get_ticks_msec()
-    preview_ready.emit(image)
+    preview_ready.emit(image, _batch_index)
 
 
 ## Four big-endian bytes at [param at], as a number.

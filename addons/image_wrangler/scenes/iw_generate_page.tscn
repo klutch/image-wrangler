@@ -2,17 +2,6 @@
 
 [node name="Generate" type="VBoxContainer" unique_id=1866017413]
 
-[node name="GenerateButton" type="Button" parent="." unique_id=1948636383]
-unique_name_in_owner = true
-layout_mode = 2
-tooltip_text = "Make a picture from the description below.
-
-Nothing here runs on its own the way the other tabs do — a generation takes a
-minute and a graphics card, so it happens only when asked. Refresh asks too.
-
-While one is going this stops it, as does Escape."
-text = "Generate"
-
 [node name="GenerateScroll" type="ScrollContainer" parent="." unique_id=1732508914]
 layout_mode = 2
 size_flags_vertical = 3
@@ -102,3 +91,14 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
+
+[node name="GenerateButton" type="Button" parent="." unique_id=1948636383]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Make a picture from the description above.
+
+Nothing here runs on its own the way the other tabs do — a generation takes a
+minute and a graphics card, so it happens only when asked. Refresh asks too.
+
+While one is going this stops it, as does Escape."
+text = "Generate"

@@ -364,11 +364,17 @@ var _generate_sheet: Image
 
 ## The last step picture the server pushed, or null. What the viewport shows while a
 ## picture is being made.
+## The same grid with the picture being made drawn into its own cell, or null.
 ##
-## [b]Deliberately not part of the batch.[/b] It is a rough look at work in progress, made
-## by a shortcut rather than by the real decoder — it is never saved, and it is dropped the
-## moment the picture it was showing arrives for real. See [signal IWComfyServer.preview_ready].
-var _generate_step: Image
+## [b]A second sheet rather than the one above.[/b] That one is what Save Current writes, and
+## a step picture is a rough guess made by a shortcut — it must never reach a file. This one
+## is only ever what the viewport shows, and it is laid out at the start of a run so the
+## first picture's steps already have their place in the grid to sit in.
+var _generate_display: Image
+
+## Whether a step picture has been drawn into that sheet, so the viewport should be showing
+## it rather than the batch on its own. Cleared at both ends of a run.
+var _generate_showing_step := false
 
 ## The cell that sheet was laid out with, so a picture can be dropped into it without the
 ## whole thing being made again.
@@ -4712,6 +4718,39 @@ func _rebuild_generate_sheet(total: int) -> void:
         _blit_generate_cell(_generate_images[i], i, grid)
 
 
+## Lays out an empty display sheet for a batch of [param total] pictures at [param cell].
+##
+## [b]Made when the run is asked for rather than when the first picture lands.[/b] The step
+## pictures of picture one arrive long before picture one does, and without a grid to sit in
+## they would have to be shown on their own — which is the whole point of this.
+##
+## The size is what the form asked for. If the server sends something else back, the arriving
+## picture rebuilds both sheets; see [method _sync_generate_display].
+func _reset_generate_display(total: int, cell: Vector2i) -> void:
+    _generate_showing_step = false
+    if cell.x <= 0 or cell.y <= 0:
+        _generate_display = null
+        return
+    _generate_cell = cell
+    var grid := _generate_grid(total)
+    _generate_display = Image.create_empty(grid.x * cell.x, grid.y * cell.y,
+            false, Image.FORMAT_RGBA8)
+    # Transparent, so the cells still to be filled read as waiting rather than as black.
+    _generate_display.fill(Color(0, 0, 0, 0))
+
+
+## Brings the display sheet back into line with the batch, once per finished picture.
+##
+## A whole copy rather than one cell, because the arriving picture may have rebuilt the sheet
+## at another size — and once per picture is nothing beside making one.
+func _sync_generate_display() -> void:
+    if _generate_sheet == null:
+        return
+    if _generate_display == null:
+        _generate_display = Image.create_empty(1, 1, false, Image.FORMAT_RGBA8)
+    _generate_display.copy_from(_generate_sheet)
+
+
 ## Paints one picture into its cell, centred in case it is smaller than the rest.
 func _blit_generate_cell(image: Image, index: int, grid: Vector2i) -> void:
     var at := Vector2i(index % grid.x, index / grid.x) * _generate_cell
@@ -4740,10 +4779,10 @@ func _generate_grid(count: int) -> Vector2i:
 ## run over a selected image can be lined up and looked at before a minute of graphics card
 ## is spent on it.
 func _generate_preview_image() -> Image:
-    # First, because a picture forming now is worth more than the one before it. It is
-    # cleared as each real picture lands, so a batch still shows what it has finished.
-    if _generate_step != null:
-        return _generate_step
+    # First, because a picture forming now is worth more than the one before it. It carries
+    # whatever the batch has already finished, so nothing is hidden by showing it.
+    if _generate_showing_step and _generate_display != null:
+        return _generate_display
     var made := _current_generate_image()
     if made != null and (_generate_source_of == null or _generate_source_of == _source_image):
         return made
@@ -5256,40 +5295,52 @@ func _on_comfy_progress(overall: float, step: float, note: String) -> void:
         _set_status(note)
 
 
-## Takes one step picture and puts it in the viewport.
+## Draws one step picture into the cell of the batch it belongs to.
 ##
-## [b]Scaled to the size the picture will come back at.[/b] These arrive at whatever the
-## server's preview size is rather than at the size being asked for, and left alone the view
-## would jump every time one landed and again when the real picture arrived. Nearest,
-## because it is a rough guess at a picture and smoothing it would only make the guesswork
-## look like detail.
+## [b]Into the grid rather than over it.[/b] [param index] is which picture of the batch is
+## being made, so a step picture lands in that picture's own place and everything already
+## finished stays visible beside it. Whole-batch runs then fill in under you rather than
+## being replaced, one cell at a time, by whatever is currently on the graphics card.
+##
+## Scaled to the cell, because these arrive at whatever the server's preview size is rather
+## than at the size being asked for. Nearest, because it is a rough guess at a picture and
+## smoothing it would only make the guesswork look like detail.
 ##
 ## The scrim comes off the overlay on the first one, since there is now something under it
 ## worth seeing. The bars and the spinner stay.
-func _on_comfy_preview(image: Image) -> void:
+func _on_comfy_preview(image: Image, index: int) -> void:
     if not _generate_running or _mode != Mode.GENERATE or _preview == null:
         return
+    # No grid to draw into. The run was started by a build that could not work out a size,
+    # which leaves the batch to speak for itself when its pictures land.
+    if _generate_display == null or _generate_cell.x <= 0 or _generate_cell.y <= 0:
+        return
 
-    var target := _generate_source_size
-    if target == Vector2i.ZERO and _generate != null:
-        var settings: IWGenerateSettings = _generate.get_settings()
-        target = IWComfyGraph.working_size(settings)
-    if target != Vector2i.ZERO and image.get_size() != target:
-        image.resize(target.x, target.y, Image.INTERPOLATE_NEAREST)
+    if image.get_size() != _generate_cell:
+        image.resize(_generate_cell.x, _generate_cell.y, Image.INTERPOLATE_NEAREST)
+    # blit_rect wants the sheet's format, and a JPEG comes back without an alpha channel.
+    if image.get_format() != _generate_display.get_format():
+        image.convert(_generate_display.get_format())
 
-    var first := _generate_step == null
-    _generate_step = image
+    var grid := _generate_grid(maxi(_generate_batch_total, 1))
+    var cells := grid.x * grid.y
+    var at := Vector2i(index % grid.x, index / grid.x) * _generate_cell
+    if index < 0 or index >= cells:
+        return
+    _generate_display.blit_rect(image, Rect2i(Vector2i.ZERO, _generate_cell), at)
+
+    var first := not _generate_showing_step
+    _generate_showing_step = true
     # Straight to the viewport rather than through _update_preview_texture, which these
     # arrive far too often for: the rest of what it does — clearing tile bounds, the pivot
     # overlay, the original underneath — was settled when the tab came up and cannot have
     # moved since, because a run cannot be started from anywhere else.
-    _preview.set_image(_generate_step)
+    _preview.set_image(_generate_display)
     if first:
         _preview.set_busy_dimmed(false)
-        # Only while the batch has nothing finished in it. Once it has, the view is framed
-        # on a grid somebody may be looking at, and fitting per picture would yank it away.
-        if _generate_images.is_empty():
-            _preview.fit_to_view()
+        # Once only. The sheet is laid out for the whole batch from the start, so it never
+        # changes size under the view and fitting again would only undo a zoom.
+        _preview.fit_to_view()
 
 
 ## Takes one picture of a batch, before the rest are made.
@@ -5297,9 +5348,6 @@ func _on_comfy_preview(image: Image) -> void:
 ## The grid is rebuilt and shown each time, so a long batch fills in under you rather than
 ## arriving all at once at the end.
 func _on_comfy_image_ready(image: Image, index: int, total: int) -> void:
-    # The step pictures were standing in for this one. Dropped before the grid is shown, or
-    # the real picture would arrive behind a rough guess at it.
-    _generate_step = null
     # Back to the size it came from, whatever the server was asked to work at.
     if _generate_source_size != Vector2i.ZERO and image.get_size() != _generate_source_size:
         image.resize(_generate_source_size.x, _generate_source_size.y,
@@ -5315,6 +5363,9 @@ func _on_comfy_image_ready(image: Image, index: int, total: int) -> void:
         _generate_images.append(image)
     _generate_batch_total = maxi(total, _generate_batch_total)
     _place_generate_image(index, _generate_batch_total)
+    # The rough guess at this picture is still sitting in its cell. Overwritten by the real
+    # one here, so what the viewport shows is the batch as it actually stands.
+    _sync_generate_display()
 
     if _mode == Mode.GENERATE and _preview != null:
         _update_preview_texture()
@@ -5327,7 +5378,7 @@ func _on_comfy_image_ready(image: Image, index: int, total: int) -> void:
 
 func _on_comfy_finished(images: Array) -> void:
     _generate_running = false
-    _generate_step = null
+    _generate_showing_step = false
     if _preview != null:
         _preview.set_busy(false)
     var made := _current_generate_image()
@@ -5380,9 +5431,9 @@ func _cancel_generate() -> void:
 ## Puts the tab back to not-running, with [param note] on the status label.
 func _end_generate_run(note: String) -> void:
     _generate_running = false
-    # A run stopped part way leaves its last step picture standing in for a picture that is
+    # A run stopped part way leaves a rough guess sitting in the cell of a picture that is
     # never going to arrive. What the batch actually finished is what should be on screen.
-    _generate_step = null
+    _generate_showing_step = false
     # Through the refresh rather than set_busy(false): a failed start reports through
     # here too, and its overlay has to stay up with what was printed.
     if _mode == Mode.GENERATE:
@@ -5447,9 +5498,15 @@ func _run_generate() -> void:
 
     _generate_images.clear()
     _generate_sheet = null
-    _generate_step = null
     _generate_cell = Vector2i.ZERO
     _generate_batch_total = count
+    # The grid the step pictures draw into, laid out before the first of them can arrive. A
+    # run from a selected image comes back at that image's size, whatever the form asked the
+    # server to work at.
+    var cell := IWComfyGraph.working_size(settings)
+    if _generate_source_size != Vector2i.ZERO:
+        cell = _generate_source_size
+    _reset_generate_display(count, cell)
     _generate_running = true
     if _preview != null:
         _preview.set_busy(true)
