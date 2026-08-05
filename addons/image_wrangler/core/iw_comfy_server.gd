@@ -37,6 +37,14 @@ const FETCH_TIMEOUT := 60.0
 ## What separates the parts of an upload. Anything the file itself cannot contain will do.
 const UPLOAD_BOUNDARY := "ImageWranglerUpload"
 
+## How much the socket may hold of what has not been read yet.
+##
+## [b]Godot's default is 64 KB, which one step picture is easily larger than.[/b] A peer
+## given more than its buffer holds is closed rather than trimmed — so the default does not
+## cost the picture, it costs the whole socket, and the progress frames go down with it.
+## Sized for several of the largest pictures a server might push between two of our frames.
+const SOCKET_BUFFER := 4 << 20
+
 ## What a binary frame off the socket is made of: two counts of four bytes, then the
 ## picture. The first count says what the frame is, the second what the picture is encoded
 ## as. Both are big-endian, which is why they are read a byte at a time — the decoders on
@@ -675,7 +683,11 @@ func _open_socket() -> void:
     if _shutting_down:
         return
     var socket := WebSocketPeer.new()
-    if socket.connect_to_url(_socket_url()) != OK:
+    # Before connecting: the buffer is claimed by the handshake and cannot be grown under a
+    # socket that is already open. See SOCKET_BUFFER for what the default costs.
+    socket.inbound_buffer_size = SOCKET_BUFFER
+    var error := socket.connect_to_url(_socket_url())
+    if error != OK:
         return
     _socket = socket
     set_process(true)
