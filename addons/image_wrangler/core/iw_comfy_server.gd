@@ -23,11 +23,12 @@ const START_POLL_SECONDS := 1.0
 
 ## What a server this dock starts is told to make step pictures with.
 ##
-## [code]auto[/code] takes the good decoder if the server has the files for it and the
-## cheap approximation otherwise, so it is never the reason a start fails. ComfyUI makes
-## none at all unless it is asked at launch, and only a server this dock started can be
+## [code]taesd[/code] rather than [code]auto[/code]: some builds resolve auto to the cheap
+## color mapping even when the good decoder is installed. Asked for outright, taesd is used
+## when its file is there and the server still falls back to the cheap mapping when it is
+## not — so it is never the reason a start fails. Only a server this dock started can be
 ## asked — one that was already running keeps whatever it was given.
-const PREVIEW_METHOD := "auto"
+const PREVIEW_METHOD := "taesd"
 
 ## How long each kind of request may take. Fetching a picture is slower than asking a
 ## question, and a picture can be a few megabytes over loopback.
@@ -44,6 +45,10 @@ const UPLOAD_BOUNDARY := "ImageWranglerUpload"
 ## cost the picture, it costs the whole socket, and the progress frames go down with it.
 ## Sized for several of the largest pictures a server might push between two of our frames.
 const SOCKET_BUFFER := 4 << 20
+
+## How long after the progress socket drops mid-run before another connection is tried.
+## Paced so a server that keeps refusing is not asked again every frame.
+const SOCKET_RETRY_SECONDS := 1.0
 
 ## What a binary frame off the socket is made of: two counts of four bytes, then the
 ## picture. The first count says what the frame is, the second what the picture is encoded
@@ -156,8 +161,14 @@ var _batch_total := 1
 ## The socket the server pushes progress down, open only while a run is in flight.
 ##
 ## [b]A progress bar and nothing else.[/b] Nothing here decides that a run finished — if it
-## drops, the bar stops moving and the poll carries the run to its end exactly as before.
+## drops, it is opened again and the poll carries the run in the meantime. A stall in the
+## editor can drop it: pictures pile up unread past the buffer, and the peer is closed for
+## that rather than trimmed.
 var _socket: WebSocketPeer
+
+## When a reconnect was last tried, so a drop mid-run is retried on a pace rather than
+## every frame. See SOCKET_RETRY_SECONDS.
+var _socket_retry_msec := 0
 
 ## When something last happened, for the watchdog. Any frame off the socket counts, since
 ## the server only sends one while it is working.
@@ -265,8 +276,16 @@ func _process(_delta: float) -> void:
     if ready == WebSocketPeer.STATE_CLOSING:
         return
     if ready == WebSocketPeer.STATE_CLOSED:
-        # Quietly. The bar stops moving and the poll finishes the run, which is the whole
-        # point of not letting this decide anything.
+        # Opened again while a run is still going: the drop cost the step pictures and
+        # nothing else, and the server resends progress from wherever the run is. Anything
+        # that actually ends the run closes the socket through its own path.
+        if _state == State.RUNNING and not _shutting_down:
+            if Time.get_ticks_msec() - _socket_retry_msec >= int(SOCKET_RETRY_SECONDS * 1000.0):
+                _socket_retry_msec = Time.get_ticks_msec()
+                _open_socket()
+            return
+        # Quietly. The poll finishes the run, which is the whole point of not letting this
+        # decide anything.
         _close_socket()
         return
     if ready != WebSocketPeer.STATE_OPEN:
