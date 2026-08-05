@@ -355,21 +355,22 @@ var _comfy: IWComfyServer
 ## What the last batch made, one entry per picture, filled as they arrive.
 ##
 ## Kept rather than written straight out: a generation is asked for and then stands, the way
-## a packed sheet does, and Save Current is what puts it on disk.
+## a packed sheet does, and the Save buttons are what put it on disk — Save Current for one
+## picture, Save All for a batch of them.
 var _generate_images: Array[Image] = []
 
-## Those pictures laid out as one, which is what the viewport shows and what Save Current
-## writes. Null until the first of a batch arrives. See [method _place_generate_image].
+## Those pictures laid out as one, which is what the viewport shows. Null until the first
+## of a batch arrives. See [method _place_generate_image].
 var _generate_sheet: Image
 
 ## The last step picture the server pushed, or null. What the viewport shows while a
 ## picture is being made.
 ## The same grid with the picture being made drawn into its own cell, or null.
 ##
-## [b]A second sheet rather than the one above.[/b] That one is what Save Current writes, and
-## a step picture is a rough guess made by a shortcut — it must never reach a file. This one
-## is only ever what the viewport shows, and it is laid out at the start of a run so the
-## first picture's steps already have their place in the grid to sit in.
+## [b]A second sheet rather than the one above.[/b] That one holds what the batch actually
+## made, and a step picture is a rough guess made by a shortcut — it must never reach a
+## file. This one is only ever what the viewport shows, and it is laid out at the start of
+## a run so the first picture's steps already have their place in the grid to sit in.
 var _generate_display: Image
 
 ## Whether a step picture has been drawn into that sheet, so the viewport should be showing
@@ -565,7 +566,6 @@ var _shutting_down := false
 ## there is no reason to let it finish — cancelling it frees the core and gets the
 ## replacement started sooner.
 var _preview_worker_op: IWOperation
-var _suffix_is_default := true
 var _pending_outputs: Dictionary = {}
 
 ## The stack saved for each source path, as the ordered list
@@ -768,7 +768,6 @@ var _remove_button: Button
 var _clear_button: Button
 ## Enabled only while the clipboard holds a stack and there are images to paste it onto.
 var _paste_all_button: Button
-var _suffix_edit: LineEdit
 var _process_selected_button: Button
 var _process_all_button: Button
 var _debounce: Timer
@@ -1380,9 +1379,9 @@ func _on_rebuild_settled() -> void:
 ##
 ## What survives does so because it lives on the dock rather than in a control: the
 ## source list, each image's stack and fold state, the image being looked at, the file
-## operation. What is read off the controls here — the selection, the zoom, the mode, a
-## typed suffix — is put back afterwards. Everything else is built fresh, which is the
-## entire point of the exercise.
+## operation. What is read off the controls here — the selection, the zoom, the mode —
+## is put back afterwards. Everything else is built fresh, which is the entire point of
+## the exercise.
 func _rebuild_ui() -> void:
     # A pending sidecar write belongs to the stack about to be taken down, and the flush
     # resolves it against the current mode, so it goes before any of this.
@@ -1403,7 +1402,6 @@ func _rebuild_ui() -> void:
     var path := _current_path()
     var selected := _selected_index()
     var mode := _mode
-    var suffix := _suffix_edit.text
     var fade := _original_fade.value
     var zoom := _preview.get_zoom()
     var indicators := _indicators
@@ -1448,7 +1446,6 @@ func _rebuild_ui() -> void:
     _refresh_file_list()
     if selected >= 0 and selected < _file_list.item_count:
         _file_list.select(selected)
-    _suffix_edit.text = suffix
     _original_fade.set_value_no_signal(fade)
     _preview.original_fade = fade * 0.01
 
@@ -1521,7 +1518,6 @@ func _forget_controls() -> void:
     _remove_button = null
     _clear_button = null
     _paste_all_button = null
-    _suffix_edit = null
     _process_selected_button = null
     _process_all_button = null
     _debounce = null
@@ -1888,7 +1884,6 @@ func _select_mode(mode: int) -> void:
     # form that is no longer showing would be a click nobody could explain.
     _release_pick()
     _update_overlays()
-    _refresh_suffix()
 
     # The other side's result no longer describes anything, so it must not be left on
     # screen — under a fade it would be presented as this one's. Crossing between
@@ -1990,9 +1985,6 @@ func _on_tab_changed(tab: int) -> void:
 
 
 func _bind_output_section(chrome: Control) -> void:
-    _suffix_edit = chrome.get_node("%SuffixEdit")
-    _suffix_edit.text_changed.connect(func(_text: String) -> void: _suffix_is_default = false)
-
     _process_selected_button = chrome.get_node("%ProcessSelectedButton")
     _process_selected_button.pressed.connect(_on_process_selected)
     _process_all_button = chrome.get_node("%ProcessAllButton")
@@ -2392,7 +2384,6 @@ func _on_entries_rebuilt() -> void:
     # A fresh set of forms never inherits a crosshair from the set before it.
     _release_pick()
     _update_overlays()
-    _refresh_suffix()
 
 
 ## Connects one picker or drawing control to the dock.
@@ -2443,7 +2434,6 @@ func _on_stack_changed() -> void:
     _capture_history()
     _refresh_notes()
     _schedule_autosave()
-    _refresh_suffix()
     if _auto_preview_allowed():
         _schedule_preview()
     else:
@@ -2583,7 +2573,6 @@ func _on_history_revert(index: int) -> void:
     _shadow_text = JSON.stringify(history.current_state())
     _store_stack(path)
     _refresh_notes()
-    _refresh_suffix()
     _schedule_autosave()
     _refresh_history_view()
     if _auto_preview_allowed():
@@ -3168,7 +3157,6 @@ func _reset_stack() -> void:
     _refresh_history_view()
 
     _refresh_notes()
-    _refresh_suffix()
     _schedule_autosave()
     _set_status("Operations reset to the default.")
     if _auto_preview_allowed():
@@ -3194,16 +3182,6 @@ func _refresh_notes() -> void:
         entry.set_note(note)
         if stage.enabled and stage.establishes_keying():
             keying = true
-
-
-## Puts the output suffix back to what the current mode suggests.
-##
-## Only while the user has not claimed the field as their own — once it has been
-## typed in, changing the stack must not take it away again.
-func _refresh_suffix() -> void:
-    if not _suffix_is_default:
-        return
-    _suffix_edit.text = _active_operation().get_output_suffix() if _active_operation() != null else "_out"
 
 
 ## The operation the Process buttons would run, built fresh from what is on screen.
@@ -4126,10 +4104,6 @@ func _on_setting_changed() -> void:
             _upscale_form_key = _upscale_form_signature()
             _build_upscale.call_deferred()
         _refresh_upscale_note()
-        # The one tab whose suffix follows a setting rather than naming the operation, so
-        # changing the ratio has to move it. Only while the user has not typed their own;
-        # _refresh_suffix is what decides that.
-        _refresh_suffix()
         _schedule_upscale()
         return
     if _mode == Mode.RENAME:
@@ -4310,7 +4284,7 @@ func _on_preview_done(source: Image, result: Image, elapsed: int) -> void:
         # run.
         var path := _current_path()
         var active := _active_operation()
-        var note := active.describe_output(path, _suffix_edit.text, maxi(_sources.find(path), 0)) if not path.is_empty() else ""
+        var note := active.describe_output(path, active.get_output_suffix(), maxi(_sources.find(path), 0)) if not path.is_empty() else ""
         if note.is_empty():
             _set_status("%s in %d ms" % [_stack_summary(), elapsed])
         else:
@@ -5538,7 +5512,7 @@ func _generate_source(settings: IWGenerateSettings) -> Image:
 ## Asks where to put the picture. It is not one of the sources, so it goes the short way,
 ## exactly as a packed sheet does.
 func _save_generated_image() -> void:
-    if _current_generate_image() == null:
+    if _generate_images.is_empty():
         _set_status("Nothing generated yet.")
         return
     _save_kind = SAVE_KIND_GENERATED
@@ -5550,10 +5524,12 @@ func _save_generated_image() -> void:
     _save_dialog.popup_centered_ratio(0.6)
 
 
+## The picture itself rather than the sheet: the button only stands while the batch made
+## exactly one, and the sheet may still be laid out for more.
 func _write_generated_image(destination: String) -> void:
-    var made := _current_generate_image()
-    if made == null:
+    if _generate_images.is_empty():
         return
+    var made: Image = _generate_images[0]
     var directory := destination.get_base_dir()
     if not DirAccess.dir_exists_absolute(directory):
         if DirAccess.make_dir_recursive_absolute(directory) != OK:
@@ -5563,6 +5539,28 @@ func _write_generated_image(destination: String) -> void:
         _set_status("Could not write %s." % destination.get_file())
         return
     _set_status("Saved %s." % destination.get_file())
+    if Engine.is_editor_hint():
+        EditorInterface.get_resource_filesystem().scan()
+
+
+## Writes each picture of the batch into [param directory] as its own file, named for
+## the seed that made it — the batch counts up from the seed in the form, so the name
+## is what makes that picture again.
+func _write_generated_batch(directory: String) -> void:
+    if _generate_images.is_empty() or _generate == null:
+        return
+    if not DirAccess.dir_exists_absolute(directory):
+        if DirAccess.make_dir_recursive_absolute(directory) != OK:
+            _set_status("Could not make %s." % directory)
+            return
+    var settings: IWGenerateSettings = _generate.get_settings()
+    for i in _generate_images.size():
+        var seed_value := wrapi(settings.seed + i, 0, IWComfyGraph.MAX_SEED + 1)
+        var destination := directory.path_join("generated_%d.png" % seed_value)
+        if _generate_images[i].save_png(destination) != OK:
+            _set_status("Could not write %s." % destination.get_file())
+            return
+    _set_status("Saved %d pictures to %s." % [_generate_images.size(), directory])
     if Engine.is_editor_hint():
         EditorInterface.get_resource_filesystem().scan()
 
@@ -6562,11 +6560,12 @@ func _update_controls() -> void:
         _process_selected_button.disabled = _packing_image == null
         _process_all_button.disabled = true
         return
-    # One picture, made from nothing and not a file from the list — so Save Current writes
-    # it and Save All has nothing to mean. The same shape as Packing.
+    # Generated pictures are not files from the list, so the buttons follow the batch:
+    # one picture goes out through Save Current, more than one through Save All.
     if _mode == Mode.GENERATE:
-        _process_selected_button.disabled = _current_generate_image() == null
-        _process_all_button.disabled = true
+        var made := _generate_images.size()
+        _process_selected_button.disabled = made != 1
+        _process_all_button.disabled = made < 2
         _update_comfy_controls()
         if _generate_button != null:
             # Never disabled while a run is going: it is the way to stop one.
@@ -6747,8 +6746,13 @@ func _write_normal_map(sheet_path: String) -> String:
 
 
 ## Processing the whole list asks for a folder instead: one dialog cannot name
-## every output, so the suffix does the naming and this only picks where.
+## every output, so the operation does the naming and this only picks where.
 func _on_process_all() -> void:
+    if _mode == Mode.GENERATE:
+        if _generate_images.size() < 2:
+            return
+        _output_dialog.popup_centered_ratio(0.6)
+        return
     if _sources.is_empty():
         return
     _output_dialog.current_dir = _sources[0].get_base_dir()
@@ -6756,6 +6760,11 @@ func _on_process_all() -> void:
 
 
 func _on_output_dir_chosen(directory: String) -> void:
+    # Generated pictures have no source files, so they go straight out rather than
+    # through the job list below.
+    if _mode == Mode.GENERATE:
+        _write_generated_batch(directory)
+        return
     # Sidecars travel with their image on the copy path, so they can be replaced by
     # a run too and belong in the warning below.
     var carries_sidecars := _mode == Mode.RENAME
@@ -6952,7 +6961,7 @@ func _output_name_for(path: String) -> String:
     if active == null:
         return path.get_file()
     var index := _sources.find(path)
-    return active.get_output_name(path, _suffix_edit.text, maxi(index, 0))
+    return active.get_output_name(path, active.get_output_suffix(), maxi(index, 0))
 
 
 ## Sidecar paths that sources outside [param jobs] still read from.

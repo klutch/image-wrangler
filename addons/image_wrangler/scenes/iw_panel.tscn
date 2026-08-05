@@ -273,55 +273,6 @@ layout_mode = 2
 [node name="Output" type="VBoxContainer" parent="RightSplit/OperationColumn" unique_id=1547538831]
 layout_mode = 2
 
-[node name="OutputTitle" type="Label" parent="RightSplit/OperationColumn/Output" unique_id=1380407285]
-layout_mode = 2
-text = "Output"
-
-[node name="SuffixRow" type="HBoxContainer" parent="RightSplit/OperationColumn/Output" unique_id=116191551]
-layout_mode = 2
-
-[node name="SuffixLabel" type="Label" parent="RightSplit/OperationColumn/Output/SuffixRow" unique_id=805982005]
-layout_mode = 2
-tooltip_text = "Goes on the end of the output name, before the extension —
-flower.png with \"_nobg\" becomes flower_nobg.png.
-
-Save Current just suggests it, so you can still rename the file in
-the Save As dialog. Save All applies it to every file without asking
-again, which makes the suffix the only thing keeping the results
-apart from the sources.
-
-So take care when it is blank: each output then keeps its source's
-own name, and pointing Save All at the folder the sources are in
-will overwrite the originals in place. You are asked to confirm, but
-the prompt only says those files already exist — not that they are
-the images you are processing. There is no undo.
-
-Anything that rewrites pixels is saved as PNG. Rename copies the
-file untouched, so it keeps whatever format it already had."
-mouse_filter = 1
-text = "Suffix"
-
-[node name="SuffixEdit" type="LineEdit" parent="RightSplit/OperationColumn/Output/SuffixRow" unique_id=1154633427]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-tooltip_text = "Goes on the end of the output name, before the extension —
-flower.png with \"_nobg\" becomes flower_nobg.png.
-
-Save Current just suggests it, so you can still rename the file in
-the Save As dialog. Save All applies it to every file without asking
-again, which makes the suffix the only thing keeping the results
-apart from the sources.
-
-So take care when it is blank: each output then keeps its source's
-own name, and pointing Save All at the folder the sources are in
-will overwrite the originals in place. You are asked to confirm, but
-the prompt only says those files already exist — not that they are
-the images you are processing. There is no undo.
-
-Anything that rewrites pixels is saved as PNG. Rename copies the
-file untouched, so it keeps whatever format it already had."
-
 [node name="SaveRow" type="HBoxContainer" parent="RightSplit/OperationColumn/Output" unique_id=303126787]
 layout_mode = 2
 
@@ -334,7 +285,9 @@ tooltip_text = "Process the selected image and ask where to save it.
 On the Packing tab it saves the packed sheet instead, which is the one
 thing there is to save there — plus the lookup table beside it, if that
 switch is on. On Upscale it runs the image's operations and then the
-network, which is what the tab is showing."
+network, which is what the tab is showing. On Generate it saves the
+picture the run made, and stands down when the batch made more than
+one — Save All is for those."
 text = "Save Current"
 
 [node name="ProcessAllButton" type="Button" parent="RightSplit/OperationColumn/Output/SaveRow" unique_id=1971062810]
@@ -348,7 +301,10 @@ use Save Current for that.
 
 On Upscale it runs every image through its own operations and then the
 network. That is the slow one: it holds the editor for as long as it
-takes, and it reports nothing until it is done."
+takes, and it reports nothing until it is done.
+
+On Generate it saves every picture of the batch, each named for the
+seed that made it."
 text = "Save All"
 
 [node name="OpenDialog" type="FileDialog" parent="." unique_id=1731307217]
